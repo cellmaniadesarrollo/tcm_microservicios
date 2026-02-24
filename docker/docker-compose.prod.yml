@@ -1,18 +1,33 @@
 # docker/compose.prod.yml
-# Versión optimizada para producción en EC2
-# - Sin rabbitmq local (usa CloudAMQP externo)
+# Versión de producción en EC2 con RabbitMQ LOCAL (no expuesto)
+# - RabbitMQ corre en la misma máquina (red backend privada)
+# - Puertos 5672/15672 NO expuestos al exterior (solo interno)
 # - Sin volúmenes de código (no hot-reload)
-# - Comandos en modo producción (npm run start)
-# - Dockerfile estándar (build + producción)
-# - Variables específicas por microservicio (prefijo XXX_DB_)
+# - Comandos en modo producción
+# - Variables DB_ específicas por microservicio
 
 version: '3.8'
 
 services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    # NO exponer puertos al exterior (seguridad)
+    # ports: []   # comentado o eliminado
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: always
+
   gateway:
     build:
       context: ../gateway
-      dockerfile: Dockerfile          # Asegúrate que sea el de producción (build)
+      dockerfile: Dockerfile
     container_name: ms-gateway
     restart: always
     ports:
@@ -22,9 +37,12 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
-      - RABBIT_URL=${RABBIT_URL}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/   # conexión interna local
     networks:
       - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   users:
     build:
@@ -40,9 +58,12 @@ services:
       - DB_USER=${USERS_DB_USER}
       - DB_PASSWORD=${USERS_DB_PASSWORD}
       - DB_NAME=${USERS_DB_NAME}
-      - RABBIT_URL=${RABBIT_URL}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   orders:
     build:
@@ -58,7 +79,7 @@ services:
       - DB_USER=${ORDERS_DB_USER}
       - DB_PASSWORD=${ORDERS_DB_PASSWORD}
       - DB_NAME=${ORDERS_DB_NAME}
-      - RABBIT_URL=${RABBIT_URL}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
       - MYSQL_DB_USER=${MYSQL_DB_USER}
       - MYSQL_DB_PORT=${MYSQL_DB_PORT}
@@ -70,6 +91,9 @@ services:
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
     networks:
       - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   clients:
     build:
@@ -85,9 +109,12 @@ services:
       - DB_USER=${CLIENTS_DB_USER}
       - DB_PASSWORD=${CLIENTS_DB_PASSWORD}
       - DB_NAME=${CLIENTS_DB_NAME}
-      - RABBIT_URL=${RABBIT_URL}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   companies:
     build:
@@ -103,9 +130,12 @@ services:
       - DB_USER=${COMPANIES_DB_USER}
       - DB_PASSWORD=${COMPANIES_DB_PASSWORD}
       - DB_NAME=${COMPANIES_DB_NAME}
-      - RABBIT_URL=${RABBIT_URL}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   subscriptions:
     build:
@@ -121,9 +151,12 @@ services:
       - DB_USER=${SUBSCRIPTIONS_DB_USER}
       - DB_PASSWORD=${SUBSCRIPTIONS_DB_PASSWORD}
       - DB_NAME=${SUBSCRIPTIONS_DB_NAME}
-      - RABBIT_URL=${RABBIT_URL}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
 networks:
   backend:
