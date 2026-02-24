@@ -71,6 +71,7 @@ services:
       dockerfile: Dockerfile
     container_name: ms-orders
     restart: always
+    network_mode: host
     environment:
       - NODE_ENV=production
       - INTERNAL_SECRET=${INTERNAL_SECRET}
