@@ -1,0 +1,29 @@
+name: Deploy to EC2 on Push
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_PORT }}
+          script: |
+            cd /home/ubuntu/proyects/tcm_microservicios || { echo "Repo no encontrado en EC2. Clónalo primero."; exit 1; }
+            git pull origin main
+            cd docker
+            docker compose -f compose.prod.yml pull
+            docker compose -f compose.prod.yml up -d --build --force-recreate
+            docker image prune -f --filter "until=24h"  # Limpia imágenes antiguas (más de 24h)
+            echo "Deploy completado exitosamente!"
