@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"claveAutorizacion":{"$numberInt":"1"},"tipoArchivo":{"$numberInt":"1"}},"name":"claveAutorizacion_1_tipoArchivo_1","background":true,"unique":true}],"uuid":"e4743e4a5a354fffb978b8da53963d72","collectionName":"scrapingdownloads","type":"collection"}

@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"quality_inventoryflow":{"$numberInt":"1"}},"name":"quality_inventoryflow_1","background":true,"unique":true}],"uuid":"09887c4517004f39b90a911ffad7efc5","collectionName":"qualityinventoryflows","type":"collection"}

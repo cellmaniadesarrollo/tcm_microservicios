@@ -1,0 +1,14 @@
+{
+  "connection": "network",
+  "network": {
+    "ip": "192.168.10.161",
+    "port": 9100
+  },
+  "usb": {
+    "vid": null,
+    "pid": null
+  },
+  "paperWidth": 58,
+  "encoding": "GB18030",
+  "printerName": "Rongta Network"
+}

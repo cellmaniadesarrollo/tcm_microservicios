@@ -1,0 +1,202 @@
+version: '3.8'  # Recomendado para usar condition: service_healthy
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # Management UI
+    networks:
+      - backend
+    healthcheck:  # ← Esto es clave para que los demás esperen
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s   # Dale tiempo inicial para que inicie todo
+
+  # ============================
+  # GATEWAY (con WATCH por default comentado)
+  # ============================
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile.dev
+    container_name: ms-gateway
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../gateway:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]   # WATCH (hot-reload) - descomenta si lo necesitas
+    #command: ["npm", "run", "start"]         # SIN watch (más estable)
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy           # ← Espera a que RabbitMQ esté healthy
+
+  # ============================
+  # USERS (SIN WATCH por default)
+  # ============================
+  users:
+    build:
+      context: ../microservices/users
+      dockerfile: Dockerfile.dev
+    container_name: ms-users
+    volumes:
+      - ../microservices/users:/app
+      - /app/node_modules
+    restart: always
+    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si quieres hot-reload
+    command: ["npm", "run", "start"]         # SIN watch (recomendado para evitar EIO)
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_USERS}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================
+  # ORDERS (con WATCH comentado)
+  # ============================
+  orders:
+    build:
+      context: ../microservices/orders
+      dockerfile: Dockerfile.dev
+    container_name: ms-orders
+    restart: always
+    volumes:
+      - ../microservices/orders:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]   # WATCH - descomenta si lo necesitas
+    #command: ["npm", "run", "start"]         # SIN watch
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_ORDERS}
+      - RABBIT_URL=${RABBIT_URL}
+      - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
+      - MYSQL_DB_USER=${MYSQL_DB_USER}
+      - MYSQL_DB_PORT=${MYSQL_DB_PORT}
+      - MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD}
+      - MYSQL_DB_NAME=${MYSQL_DB_NAME}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================
+  # CLIENTS
+  # ============================
+  clients:
+    build:
+      context: ../microservices/clients
+      dockerfile: Dockerfile.dev
+    container_name: ms-clients
+    restart: always
+    volumes:
+      - ../microservices/clients:/app
+      - /app/node_modules
+    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si quieres
+    command: ["npm", "run", "start"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_CLIENTS}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================
+  # COMPANIES
+  # ============================
+  companies:
+    build:
+      context: ../microservices/companies
+      dockerfile: Dockerfile.dev
+    container_name: ms-companies
+    restart: always
+    volumes:
+      - ../microservices/companies:/app
+      - /app/node_modules
+    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si lo necesitas
+    command: ["npm", "run", "start"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_COMPANIES}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  # ============================
+  # SUBSCRIPTIONS
+  # ============================
+  subscriptions:
+    build:
+      context: ../microservices/subscriptions
+      dockerfile: Dockerfile.dev
+    container_name: ms-subscriptions
+    restart: always
+    volumes:
+      - ../microservices/subscriptions:/app
+      - /app/node_modules
+    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si quieres hot-reload
+    command: ["npm", "run", "start"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_SUBSCRIPTIONS}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+networks:
+  backend:

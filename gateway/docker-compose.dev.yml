@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - backend
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: ms-gateway
+    restart: always
+    ports:
+      - '3005:3000'
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - CHOKIDAR_USEPOLLING=${CHOKIDAR_USEPOLLING}
+      - CHOKIDAR_INTERVAL=${CHOKIDAR_INTERVAL}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+    networks:
+      - backend
+
+networks:
+  backend:
+    external: true

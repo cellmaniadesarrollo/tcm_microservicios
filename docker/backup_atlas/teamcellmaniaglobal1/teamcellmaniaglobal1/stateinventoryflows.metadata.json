@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"state_inventoryflow":{"$numberInt":"1"}},"name":"state_inventoryflow_1","background":true,"unique":true}],"uuid":"ad5284acc19046dbbececa5a6781796d","collectionName":"stateinventoryflows","type":"collection"}

@@ -1,0 +1,39 @@
+# Node / NPM
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Builds y outputs
+dist/
+build/
+out/
+*.exe
+*.msi
+*.log
+
+# Print-service específico
+print-service-public/dist/
+print-service-public/build/
+print-service-public/release/
+print-service-public/*.exe
+print-service-public/*.msi
+
+# Entorno
+.env
+.env.local
+docker/.env
+
+# Logs y temp
+logs/
+.tmp/
+temp/
+
+# Editores
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

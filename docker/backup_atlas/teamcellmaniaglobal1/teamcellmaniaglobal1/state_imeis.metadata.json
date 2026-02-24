@@ -1,0 +1,1 @@
+{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"state_imei":{"$numberInt":"1"}},"name":"state_imei_1","background":true,"unique":true}],"uuid":"9a154eb1b1404f368a6da81efeeb31c7","collectionName":"state_imeis","type":"collection"}
