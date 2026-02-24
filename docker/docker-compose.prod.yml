@@ -1,0 +1,129 @@
+# docker/compose.prod.yml
+# Versión optimizada para producción en EC2
+# - Sin rabbitmq local (usa CloudAMQP externo)
+# - Sin volúmenes de código (no hot-reload)
+# - Comandos en modo producción (npm run start)
+# - Dockerfile estándar (build + producción)
+# - Variables específicas por microservicio (prefijo XXX_DB_)
+
+version: '3.8'
+
+services:
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile          # Asegúrate que sea el de producción (build)
+    container_name: ms-gateway
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+
+  users:
+    build:
+      context: ../microservices/users
+      dockerfile: Dockerfile
+    container_name: ms-users
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${USERS_DB_HOST}
+      - DB_PORT=${USERS_DB_PORT}
+      - DB_USER=${USERS_DB_USER}
+      - DB_PASSWORD=${USERS_DB_PASSWORD}
+      - DB_NAME=${USERS_DB_NAME}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+
+  orders:
+    build:
+      context: ../microservices/orders
+      dockerfile: Dockerfile
+    container_name: ms-orders
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${ORDERS_DB_HOST}
+      - DB_PORT=${ORDERS_DB_PORT}
+      - DB_USER=${ORDERS_DB_USER}
+      - DB_PASSWORD=${ORDERS_DB_PASSWORD}
+      - DB_NAME=${ORDERS_DB_NAME}
+      - RABBIT_URL=${RABBIT_URL}
+      - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
+      - MYSQL_DB_USER=${MYSQL_DB_USER}
+      - MYSQL_DB_PORT=${MYSQL_DB_PORT}
+      - MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD}
+      - MYSQL_DB_NAME=${MYSQL_DB_NAME}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+    networks:
+      - backend
+
+  clients:
+    build:
+      context: ../microservices/clients
+      dockerfile: Dockerfile
+    container_name: ms-clients
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${CLIENTS_DB_HOST}
+      - DB_PORT=${CLIENTS_DB_PORT}
+      - DB_USER=${CLIENTS_DB_USER}
+      - DB_PASSWORD=${CLIENTS_DB_PASSWORD}
+      - DB_NAME=${CLIENTS_DB_NAME}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+
+  companies:
+    build:
+      context: ../microservices/companies
+      dockerfile: Dockerfile
+    container_name: ms-companies
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${COMPANIES_DB_HOST}
+      - DB_PORT=${COMPANIES_DB_PORT}
+      - DB_USER=${COMPANIES_DB_USER}
+      - DB_PASSWORD=${COMPANIES_DB_PASSWORD}
+      - DB_NAME=${COMPANIES_DB_NAME}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+
+  subscriptions:
+    build:
+      context: ../microservices/subscriptions
+      dockerfile: Dockerfile
+    container_name: ms-subscriptions
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${SUBSCRIPTIONS_DB_HOST}
+      - DB_PORT=${SUBSCRIPTIONS_DB_PORT}
+      - DB_USER=${SUBSCRIPTIONS_DB_USER}
+      - DB_PASSWORD=${SUBSCRIPTIONS_DB_PASSWORD}
+      - DB_NAME=${SUBSCRIPTIONS_DB_NAME}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+
+networks:
+  backend:
