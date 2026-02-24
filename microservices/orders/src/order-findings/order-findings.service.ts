@@ -328,7 +328,7 @@ export class OrderFindingsService {
     const attachment = await this.attachmentRepository.findOne({ where: { id: attachmentId } });
 
     if (!attachment) {
-      throw new RpcException(new NotFoundException('Archivo no encontrado'));
+      throw new RpcException(new NotFoundException('Archivo no encontrado pp'));
     }
 
     let orderId: number | undefined;
