@@ -4,6 +4,10 @@ npm-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Archivos sensibles o solo locales en docker/
+docker/bases_de_datos_prodiuccion.md
+docker/docker.md
+
 # Builds y outputs
 dist/
 build/

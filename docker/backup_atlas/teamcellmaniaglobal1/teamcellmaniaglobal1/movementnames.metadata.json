@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"name_movement":{"$numberInt":"1"}},"name":"name_movement_1","background":true,"unique":true}],"uuid":"9e375801cb5a4f3c962a940096711a0f","collectionName":"movementnames","type":"collection"}

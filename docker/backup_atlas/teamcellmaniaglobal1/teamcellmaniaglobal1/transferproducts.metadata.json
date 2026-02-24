@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"uuid":{"$numberInt":"1"}},"name":"uuid_1","background":true,"unique":true}],"uuid":"174e6ac7456e42b9854d35f34e187562","collectionName":"transferproducts","type":"collection"}

@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"comesfrom":{"$numberInt":"1"}},"name":"comesfrom_1","background":true,"unique":true}],"uuid":"94b5eae3c06c4b16aa553395941f8617","collectionName":"comesfrominventoryflows","type":"collection"}

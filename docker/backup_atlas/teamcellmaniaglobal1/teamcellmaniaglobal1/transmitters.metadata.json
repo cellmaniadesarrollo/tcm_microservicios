@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"identification":{"$numberInt":"1"}},"name":"identification_1","background":true,"unique":true}],"uuid":"fbe67dc206e64407b8c663fa52f0348c","collectionName":"transmitters","type":"collection"}

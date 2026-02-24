@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"}],"uuid":"564e213bb68f46a7b6d8a51048af143a","collectionName":"counterbatches","type":"collection"}

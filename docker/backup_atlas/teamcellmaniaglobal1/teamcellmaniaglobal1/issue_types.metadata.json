@@ -1,1 +1,0 @@
-{"indexes":[{"v":{"$numberInt":"2"},"key":{"_id":{"$numberInt":"1"}},"name":"_id_"},{"v":{"$numberInt":"2"},"key":{"name_issue":{"$numberInt":"1"}},"name":"name_issue_1","background":true,"unique":true}],"uuid":"ca455153862d44df8728357c695e16c8","collectionName":"issue_types","type":"collection"}
