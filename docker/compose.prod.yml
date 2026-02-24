@@ -70,8 +70,7 @@ services:
       context: ../microservices/orders
       dockerfile: Dockerfile
     container_name: ms-orders
-    restart: always
-    network_mode: host
+    restart: always 
     environment:
       - NODE_ENV=production
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -90,8 +89,10 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
-    #networks:
-    #  - backend
+    networks:
+      - backend
+    extra_hosts:
+      - "host.docker.internal:host-gateway" 
     depends_on:
       rabbitmq:
         condition: service_healthy
