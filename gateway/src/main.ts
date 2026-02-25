@@ -44,7 +44,13 @@ async function bootstrap() {
 
   // CORS – muy importante diferenciar dev vs prod
   await app.register(fastifyCors, {
-    origin: true,
+    origin: isProduction
+      ? [
+        'https://tu-frontend.com',           // ← cámbialo por el dominio real
+        'https://www.tu-frontend.com',
+        // 'https://ms.teamcellmania.com',   // si el frontend y api están en mismo dominio
+      ]
+      : ['http://localhost:4200', 'http://localhost:3000'], // para dev
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -72,9 +78,9 @@ async function bootstrap() {
 
   // Puerto y host según entorno
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const host = isProduction ? '127.0.0.1' : '0.0.0.0';
+  const host = '0.0.0.0';
 
-  await app.listen(port, '0.0.0.0');
+  await app.listen(port, host);
 
   const protocol = isProduction ? 'http' : 'http'; // en prod es http interno
   console.log(`🚀 Gateway corriendo en ${protocol}://${host}:${port} (${process.env.NODE_ENV || 'development'})`);
@@ -87,4 +93,4 @@ async function bootstrap() {
 bootstrap().catch((err) => {
   console.error('Error al iniciar el gateway:', err);
   process.exit(1);
-}); 
+});
