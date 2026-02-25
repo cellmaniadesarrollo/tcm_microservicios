@@ -10,87 +10,50 @@ import fastifyStatic from '@fastify/static';
 import { join } from 'path';
 import { RpcToHttpInterceptor } from './common/interceptors/rpc-to-http.interceptor';
 import multipart from '@fastify/multipart';
-
 async function bootstrap() {
-  const isProduction = process.env.NODE_ENV === 'production';
-
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     new FastifyAdapter({
       logger: {
-        level: isProduction ? 'info' : 'debug', // menos verbose en prod
+        level: 'info', // niveles: fatal, error, warn, info, debug, trace
         transport: {
-          target: 'pino-pretty',
+          target: 'pino-pretty', // 👈 formato "bonito" como Morgan
           options: {
-            colorize: !isProduction,           // sin colores en prod (logs más limpios)
-            translateTime: 'yyyy-mm-dd HH:MM:ss',
+            colorize: true,
+            translateTime: 'HH:MM:ss',
             singleLine: true,
             ignore: 'pid,hostname',
           },
         },
       },
-      // Muy importante cuando hay proxy delante (Nginx, ALB, CloudFront, etc.)
-      trustProxy: true,
-    }),
+    })
   );
-
-  // Multipart (subida de archivos)
+  // 👉 REGISTRO DE MULTIPART  
   await app.register(multipart, {
     limits: {
-      fileSize: 10 * 1024 * 1024, // 10 MiB
-      files: 10,
+      fileSize: 10 * 1024 * 1024, // 10MB por archivo (ajusta según necesites)
+      files: 10,                  // max 10 archivos por request
     },
   });
-
-  // CORS – muy importante diferenciar dev vs prod
+  // 👉 Habilita CORS
   await app.register(fastifyCors, {
-    origin: isProduction
-      ? [
-        'https://tu-frontend.com',           // ← cámbialo por el dominio real
-        'https://www.tu-frontend.com',
-        // 'https://ms.teamcellmania.com',   // si el frontend y api están en mismo dominio
-      ]
-      : ['http://localhost:4200', 'http://localhost:3000'], // para dev
+    origin: ['http://localhost:4200'], // o '*', o un array de orígenes
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // Pipes globales
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
-      transform: true,           // ← recomendado: convierte query params y body a tipos
-      forbidUnknownValues: true,
     }),
   );
-
-  // Archivos estáticos (si los usas)
   app.getHttpAdapter().getInstance().register(fastifyStatic, {
     root: join(__dirname, '..', 'assets'),
     prefix: '/public/',
-    decorateReply: false, // buena práctica con Fastify
   });
-
-  // Interceptor global
   app.useGlobalInterceptors(new RpcToHttpInterceptor());
-
-  // Puerto y host según entorno
-  const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const host = isProduction ? '127.0.0.1' : '0.0.0.0';
-
-  await app.listen(port, host);
-
-  const protocol = isProduction ? 'http' : 'http'; // en prod es http interno
-  console.log(`🚀 Gateway corriendo en ${protocol}://${host}:${port} (${process.env.NODE_ENV || 'development'})`);
-
-  if (isProduction) {
-    console.log(`   Accesible públicamente → https://ms.teamcellmania.com`);
-  }
+  await app.listen(process.env.PORT ? parseInt(process.env.PORT) : 3000, '0.0.0.0');
+  console.log(`🚀 Gateway corriendo en http://localhost:${process.env.PORT ?? 3000}`);
 }
-
-bootstrap().catch((err) => {
-  console.error('Error al iniciar el gateway:', err);
-  process.exit(1);
-});
+bootstrap();
