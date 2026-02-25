@@ -74,7 +74,7 @@ async function bootstrap() {
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
   const host = isProduction ? '127.0.0.1' : '0.0.0.0';
 
-  await app.listen(port, host);
+  await app.listen(port, '0.0.0.0');
 
   const protocol = isProduction ? 'http' : 'http'; // en prod es http interno
   console.log(`🚀 Gateway corriendo en ${protocol}://${host}:${port} (${process.env.NODE_ENV || 'development'})`);
