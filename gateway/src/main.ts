@@ -78,7 +78,7 @@ async function bootstrap() {
 
   // Puerto y host según entorno
   const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-  const host = isProduction ? '127.0.0.1' : '0.0.0.0';
+  const host = '0.0.0.0';
 
   await app.listen(port, host);
 
