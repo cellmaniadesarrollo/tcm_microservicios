@@ -43,19 +43,34 @@ async function bootstrap() {
   });
 
   // CORS – muy importante diferenciar dev vs prod
+  const allowedOrigins = isProduction
+    ? [
+      'https://ordenes.teamcellmania.com',
+      'https://main.d7t3s5bze5863.amplifyapp.com',
+    ]
+    : ['http://localhost:4200', 'http://localhost:3000'];
+
   await app.register(fastifyCors, {
-    origin: isProduction
-      ? [
-        'https://tu-frontend.com',           // ← cámbialo por el dominio real
-        'https://www.tu-frontend.com',
-        // 'https://ms.teamcellmania.com',   // si el frontend y api están en mismo dominio
-      ]
-      : ['http://localhost:4200', 'http://localhost:3000'], // para dev
+    origin: (origin, cb) => {
+      // 1. Si no hay origen (Postman desktop, curl, herramientas internas)
+      // 2. O si el origen está en nuestra lista blanca
+      if (!origin || allowedOrigins.includes(origin)) {
+        cb(null, true);
+        return;
+      }
+
+      // Si estás en desarrollo, podrías ser más permisivo aún
+      if (!isProduction) {
+        cb(null, true);
+        return;
+      }
+
+      cb(new Error('Not allowed by CORS'), false);
+    },
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with'],
   });
-
   // Pipes globales
   app.useGlobalPipes(
     new ValidationPipe({
