@@ -98,7 +98,7 @@ async function bootstrap() {
   await app.listen(port, host);
 
   const protocol = isProduction ? 'http' : 'http'; // en prod es http interno
-  console.log(`🚀 Gateway corriendo en ${protocol}://${host}:${port} (${process.env.NODE_ENV || 'development'})`);
+  console.log(`🚀 Gateway corriendo en ${protocol}://${host}:${port} (${process.env.NODE_ENV || 'development-'})`);
 
   if (isProduction) {
     console.log(`   Accesible públicamente → https://ms.teamcellmania.com`);
