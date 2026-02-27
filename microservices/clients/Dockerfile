@@ -1,23 +1,38 @@
-# Etapa 1: Build
+# Etapa de construcción
 FROM node:20-alpine AS builder
+
 WORKDIR /app
+
+# Primero dependencias (cacheo eficiente)
 COPY package*.json ./
 RUN npm ci
-COPY tsconfig*.json nest-cli.json ./
-COPY src/ src/
-COPY src/catalogs/data/ dist/catalogs/data/   
+
+# Copiamos TODO el código fuente
+COPY . .
+
+# ────────────────────────────────────────────────
+# COPIA EXPLÍCITA DE LOS ARCHIVOS JSON ANTES DE BUILD
+# Esto es lo que más consistentemente resuelve el problema
+RUN mkdir -p dist/catalogs/data
+COPY src/catalogs/data/*.json dist/catalogs/data/
+# ────────────────────────────────────────────────
+
+# Compilamos
 RUN npm run build
 
-# Etapa 2: Producción (solo lo necesario)
-FROM node:20-alpine AS production
+# Etapa final - imagen liviana
+FROM node:20-alpine
+
 WORKDIR /app
 ENV NODE_ENV=production
 
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
-# Opcional: si usas .env o configs
-# COPY .env* ./
+# Solo copiamos lo estrictamente necesario
+COPY --from=builder /app/dist          ./dist
+COPY --from=builder /app/node_modules  ./node_modules
+COPY --from=builder /app/package.json  ./package.json
+COPY --from=builder /app/package-lock.json ./package-lock.json  
+
+# NO COPIAR NADA MÁS aquí (evitar COPY . .)
 
 USER node
 EXPOSE 3000
