@@ -3,6 +3,10 @@
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
+    "assets": [
+      "src/catalogs/data/**/*"
+    ],
+    "watchAssets": true,
     "deleteOutDir": true
   }
 }

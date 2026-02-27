@@ -4,17 +4,13 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-# Forzamos copia explícita de los json ANTES del build
-COPY src/catalogs/data/ dist/catalogs/data/
-RUN npm run build
+RUN npm run build   # genera dist/
 
 FROM node:20-alpine
 WORKDIR /app
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package*.json ./
-# NO copies todo el proyecto aquí
-# COPY . .   ← ¡ELIMINA ESTA LÍNEA!
-
-CMD ["node", "dist/main.js"]
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+CMD ["node", "dist/main"]
 EXPOSE 3000
