@@ -1,39 +1,42 @@
-# Etapa de construcción
+# Etapa 1: Builder (compila + fuerza copia de assets)
 FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Primero dependencias (cacheo eficiente)
+# Copia solo dependencias primero (buen cacheo)
 COPY package*.json ./
 RUN npm ci
 
-# Copiamos TODO el código fuente
+# Copia todo el código (incluyendo nest-cli.json, tsconfig, src, etc.)
 COPY . .
 
-# ────────────────────────────────────────────────
-# COPIA EXPLÍCITA DE LOS ARCHIVOS JSON ANTES DE BUILD
-# Esto es lo que más consistentemente resuelve el problema
-RUN mkdir -p dist/catalogs/data
-COPY src/catalogs/data/*.json dist/catalogs/data/
-# ────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# FUERZA COPIA DE LA CARPETA catalogs/data ANTES DEL BUILD
+# Esto crea la estructura en dist/ independientemente de nest-cli.json
+RUN mkdir -p dist/catalogs/data && \
+    cp -r src/catalogs/data/* dist/catalogs/data/ 2>/dev/null || true
+# El "|| true" evita que falle si la carpeta está vacía
+# ───────────────────────────────────────────────────────────────
 
-# Compilamos
+# Ahora sí compilamos (nest build o tsc)
 RUN npm run build
 
-# Etapa final - imagen liviana
+# Etapa 2: Producción (imagen liviana)
 FROM node:20-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Solo copiamos lo estrictamente necesario
-COPY --from=builder /app/dist          ./dist
-COPY --from=builder /app/node_modules  ./node_modules
-COPY --from=builder /app/package.json  ./package.json
-COPY --from=builder /app/package-lock.json ./package-lock.json  
+# Copia solo lo necesario del builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package*.json ./
 
-# NO COPIAR NADA MÁS aquí (evitar COPY . .)
+# Opcional: si tienes .env o configs que no van en dist
+# COPY .env* ./
 
+# Corre como usuario no-root (buena práctica)
 USER node
+
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
