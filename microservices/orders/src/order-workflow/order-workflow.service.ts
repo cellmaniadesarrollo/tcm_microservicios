@@ -25,7 +25,9 @@ import { CloseOrderDto } from '../order-findings/dto/close-order.dto';
 import { OrderDelivery } from './entities/order-delivery.entity';
 import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { Attachment, AttachmentEntityType } from '../order-findings/entities/attachment.entity';
+import { v4 as uuidv4 } from 'uuid';
 @Injectable()
+
 export class OrderWorkflowService {
   constructor(
     private readonly awsS3Service: AwsS3Service,
@@ -96,6 +98,7 @@ export class OrderWorkflowService {
       const nextOrderNumber = (result?.max ?? 0) + 1;
       // 🧠 Crear orden
       const order = manager.create(Order, {
+        public_id: uuidv4(),
         order_number: nextOrderNumber,
         order_type_id: dto.order_type_id,
         order_priority_id: dto.order_priority_id,
