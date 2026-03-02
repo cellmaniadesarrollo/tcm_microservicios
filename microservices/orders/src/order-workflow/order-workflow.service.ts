@@ -293,7 +293,6 @@ export class OrderWorkflowService {
     try {
       const order = await this.orderRepo
         .createQueryBuilder('order')
-        .addSelect('order.public_id')
         .leftJoinAndSelect('order.company', 'company')
         .leftJoinAndSelect('order.branch', 'branch')
         .leftJoinAndSelect('order.customer', 'customer')
