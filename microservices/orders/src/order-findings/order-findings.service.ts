@@ -87,36 +87,55 @@ export class OrderFindingsService {
       finding_id: finding.id,
       description: dto.description,
 
-      // 👁 Visibilidad (solo procedimientos)
       is_public: dto.is_public ?? true,
-
-      // ♻ Soft delete
       is_active: true,
 
-      // ⏱ Tiempo / costos
       time_spent_minutes: dto.time_spent_minutes,
       procedure_cost: dto.procedure_cost,
       warranty_days: dto.warranty_days,
 
-      // 🔁 Seguimiento
       requires_followup: dto.requires_followup ?? false,
       followup_notes: dto.followup_notes,
 
-      // 👨‍🔧 Técnico
       performed_by_id: user.userId,
 
-      // Estados iniciales
       client_approved: false,
       was_solved: false,
     });
 
     await this.procedureRepository.save(procedure);
 
+    // 🔥 AUTO-ASIGNACIÓN DE TÉCNICO A LA ORDEN
+    if (dto.procedure_cost && dto.procedure_cost > 4) {
+      const orderId = finding.order_id;
+      const technicianId = user.userId;
+
+      // Verificar si YA está asignado (evita duplicados)
+      const yaEstaAsignado = await this.orderRepository
+        .createQueryBuilder('o')
+        .innerJoin('o.technicians', 't')
+        .where('o.id = :orderId', { orderId })
+        .andWhere('t.id = :technicianId', { technicianId })
+        .getCount();
+
+      if (yaEstaAsignado === 0) {
+        // ← Aquí se agrega la fila en la tabla order_technicians
+        await this.orderRepository
+          .createQueryBuilder()
+          .relation(Order, 'technicians')
+          .of(orderId)
+          .add(technicianId);
+
+        console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId} (procedure_cost > 4)`);
+      }
+    }
+
     return {
       success: true,
       message: 'Procedimiento guardado correctamente',
       procedureId: procedure.id,
       findingId: finding.id,
+      // opcional: puedes agregar "technicianAutoAssigned: true" si quieres
     };
   }
 
