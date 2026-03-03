@@ -55,6 +55,7 @@ export class OrderWorkflowService {
 
   async createOrder(
     dto: CreateOrderDto,
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
     user: { companyId: string; branchId: string; userId: string },
   ) {
     return this.orderRepo.manager.transaction(async (manager) => {
@@ -134,7 +135,27 @@ export class OrderWorkflowService {
         observation: 'CREACIÓN DE ORDEN',
       });
 
-      return savedOrder;
+      const attachments: Attachment[] = [];
+
+      for (const file of files) {
+        const buffer = Buffer.from(file.buffer, 'base64');
+        const prefix = `order/${savedOrder.id}/`;
+        const url = await this.awsS3Service.uploadBuffer(buffer, file.originalname, file.mimetype, prefix);
+
+        const attachment = manager.create(Attachment, {
+          entity_type: AttachmentEntityType.ORDER,
+          entity_id: savedOrder.id,
+          file_name: file.originalname,
+          file_url: url,
+          file_type: file.mimetype,
+          uploaded_by_id: user.userId,
+          is_public: true,
+        });
+
+        attachments.push(await manager.save(attachment));
+      }
+
+      return { ...savedOrder, attachments };
     });
   }
 
@@ -310,14 +331,10 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.currentStatus', 'currentStatus')
         .leftJoinAndSelect('order.createdBy', 'createdBy')
         .leftJoinAndSelect('order.technicians', 'technicians')
-
-        // Pagos relacionados con la orden
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
-        .leftJoinAndSelect('payments.receivedBy', 'receivedBy') // quién recibió el pago
-
-        // Findings activos + sus procedimientos activos
+        .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
         .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', {
           findingActive: true,
         })
@@ -326,14 +343,10 @@ export class OrderWorkflowService {
           procActive: true,
         })
         .leftJoinAndSelect('procedures.performedBy', 'performedBy')
-
         .where('order.id = :orderId', { orderId })
         .andWhere('order.company_id = :companyId', { companyId: user.companyId })
-
-        // Ordenamiento recomendado
         .orderBy('findings.createdAt', 'ASC')
-        .addOrderBy('payments.paid_at', 'ASC')   // pagos en orden cronológico
-
+        .addOrderBy('payments.paid_at', 'ASC')
         .getOne();
 
       if (!order) {
@@ -345,54 +358,74 @@ export class OrderWorkflowService {
         finding.procedures?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       });
 
-      // CARGA MANUAL DE ATTACHMENTS (como ya lo tenías)
-      if (order.findings?.length) {
-        const findingIds = order.findings.map((f) => f.id);
-        const procedureIds = order.findings.flatMap((f) =>
-          f.procedures?.map((p) => p.id) || [],
-        );
+      // ─── CARGA MANUAL DE ATTACHMENTS ────────────────────────────────────────
 
-        const allAttachments = await this.attachmentRepository.find({
-          where: [
-            {
-              entity_type: AttachmentEntityType.FINDING,
-              entity_id: In(findingIds),
-              is_active: true,
-            },
-            {
-              entity_type: AttachmentEntityType.PROCEDURE,
-              entity_id: In(procedureIds),
-              is_active: true,
-            },
-          ],
-          order: { createdAt: 'ASC' },
-        });
+      const findingIds = order.findings?.length
+        ? order.findings.map((f) => f.id)
+        : [];
 
-        const attachmentsMap = new Map<string, Attachment[]>();
+      const procedureIds = order.findings?.length
+        ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
+        : [];
 
-        allAttachments.forEach((att) => {
-          const key = `${att.entity_type}_${att.entity_id}`;
-          if (!attachmentsMap.has(key)) attachmentsMap.set(key, []);
-          attachmentsMap.get(key)!.push(att);
-        });
+      // Siempre incluimos los attachments de la orden
+      const whereConditions: any[] = [
+        {
+          entity_type: AttachmentEntityType.ORDER,
+          entity_id: order.id,
+          is_active: true,
+        },
+      ];
 
-        order.findings.forEach((finding) => {
-          const findingKey = `${AttachmentEntityType.FINDING}_${finding.id}`;
-          finding.attachments = attachmentsMap.get(findingKey) || [];
-
-          finding.procedures?.forEach((proc) => {
-            const procKey = `${AttachmentEntityType.PROCEDURE}_${proc.id}`;
-            proc.attachments = attachmentsMap.get(procKey) || [];
-          });
+      if (findingIds.length) {
+        whereConditions.push({
+          entity_type: AttachmentEntityType.FINDING,
+          entity_id: In(findingIds),
+          is_active: true,
         });
       }
 
-      // Firmado de URLs de attachments (como ya lo tenías)
+      if (procedureIds.length) {
+        whereConditions.push({
+          entity_type: AttachmentEntityType.PROCEDURE,
+          entity_id: In(procedureIds),
+          is_active: true,
+        });
+      }
+
+      const allAttachments = await this.attachmentRepository.find({
+        where: whereConditions,
+        order: { createdAt: 'ASC' },
+      });
+
+      // Construir mapa key: "ENTITY_TYPE_id" → Attachment[]
+      const attachmentsMap = new Map<string, Attachment[]>();
+      allAttachments.forEach((att) => {
+        const key = `${att.entity_type}_${att.entity_id}`;
+        if (!attachmentsMap.has(key)) attachmentsMap.set(key, []);
+        attachmentsMap.get(key)!.push(att);
+      });
+
+      // Attachments de la orden
+      const orderKey = `${AttachmentEntityType.ORDER}_${order.id}`;
+      (order as any).attachments = attachmentsMap.get(orderKey) || [];
+
+      // Attachments de findings y procedimientos
+      order.findings?.forEach((finding) => {
+        const findingKey = `${AttachmentEntityType.FINDING}_${finding.id}`;
+        finding.attachments = attachmentsMap.get(findingKey) || [];
+
+        finding.procedures?.forEach((proc) => {
+          const procKey = `${AttachmentEntityType.PROCEDURE}_${proc.id}`;
+          proc.attachments = attachmentsMap.get(procKey) || [];
+        });
+      });
+
+      // ─── FIRMADO DE URLs ─────────────────────────────────────────────────────
       await this.enrichAttachmentsWithSignedUrls(order);
 
-
-
       return order;
+
     } catch (error) {
       if (!(error instanceof RpcException)) {
         console.error('Error inesperado en getOrderFullData:', error);
@@ -404,64 +437,54 @@ export class OrderWorkflowService {
     }
   }
   private async enrichAttachmentsWithSignedUrls(order: Order) {
-    if (!order.findings?.length) {
-      console.log('[DEBUG] No hay findings → no hay attachments para firmar');
-      return;
-    }
-
-
     const promises: Promise<void>[] = [];
 
-    for (const finding of order.findings) {
-      // Attachments directos del finding
-      if (finding.attachments?.length) {
-        // console.log(`[DEBUG] Finding ${finding.id} tiene ${finding.attachments.length} attachment(s)`);
-        for (const att of finding.attachments) {
-          // console.log(`[DEBUG] Intentando firmar → original: ${att.file_url}`);
+    // ─── Attachments de la ORDEN ─────────────────────────────────────────────
+    if ((order as any).attachments?.length) {
+      for (const att of (order as any).attachments) {
+        promises.push(
+          this.awsS3Service
+            .getPresignedUrl(att.file_url, 1800)
+            .then((signed) => { att.file_url = signed; })
+            .catch((err) => {
+              console.error(`[ERROR] Falló presigned ORDER ${att.id}:`, err.message);
+            }),
+        );
+      }
+    }
 
+    // ─── Attachments de FINDINGS y PROCEDURES ────────────────────────────────
+    for (const finding of order.findings ?? []) {
+      if (finding.attachments?.length) {
+        for (const att of finding.attachments) {
           promises.push(
             this.awsS3Service
               .getPresignedUrl(att.file_url, 1800)
-              .then((signed) => {
-                //console.log(`[DEBUG] ÉXITO - Presigned generada para ${att.id}:`);
-                //console.log(`   Original: ${att.file_url}`);
-                //console.log(`   Firmada : ${signed.substring(0, 120)}...`); // mostramos solo parte para no saturar
-                att.file_url = signed;
-              })
+              .then((signed) => { att.file_url = signed; })
               .catch((err) => {
-                console.error(`[ERROR] Falló presigned para ${att.file_url}:`, err.message);
+                console.error(`[ERROR] Falló presigned FINDING ${att.id}:`, err.message);
               }),
           );
         }
       }
 
-      // Attachments de procedures
-      if (finding.procedures?.length) {
-        for (const proc of finding.procedures) {
-          if (proc.attachments?.length) {
-            //  console.log(`[DEBUG] Procedure ${proc.id} tiene ${proc.attachments.length} attachment(s)`);
-            for (const att of proc.attachments) {
-              //  console.log(`[DEBUG] Intentando firmar (procedure) → ${att.file_url}`);
-
-              promises.push(
-                this.awsS3Service
-                  .getPresignedUrl(att.file_url, 1800)
-                  .then((signed) => {
-                    //  console.log(`[DEBUG] ÉXITO procedure ${proc.id} - ${att.id}: ${signed.substring(0, 100)}...`);
-                    att.file_url = signed;
-                  })
-                  .catch((err) => {
-                    console.error(`[ERROR] Falló en procedure ${proc.id}:`, err.message);
-                  }),
-              );
-            }
+      for (const proc of finding.procedures ?? []) {
+        if (proc.attachments?.length) {
+          for (const att of proc.attachments) {
+            promises.push(
+              this.awsS3Service
+                .getPresignedUrl(att.file_url, 1800)
+                .then((signed) => { att.file_url = signed; })
+                .catch((err) => {
+                  console.error(`[ERROR] Falló presigned PROCEDURE ${att.id}:`, err.message);
+                }),
+            );
           }
         }
       }
     }
 
     await Promise.allSettled(promises);
-    console.log('[DEBUG] Finalizó enriquecimiento de attachments');
   }
 
 

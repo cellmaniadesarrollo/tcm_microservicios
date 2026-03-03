@@ -12,6 +12,7 @@ import { FindingProcedure } from './finding-procedure.entity';
 export enum AttachmentEntityType {
   FINDING = 'FINDING',
   PROCEDURE = 'PROCEDURE',
+  ORDER = 'ORDER',
 }
 
 @Entity('attachments')

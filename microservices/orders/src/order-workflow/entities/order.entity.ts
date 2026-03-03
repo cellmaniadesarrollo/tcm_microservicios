@@ -26,6 +26,7 @@ import { OrderStatus } from '../../catalogs/entities/order_status.entity';
 import { OrderFinding } from '../../order-findings/entities/order-finding.entity';
 import { OrderDelivery } from './order-delivery.entity';
 import { OrderPayment } from './order-payment.entity';
+import { Attachment } from '../../order-findings/entities/attachment.entity';
 
 @Entity('orders')
 @Index(['company_id', 'order_number'], { unique: true }) // 🔐 único por empresa
@@ -153,6 +154,7 @@ export class Order {
   @UpdateDateColumn()
   updatedAt: Date;
 
+  attachments?: Attachment[];
 
   @OneToMany(() => OrderPayment, (payment) => payment.order, { cascade: true })
   payments: OrderPayment[];

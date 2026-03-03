@@ -16,16 +16,10 @@ export class OrderWorkflowController {
   @MessagePattern({ cmd: 'create_order' })
   async createOrder(data: {
     dto: CreateOrderDto;
-    user: {
-      userId: string;
-      companyId: string;
-      branchId: string;
-    };
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>;
+    user: { userId: string; companyId: string; branchId: string };
   }) {
-    return this.orderWorkflowService.createOrder(
-      data.dto,
-      data.user,
-    );
+    return this.orderWorkflowService.createOrder(data.dto, data.files ?? [], data.user);
   }
   @MessagePattern({ cmd: 'list_orders' })
   async listOrders(data: {
