@@ -29,6 +29,7 @@ import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 
 export class OrderWorkflowService {
+
   constructor(
     private readonly awsS3Service: AwsS3Service,
     @InjectRepository(Order)
@@ -190,13 +191,16 @@ export class OrderWorkflowService {
     if (search && search.trim() !== '') {
       const cleanSearch = search.trim();
 
+      // UUID regex
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSearch);
+      const isNumeric = !isNaN(Number(cleanSearch)) && cleanSearch !== '';
+
       qb.andWhere(
         new Brackets((q) => {
-          if (!isNaN(Number(cleanSearch))) {
-            q.where(
-              'c.idNumber ILIKE :num OR o.order_number::text ILIKE :num',
-              { num: `%${cleanSearch}%` },
-            );
+          if (isUUID) {
+            q.where('o.public_id = :publicId', { publicId: cleanSearch });
+          } else if (isNumeric) {
+            q.where('o.order_number = :orderNumber', { orderNumber: Number(cleanSearch) });
           } else {
             const terms = cleanSearch.split(' ').filter(Boolean);
             terms.forEach((term, i) => {
@@ -205,8 +209,8 @@ export class OrderWorkflowService {
                 { [`t${i}`]: `%${term}%` },
               );
             });
+            q.orWhere('contact.value ILIKE :search', { search: `%${cleanSearch}%` });
           }
-          q.orWhere('contact.value ILIKE :search', { search: `%${cleanSearch}%` });
         }),
       );
     }
