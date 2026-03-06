@@ -37,6 +37,8 @@ import { UploadAttachmentGatewayDto } from './dto/upload-attachment.gateway.dto'
 import { CreateOrderPaymentGatewayDto } from './dto/create-order-payment-gateway.dto';
 import { CloseOrderGatewayDto } from './dto/close-order-gateway.dto';
 import { GetLastOrdersByDeviceGatewayDto } from './dto/get-last-orders-by-device-gateway.dto';
+import { Public } from '../common/auth/decorators/public.decorator';
+import { GetOrderPublicDataGatewayDto } from './dto/get-order-public-data-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -45,7 +47,57 @@ export class OrdersController {
     @Inject('ORDER_SERVICE') private readonly CustomerService: ClientProxy,
   ) { }
 
+  @Post('create')
+  @Groups('CASHIERS')
+  async createOrder(@Req() request: FastifyRequest, @User() user: any) {
+    const files: { buffer: Buffer; originalname: string; mimetype: string; size: number }[] = [];
+    const formData: Record<string, string> = {};
 
+    for await (const part of request.parts()) {
+      if (isMultipartFile(part)) {
+        const buffers: Buffer[] = [];
+        for await (const chunk of part.file) buffers.push(chunk as Buffer);
+        const buffer = Buffer.concat(buffers);
+        files.push({ buffer, originalname: part.filename, mimetype: part.mimetype, size: buffer.length });
+      } else {
+        formData[part.fieldname] = part.value as string;
+      }
+    }
+
+    // Reconstruir el DTO desde formData (los campos vienen como strings)
+    const dto: CreateOrderGatewayDto = {
+      order_type_id: Number(formData.order_type_id),
+      order_priority_id: Number(formData.order_priority_id),
+      customer_id: Number(formData.customer_id),
+      technician_ids: JSON.parse(formData.technician_ids), // el front envía JSON.stringify([...])
+      detalleIngreso: formData.detalleIngreso,
+      revisadoAntes: formData.revisadoAntes === 'true',
+      device_id: formData.device_id ? Number(formData.device_id) : undefined,
+      previous_order_id: formData.previous_order_id ? Number(formData.previous_order_id) : undefined,
+      patron: formData.patron,
+      password: formData.password,
+      estimated_price: formData.estimated_price ? Number(formData.estimated_price) : undefined,
+    };
+
+    const formattedFiles = files.map(f => ({
+      buffer: f.buffer.toString('base64'),
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
+    }));
+
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'create_order' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto,
+          files: formattedFiles, // ← nuevo
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
 
   @Post('find-customer')
   async findCustomer(@Body() body: FindCustomerDto, @User() user: any) {
@@ -190,57 +242,7 @@ export class OrdersController {
     );
   }
 
-  @Post('create')
-  @Groups('CASHIERS')
-  async createOrder(@Req() request: FastifyRequest, @User() user: any) {
-    const files: { buffer: Buffer; originalname: string; mimetype: string; size: number }[] = [];
-    const formData: Record<string, string> = {};
 
-    for await (const part of request.parts()) {
-      if (isMultipartFile(part)) {
-        const buffers: Buffer[] = [];
-        for await (const chunk of part.file) buffers.push(chunk as Buffer);
-        const buffer = Buffer.concat(buffers);
-        files.push({ buffer, originalname: part.filename, mimetype: part.mimetype, size: buffer.length });
-      } else {
-        formData[part.fieldname] = part.value as string;
-      }
-    }
-
-    // Reconstruir el DTO desde formData (los campos vienen como strings)
-    const dto: CreateOrderGatewayDto = {
-      order_type_id: Number(formData.order_type_id),
-      order_priority_id: Number(formData.order_priority_id),
-      customer_id: Number(formData.customer_id),
-      technician_ids: JSON.parse(formData.technician_ids), // el front envía JSON.stringify([...])
-      detalleIngreso: formData.detalleIngreso,
-      revisadoAntes: formData.revisadoAntes === 'true',
-      device_id: formData.device_id ? Number(formData.device_id) : undefined,
-      previous_order_id: formData.previous_order_id ? Number(formData.previous_order_id) : undefined,
-      patron: formData.patron,
-      password: formData.password,
-      estimated_price: formData.estimated_price ? Number(formData.estimated_price) : undefined,
-    };
-
-    const formattedFiles = files.map(f => ({
-      buffer: f.buffer.toString('base64'),
-      originalname: f.originalname,
-      mimetype: f.mimetype,
-      size: f.size,
-    }));
-
-    return firstValueFrom(
-      this.CustomerService.send(
-        { cmd: 'create_order' },
-        {
-          internalToken: process.env.INTERNAL_SECRET,
-          dto,
-          files: formattedFiles, // ← nuevo
-          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
-        },
-      ),
-    );
-  }
 
   @Post('list')
   async listOrders(@Body() dto: ListOrdersGatewayDto, @User() user: any) {
@@ -600,6 +602,20 @@ export class OrdersController {
             companyId: user.companyId,
             branchId: user.branchId,
           },
+        },
+      ),
+    );
+  }
+
+  @Get('public/:publicId')
+  @Public()
+  async getOrderPublicData(@Param() params: GetOrderPublicDataGatewayDto) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_order_public_data' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          publicId: params.publicId
         },
       ),
     );

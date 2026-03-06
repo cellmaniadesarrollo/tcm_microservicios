@@ -118,4 +118,10 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.getLastOrdersByDevice(data.deviceId, data.user);
   }
+
+
+  @MessagePattern({ cmd: 'get_order_public_data' })
+  async getOrderPublicData(@Payload() data: { publicId: string }) {
+    return this.orderWorkflowService.getOrderPublicData(data.publicId);
+  }
 }

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { GROUPS_KEY } from '../decorators/groups.decorator';
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 /**
  * =====================================================
  * GROUPS GUARD – REGLAS DE AUTORIZACIÓN POR GRUPOS
@@ -96,15 +97,19 @@ export class GroupsGuard implements CanActivate {
   constructor(private reflector: Reflector) { }
 
   canActivate(context: ExecutionContext): boolean {
+    // 👇 agregar esto al inicio
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
     const requiredGroups = this.reflector.getAllAndOverride<string[]>(
       GROUPS_KEY,
       [context.getHandler(), context.getClass()],
     );
 
-    // ✅ 1. Sin decorador → ruta pública
-    if (!requiredGroups || requiredGroups.length === 0) {
-      return true;
-    }
+    if (!requiredGroups || requiredGroups.length === 0) return true;
 
     const request = context.switchToHttp().getRequest();
     const user = request.user;
@@ -113,26 +118,15 @@ export class GroupsGuard implements CanActivate {
       throw new ForbiddenException('No tiene grupos asignados');
     }
 
-    // ✅ 2. Grupos con acceso total
     const SUPER_GROUPS = ['COMPANY_ADMIN', 'ADMINS'];
+    const isSuperUser = user.groups.some(group => SUPER_GROUPS.includes(group));
+    if (isSuperUser) return true;
 
-    // Si es admin → pasa siempre
-    const isSuperUser = user.groups.some(group =>
-      SUPER_GROUPS.includes(group),
-    );
-
-    if (isSuperUser) {
-      return true;
-    }
-
-    // ✅ 3. Validar grupos específicos del decorador
     const hasRequiredGroup = requiredGroups.some(group =>
       user.groups.includes(group),
     );
 
-    if (!hasRequiredGroup) {
-      throw new ForbiddenException('No tiene permisos');
-    }
+    if (!hasRequiredGroup) throw new ForbiddenException('No tiene permisos');
 
     return true;
   }

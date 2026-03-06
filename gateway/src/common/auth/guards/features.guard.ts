@@ -6,7 +6,8 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { FEATURES_KEY } from '../decorators/features.decorator';
- 
+import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+
 /**
  * =====================================================
  * FEATURES GUARD – CONTROL DE ACCESO POR PLAN / FEATURES
@@ -64,23 +65,24 @@ import { FEATURES_KEY } from '../decorators/features.decorator';
  * =====================================================
  */
 
-
 @Injectable()
 export class FeaturesGuard implements CanActivate {
-  constructor(private reflector: Reflector) {}
+  constructor(private reflector: Reflector) { }
 
   canActivate(context: ExecutionContext): boolean {
+    // 👇 agregar esto al inicio
+    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (isPublic) return true;
+
     const requiredFeatures = this.reflector.getAllAndOverride<string[]>(
       FEATURES_KEY,
       [context.getHandler(), context.getClass()],
     );
 
-    /**
-     * 1️⃣ Sin decorador → no se valida feature
-     */
-    if (requiredFeatures === undefined) {
-      return true;
-    }
+    if (requiredFeatures === undefined) return true;
 
     const request = context.switchToHttp().getRequest();
     const user = request.user;
@@ -89,33 +91,20 @@ export class FeaturesGuard implements CanActivate {
       throw new ForbiddenException('No tiene features asignadas');
     }
 
-    /**
-     * 2️⃣ Decorador vacío → solo "all"
-     */
     if (requiredFeatures.length === 0) {
       if (!user.features.includes('all')) {
-        throw new ForbiddenException(
-          'Feature no habilitada para su plan',
-        );
+        throw new ForbiddenException('Feature no habilitada para su plan');
       }
       return true;
     }
 
-    /**
-     * 3️⃣ Feature requerida o "all"
-     */
     const hasFeature =
       user.features.includes('all') ||
-      requiredFeatures.some(f =>
-        user.features.includes(f),
-      );
+      requiredFeatures.some(f => user.features.includes(f));
 
-    if (!hasFeature) {
-      throw new ForbiddenException(
-        'Feature no habilitada para su plan',
-      );
-    }
+    if (!hasFeature) throw new ForbiddenException('Feature no habilitada para su plan');
 
     return true;
   }
 }
+

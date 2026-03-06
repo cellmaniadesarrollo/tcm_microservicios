@@ -860,5 +860,177 @@ export class OrderWorkflowService {
       take: 5,
     });
   }
+  async getOrderPublicData(publicId: string) {
+    try {
+      const order = await this.orderRepo
+        .createQueryBuilder('order')
+        .leftJoinAndSelect('order.company', 'company')
+        .leftJoinAndSelect('order.branch', 'branch')
+        .leftJoinAndSelect('order.customer', 'customer')
+        .leftJoinAndSelect('customer.contacts', 'contacts')
+        .leftJoinAndSelect('order.device', 'device')
+        .leftJoinAndSelect('device.imeis', 'imeis')
+        .leftJoinAndSelect('device.model', 'model')
+        .leftJoinAndSelect('device.type', 'deviceType')
+        .leftJoinAndSelect('order.type', 'type')
+        .leftJoinAndSelect('order.priority', 'priority')
+        .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+        .leftJoinAndSelect('order.payments', 'payments')
+        .leftJoinAndSelect('payments.paymentType', 'paymentType')
+        .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
+        .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', {
+          findingActive: true,
+        })
+        .leftJoinAndSelect('findings.procedures', 'procedures',
+          'procedures.is_active = :procActive AND procedures.is_public = :procPublic',
+          { procActive: true, procPublic: true },
+        )
+        .where('order.public_id = :publicId', { publicId })
+        .orderBy('findings.createdAt', 'ASC')
+        .addOrderBy('payments.paid_at', 'ASC')
+        .getOne();
 
+      if (!order) {
+        throw new RpcException(
+          new NotFoundException('Orden no encontrada'),
+        );
+      }
+
+      order.findings?.forEach((finding) => {
+        finding.procedures?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+      });
+
+      // ─── CARGA DE ATTACHMENTS (solo is_public = true) ────────────────────────
+
+      const findingIds = order.findings?.map((f) => f.id) ?? [];
+      const procedureIds = order.findings?.flatMap((f) => f.procedures?.map((p) => p.id) ?? []) ?? [];
+
+      const whereConditions: any[] = [
+        { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true, is_public: true },
+      ];
+
+      if (findingIds.length) {
+        whereConditions.push({
+          entity_type: AttachmentEntityType.FINDING,
+          entity_id: In(findingIds),
+          is_active: true,
+          is_public: true,
+        });
+      }
+
+      if (procedureIds.length) {
+        whereConditions.push({
+          entity_type: AttachmentEntityType.PROCEDURE,
+          entity_id: In(procedureIds),
+          is_active: true,
+          is_public: true,
+        });
+      }
+
+      const allAttachments = await this.attachmentRepository.find({
+        where: whereConditions,
+        order: { createdAt: 'ASC' },
+      });
+
+      // ─── MAPA DE ATTACHMENTS ─────────────────────────────────────────────────
+
+      const attachmentsMap = new Map<string, Attachment[]>();
+      allAttachments.forEach((att) => {
+        const key = `${att.entity_type}_${att.entity_id}`;
+        if (!attachmentsMap.has(key)) attachmentsMap.set(key, []);
+        attachmentsMap.get(key)!.push(att);
+      });
+
+      (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) ?? [];
+
+      order.findings?.forEach((finding) => {
+        finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) ?? [];
+        finding.procedures?.forEach((proc) => {
+          proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) ?? [];
+        });
+      });
+
+      // ─── FIRMADO DE URLs ─────────────────────────────────────────────────────
+      await this.enrichAttachmentsWithSignedUrls(order);
+
+      // ─── MAPEO A DTO PÚBLICO ─────────────────────────────────────────────────
+      const primaryContact = order.customer?.contacts?.find((c) => c.isPrimary);
+
+      return {
+        public_id: order.public_id,
+        order_number: order.order_number,
+        entry_date: order.entry_date,
+        status: order.currentStatus?.name,
+        type: order.type?.name,
+        priority: order.priority?.name,
+        detail: order.detalleIngreso,
+        estimated_price: order.estimated_price,
+
+        company: {
+          name: order.company?.name,
+          branch: order.branch?.name,
+          address: order.branch?.address,
+        },
+
+        customer: {
+          name: `${order.customer?.firstName} ${order.customer?.lastName}`,
+          contact: primaryContact?.value ?? null,
+        },
+
+        device: {
+          model: order.device?.model?.models_name,
+          image_url: order.device?.model?.models_img_url,
+          type: order.device?.type?.name,
+          color: order.device?.color,
+          storage: order.device?.storage,
+          serial: order.device?.serial_number,
+          imei: order.device?.imeis?.[0]?.imei_number ?? null,
+        },
+
+        findings: order.findings?.map((finding) => ({
+          description: finding.description,
+          is_resolved: finding.is_resolved,
+          attachments: (finding.attachments ?? []).map((a) => ({
+            file_name: a.file_name,
+            file_url: a.file_url,
+            file_type: a.file_type,
+          })),
+          procedures: finding.procedures?.map((proc) => ({
+            description: proc.description,
+            was_solved: proc.was_solved,
+            warranty_days: proc.warranty_days,
+            client_approved: proc.client_approved,
+            attachments: (proc.attachments ?? []).map((a) => ({
+              file_name: a.file_name,
+              file_url: a.file_url,
+              file_type: a.file_type,
+            })),
+          })) ?? [],
+        })) ?? [],
+
+        payments: order.payments?.map((p) => ({
+          amount: p.amount,
+          type: p.paymentType?.name,
+          method: p.paymentMethod?.name,
+          paid_at: p.paid_at,
+          reference: p.reference,
+        })) ?? [],
+
+        attachments: ((order as any).attachments ?? []).map((a: Attachment) => ({
+          file_name: a.file_name,
+          file_url: a.file_url,
+          file_type: a.file_type,
+        })),
+      };
+
+    } catch (error) {
+      if (!(error instanceof RpcException)) {
+        console.error('Error inesperado en getOrderPublicData:', error);
+        throw new RpcException(
+          new InternalServerErrorException('Error interno al obtener datos públicos de la orden'),
+        );
+      }
+      throw error;
+    }
+  }
 }
