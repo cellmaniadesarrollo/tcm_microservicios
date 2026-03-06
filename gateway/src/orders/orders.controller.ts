@@ -36,6 +36,7 @@ import { UpdateOrderFindingGatewayDto } from './dto/update-order-finding-gateway
 import { UploadAttachmentGatewayDto } from './dto/upload-attachment.gateway.dto';
 import { CreateOrderPaymentGatewayDto } from './dto/create-order-payment-gateway.dto';
 import { CloseOrderGatewayDto } from './dto/close-order-gateway.dto';
+import { GetLastOrdersByDeviceGatewayDto } from './dto/get-last-orders-by-device-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -578,6 +579,27 @@ export class OrdersController {
         { cmd: 'get_payment_catalogs' },
         {
           internalToken: process.env.INTERNAL_SECRET,
+        },
+      ),
+    );
+  }
+  @Get('by-device/:deviceId/last')
+  @Groups('TECHNICIANS', 'CASHIERS') // ajusta según tu sistema
+  async getLastOrdersByDevice(
+    @Param() { deviceId }: GetLastOrdersByDeviceGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_last_orders_by_device' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          deviceId: Number(deviceId),
+          user: {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+          },
         },
       ),
     );

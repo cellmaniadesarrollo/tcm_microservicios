@@ -237,7 +237,6 @@ export class OrderWorkflowService {
     };
   }
 
-
   async listMyOrders(
     user: { companyId: string; branchId: string; userId: string },
     dto: any,
@@ -440,6 +439,7 @@ export class OrderWorkflowService {
       throw error;
     }
   }
+
   private async enrichAttachmentsWithSignedUrls(order: Order) {
     const promises: Promise<void>[] = [];
 
@@ -835,4 +835,30 @@ export class OrderWorkflowService {
       order: { name: 'ASC' },
     });
   }
+
+  async getLastOrdersByDevice(
+    deviceId: number,
+    user: { companyId: string },
+  ): Promise<Order[]> {
+    const device = await this.deviceRepo.findOne({
+      where: { device_id: deviceId, company_id: user.companyId },
+    });
+
+    if (!device) {
+      throw new RpcException(
+        new NotFoundException('Dispositivo no encontrado o no pertenece a la empresa'),
+      );
+    }
+
+    return this.orderRepo.find({
+      where: {
+        device_id: deviceId,
+        company_id: user.companyId,
+      },
+      relations: ['currentStatus', 'priority', 'type', 'technicians'],
+      order: { createdAt: 'DESC' },
+      take: 5,
+    });
+  }
+
 }

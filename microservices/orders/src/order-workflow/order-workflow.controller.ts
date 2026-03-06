@@ -111,4 +111,11 @@ export class OrderWorkflowController {
 
     return { paymentTypes: types, paymentMethods: methods };
   }
+  @MessagePattern({ cmd: 'get_last_orders_by_device' })
+  async getLastOrdersByDevice(data: {
+    deviceId: number;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.getLastOrdersByDevice(data.deviceId, data.user);
+  }
 }
