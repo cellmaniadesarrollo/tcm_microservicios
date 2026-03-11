@@ -106,29 +106,29 @@ export class OrderFindingsService {
     await this.procedureRepository.save(procedure);
 
     // 🔥 AUTO-ASIGNACIÓN DE TÉCNICO A LA ORDEN
-    if (dto.procedure_cost && dto.procedure_cost > 4) {
-      const orderId = finding.order_id;
-      const technicianId = user.userId;
+    //if (dto.procedure_cost && dto.procedure_cost > 4) {
+    const orderId = finding.order_id;
+    const technicianId = user.userId;
 
-      // Verificar si YA está asignado (evita duplicados)
-      const yaEstaAsignado = await this.orderRepository
-        .createQueryBuilder('o')
-        .innerJoin('o.technicians', 't')
-        .where('o.id = :orderId', { orderId })
-        .andWhere('t.id = :technicianId', { technicianId })
-        .getCount();
+    // Verificar si YA está asignado (evita duplicados)
+    const yaEstaAsignado = await this.orderRepository
+      .createQueryBuilder('o')
+      .innerJoin('o.technicians', 't')
+      .where('o.id = :orderId', { orderId })
+      .andWhere('t.id = :technicianId', { technicianId })
+      .getCount();
 
-      if (yaEstaAsignado === 0) {
-        // ← Aquí se agrega la fila en la tabla order_technicians
-        await this.orderRepository
-          .createQueryBuilder()
-          .relation(Order, 'technicians')
-          .of(orderId)
-          .add(technicianId);
-
-        console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId} (procedure_cost > 4)`);
-      }
+    if (yaEstaAsignado === 0) {
+      // ← Aquí se agrega la fila en la tabla order_technicians
+      await this.orderRepository
+        .createQueryBuilder()
+        .relation(Order, 'technicians')
+        .of(orderId)
+        .add(technicianId);
+      console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId}`);
+      //console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId} (procedure_cost > 4)`);
     }
+    // }
 
     return {
       success: true,
