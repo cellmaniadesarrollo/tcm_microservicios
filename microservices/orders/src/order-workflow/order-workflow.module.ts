@@ -13,10 +13,12 @@ import { OrderPayment } from './entities/order-payment.entity';
 import { PaymentCatalogSeederService } from './payment-catalog-seeder.service';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { Attachment } from '../order-findings/entities/attachment.entity';
+import { OrderNote } from './entities/order-note.entity';
+import { OrderNoteLog } from './entities/order-note-log.entity';
 
 @Module({
   imports: [AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
-    OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment, Attachment])],
+    OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment, Attachment, OrderNote, OrderNoteLog])],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService],
 })

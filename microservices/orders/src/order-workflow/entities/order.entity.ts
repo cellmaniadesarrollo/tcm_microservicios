@@ -27,11 +27,16 @@ import { OrderFinding } from '../../order-findings/entities/order-finding.entity
 import { OrderDelivery } from './order-delivery.entity';
 import { OrderPayment } from './order-payment.entity';
 import { Attachment } from '../../order-findings/entities/attachment.entity';
+import { OrderNote } from './order-note.entity';
 
 @Entity('orders')
 @Index(['company_id', 'order_number'], { unique: true }) // 🔐 único por empresa
 @Index(['public_id'], { unique: true })
 export class Order {
+  @OneToMany(() => OrderNote, (note) => note.order, {
+    cascade: true,
+  })
+  notes: OrderNote[];
   @OneToOne(() => OrderDelivery, (delivery) => delivery.order, { nullable: true })
   delivery?: OrderDelivery;
   @OneToMany(() => OrderFinding, finding => finding.order)

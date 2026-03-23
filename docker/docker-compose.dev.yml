@@ -1,24 +1,54 @@
-version: '3.8'  # Recomendado para usar condition: service_healthy
+name: teamcellmania-backend-dev
+
+version: '3.8'
 
 services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
     ports:
-      - "5672:5672"     # AMQP
-      - "15672:15672"   # Management UI
+      - "5672:5672"
+      - "15672:15672"
     networks:
       - backend
-    healthcheck:  # ← Esto es clave para que los demás esperen
+    healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s   # Dale tiempo inicial para que inicie todo
+      start_period: 30s
 
-  # ============================
-  # GATEWAY (con WATCH por default comentado)
-  # ============================
+  kafka:
+    image: apache/kafka:3.8.0          # o :latest si prefieres, pero pinnea para reproducibilidad
+    container_name: kafka
+    ports:
+      - "9092:9092"   # Interno para otros contenedores
+      - "9094:9094"   # Externo para herramientas locales (Conduktor, Kafka UI, etc.)
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_LOG_RETENTION_HOURS: 168   # 7 días, ajusta si necesitas
+    volumes:
+      - kafka_data:/bitnami/kafka   # ← Cambia el path si quieres, pero funciona
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
   gateway:
     build:
       context: ../gateway
@@ -30,8 +60,7 @@ services:
     volumes:
       - ../gateway:/app
       - /app/node_modules
-    command: ["npm", "run", "start:dev"]   # WATCH (hot-reload) - descomenta si lo necesitas
-    #command: ["npm", "run", "start"]         # SIN watch (más estable)
+    command: ["npm", "run", "start:dev"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -42,11 +71,8 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy           # ← Espera a que RabbitMQ esté healthy
+        condition: service_healthy
 
-  # ============================
-  # USERS (SIN WATCH por default)
-  # ============================
   users:
     build:
       context: ../microservices/users
@@ -56,8 +82,7 @@ services:
       - ../microservices/users:/app
       - /app/node_modules
     restart: always
-    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si quieres hot-reload
-    command: ["npm", "run", "start"]         # SIN watch (recomendado para evitar EIO)
+    command: ["npm", "run", "start"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -73,9 +98,6 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # ============================
-  # ORDERS (con WATCH comentado)
-  # ============================
   orders:
     build:
       context: ../microservices/orders
@@ -85,8 +107,7 @@ services:
     volumes:
       - ../microservices/orders:/app
       - /app/node_modules
-    command: ["npm", "run", "start:dev"]   # WATCH - descomenta si lo necesitas
-    #command: ["npm", "run", "start"]         # SIN watch
+    command: ["npm", "run", "start:dev"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -105,15 +126,16 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      # Descomenta cuando empieces con eventos de caja
+      # - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
     networks:
       - backend
     depends_on:
       rabbitmq:
         condition: service_healthy
+      # kafka:
+      #   condition: service_healthy   # ← activa cuando orders use Kafka
 
-  # ============================
-  # CLIENTS
-  # ============================
   clients:
     build:
       context: ../microservices/clients
@@ -123,7 +145,6 @@ services:
     volumes:
       - ../microservices/clients:/app
       - /app/node_modules
-    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si quieres
     command: ["npm", "run", "start"]
     environment:
       - NODE_ENV=development
@@ -140,9 +161,6 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # ============================
-  # COMPANIES
-  # ============================
   companies:
     build:
       context: ../microservices/companies
@@ -152,7 +170,6 @@ services:
     volumes:
       - ../microservices/companies:/app
       - /app/node_modules
-    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si lo necesitas
     command: ["npm", "run", "start"]
     environment:
       - NODE_ENV=development
@@ -169,9 +186,6 @@ services:
       rabbitmq:
         condition: service_healthy
 
-  # ============================
-  # SUBSCRIPTIONS
-  # ============================
   subscriptions:
     build:
       context: ../microservices/subscriptions
@@ -181,7 +195,6 @@ services:
     volumes:
       - ../microservices/subscriptions:/app
       - /app/node_modules
-    # command: ["npm", "run", "start:dev"]   # WATCH - descomenta si quieres hot-reload
     command: ["npm", "run", "start"]
     environment:
       - NODE_ENV=development
@@ -200,3 +213,6 @@ services:
 
 networks:
   backend:
+
+volumes:
+  kafka_data:

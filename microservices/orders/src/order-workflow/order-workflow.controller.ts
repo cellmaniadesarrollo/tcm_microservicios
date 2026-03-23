@@ -8,6 +8,8 @@ import { ChangeOrderStatusDto } from './dto/change-order-status.dto';
 import { CreateOrderPaymentDto } from './dto/create-order-payment.dto';
 import { CloseOrderDto } from '../order-findings/dto/close-order.dto';
 import { OrderDelivery } from './entities/order-delivery.entity';
+import { CreateOrderNoteDto } from './dto/create-order-note.dto';
+import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
@@ -123,5 +125,29 @@ export class OrderWorkflowController {
   @MessagePattern({ cmd: 'get_order_public_data' })
   async getOrderPublicData(@Payload() data: { publicId: string }) {
     return this.orderWorkflowService.getOrderPublicData(data.publicId);
+  }
+  @MessagePattern({ cmd: 'create_order_note' })
+  async createOrderNote(data: {
+    dto: CreateOrderNoteDto;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    console.log(data)
+    return this.orderWorkflowService.createOrderNote(data.dto, data.user);
+  }
+
+  @MessagePattern({ cmd: 'delete_order_note' })
+  async deleteOrderNote(data: {
+    dto: { note_id: number };
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.deleteOrderNote(data.dto.note_id, data.user);
+  }
+  @MessagePattern({ cmd: 'update_order_note' })
+  async updateOrderNote(data: {
+    noteId: number;
+    dto: UpdateOrderNoteDto;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.updateOrderNote(data.noteId, data.dto, data.user);
   }
 }

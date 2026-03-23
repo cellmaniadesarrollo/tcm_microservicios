@@ -11,24 +11,24 @@ export class UsersEmployeesEventsController {
     ) { }
     async onModuleInit() {
         try {
-            const timestamps = await this.cacheService.getLastUpdatedAt(); 
+            const timestamps = await this.cacheService.getLastUpdatedAt();
             const response = await firstValueFrom(
                 this.customerClient.send(
-                    { cmd: 'async_users_start' }, 
+                    { cmd: 'async_users_start' },
                     {
                         internalToken: process.env.INTERNAL_SECRET,
                         fromCache: timestamps,
                     }
                 )
-            );  
-           // console.log(JSON.stringify(response , null, 2));
+            );
+            // console.log(JSON.stringify(response , null, 2));
             await this.cacheService.syncUsersEmployeesBulk(response)
         } catch (err) {
             console.error('❌ Error solicitando sincronización inicial :', err);
         }
-    } 
-        @MessagePattern({cmd: 'get_technicians'})
-        async list(@Payload() data: any) {  
-            return  this.cacheService.findTechnicians(data.user);
-        }
+    }
+    @MessagePattern({ cmd: 'get_technicians' })
+    async list(@Payload() data: any) {
+        return this.cacheService.findTechniciansByOrderType(data.user, data.orderTypeId);
+    }
 }

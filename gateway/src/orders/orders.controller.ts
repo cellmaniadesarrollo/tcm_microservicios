@@ -9,6 +9,7 @@ import {
   Patch,
   Post,
   UseInterceptors, Req,
+  ParseIntPipe,
 } from '@nestjs/common';
 
 import { UploadedFiles } from '@nestjs/common';
@@ -39,6 +40,9 @@ import { CloseOrderGatewayDto } from './dto/close-order-gateway.dto';
 import { GetLastOrdersByDeviceGatewayDto } from './dto/get-last-orders-by-device-gateway.dto';
 import { Public } from '../common/auth/decorators/public.decorator';
 import { GetOrderPublicDataGatewayDto } from './dto/get-order-public-data-gateway.dto';
+import { GetTechniciansDto } from './dto/get-technicians.dto';
+import { CreateOrderNoteGatewayDto } from './dto/create-order-note-gateway.dto';
+import { UpdateOrderNoteGatewayDto } from './dto/update-order-note-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -112,14 +116,18 @@ export class OrdersController {
       ),
     );
   }
-  @Get('technicians')
-  async getTechnicians(@User() user: any) {
+  @Get('technicians/:orderTypeId')
+  async getTechnicians(
+    @User() user: any,
+    @Param() { orderTypeId }: GetTechniciansDto,
+  ) {
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'get_technicians' },
         {
           internalToken: process.env.INTERNAL_SECRET,
           user,
+          orderTypeId,
         },
       ),
     );
@@ -616,6 +624,58 @@ export class OrdersController {
         {
           internalToken: process.env.INTERNAL_SECRET,
           publicId: params.publicId
+        },
+      ),
+    );
+  }
+
+  @Post('notes/create')
+  async createOrderNote(
+    @Body() dto: CreateOrderNoteGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'create_order_note' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto,
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
+
+  @Delete('notes/:noteId')
+  async deleteOrderNote(
+    @Param('noteId', ParseIntPipe) noteId: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'delete_order_note' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto: { note_id: noteId },
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
+  @Patch('notes/:noteId')
+  async updateOrderNote(
+    @Param('noteId', ParseIntPipe) noteId: number,
+    @Body() dto: UpdateOrderNoteGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'update_order_note' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          noteId,
+          dto,
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
       ),
     );

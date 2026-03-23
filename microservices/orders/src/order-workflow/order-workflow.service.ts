@@ -26,6 +26,10 @@ import { OrderDelivery } from './entities/order-delivery.entity';
 import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { Attachment, AttachmentEntityType } from '../order-findings/entities/attachment.entity';
 import { v4 as uuidv4 } from 'uuid';
+import { OrderNote } from './entities/order-note.entity';
+import { CreateOrderNoteDto } from './dto/create-order-note.dto';
+import { NoteLogAction, OrderNoteLog } from './entities/order-note-log.entity';
+import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -51,6 +55,11 @@ export class OrderWorkflowService {
 
     @InjectRepository(PaymentMethod)
     private readonly paymentMethodRepository: Repository<PaymentMethod>,
+
+    @InjectRepository(OrderNote)
+    private readonly orderNoteRepository: Repository<OrderNote>,
+    @InjectRepository(OrderNoteLog)
+    private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
   ) { }
 
 
@@ -72,8 +81,14 @@ export class OrderWorkflowService {
         throw new Error('Uno o más técnicos no pertenecen a la empresa');
       }
 
-      // 🔒 Validar device
-      if (dto.device_id) {
+      // ── Identificar si es PERSONALIZADO por nombre (robusto entre entornos) ──
+      const PERSONALIZADO_NOMBRE = 'PERSONALIZADO';
+      const isPersonalizado = String(dto.order_type_id)
+        .trim()
+        .toUpperCase() === PERSONALIZADO_NOMBRE.toUpperCase();
+
+      // 🔒 Validar device SOLO si NO es personalizado y se envió uno
+      if (!isPersonalizado && dto.device_id) {
         const device = await manager.findOne(Device, {
           where: {
             device_id: dto.device_id,
@@ -90,7 +105,8 @@ export class OrderWorkflowService {
       const initialStatus = await manager.findOneOrFail(OrderStatus, {
         where: { name: 'INGRESADO' },
       });
-      // 🔢 obtener último número por empresa
+
+      // 🔢 Obtener último número por empresa
       const result = await manager
         .createQueryBuilder(Order, 'o')
         .select('MAX(o.order_number)', 'max')
@@ -98,20 +114,30 @@ export class OrderWorkflowService {
         .getRawOne();
 
       const nextOrderNumber = (result?.max ?? 0) + 1;
-      // 🧠 Crear orden
+
+      // ── Preparar detalleIngreso con fallback para personalizados ─────────────
+      const detalleIngresoFinal = dto.detalleIngreso?.trim()
+        ? dto.detalleIngreso.trim()
+        : isPersonalizado
+          ? 'Estuche personalizado'
+          : (dto.detalleIngreso || '');
+
+      // 🧠 Crear orden con campos condicionales
       const order = manager.create(Order, {
         public_id: uuidv4(),
         order_number: nextOrderNumber,
         order_type_id: dto.order_type_id,
         order_priority_id: dto.order_priority_id,
         customer_id: dto.customer_id,
-        device_id: dto.device_id ?? undefined,
-        previous_order_id: dto.previous_order_id ?? undefined,
 
-        patron: dto.patron,
-        password: dto.password,
-        revisadoAntes: dto.revisadoAntes,
-        detalleIngreso: dto.detalleIngreso,
+        // Campos forzados/limpiados según tipo
+        device_id: isPersonalizado ? undefined : (dto.device_id ?? undefined),
+        patron: isPersonalizado ? undefined : dto.patron,
+        password: isPersonalizado ? undefined : dto.password,
+        revisadoAntes: isPersonalizado ? false : dto.revisadoAntes,
+        detalleIngreso: detalleIngresoFinal,
+
+        previous_order_id: dto.previous_order_id ?? undefined,
 
         company_id: user.companyId,
         branch_id: user.branchId,
@@ -121,27 +147,31 @@ export class OrderWorkflowService {
         technicians,
       });
 
-      // ✅ 1️⃣ GUARDAR ORDEN (AQUÍ NACE EL ID)
+      // ✅ 1️⃣ GUARDAR ORDEN (aquí nace el ID)
       const savedOrder = await manager.save(order);
 
-      // 🧾 2️⃣ GUARDAR HISTORIAL
+      // 🧾 2️⃣ GUARDAR HISTORIAL DE ESTADO
       await manager.save(OrderStatusHistory, {
-        order_id: savedOrder.id, // ✅ YA EXISTE
+        order_id: savedOrder.id,
         to_status_id: initialStatus.id,
         changed_by_id: user.userId,
-
         company_id: user.companyId,
         branch_id: user.branchId,
-
         observation: 'CREACIÓN DE ORDEN',
       });
 
+      // 📎 Adjuntos (subida a S3)
       const attachments: Attachment[] = [];
 
       for (const file of files) {
         const buffer = Buffer.from(file.buffer, 'base64');
         const prefix = `order/${savedOrder.id}/`;
-        const url = await this.awsS3Service.uploadBuffer(buffer, file.originalname, file.mimetype, prefix);
+        const url = await this.awsS3Service.uploadBuffer(
+          buffer,
+          file.originalname,
+          file.mimetype,
+          prefix,
+        );
 
         const attachment = manager.create(Attachment, {
           entity_type: AttachmentEntityType.ORDER,
@@ -156,6 +186,7 @@ export class OrderWorkflowService {
         attachments.push(await manager.save(attachment));
       }
 
+      // Retornar la orden guardada + adjuntos
       return { ...savedOrder, attachments };
     });
   }
@@ -334,6 +365,12 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.currentStatus', 'currentStatus')
         .leftJoinAndSelect('order.createdBy', 'createdBy')
         .leftJoinAndSelect('order.technicians', 'technicians')
+        // ─── NOTAS ──────────────────────────────────────────────
+        .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', {
+          deleted: false,
+        })
+        .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
+        // ────────────────────────────────────────────────────────
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
@@ -351,7 +388,6 @@ export class OrderWorkflowService {
         .orderBy('findings.createdAt', 'ASC')
         .addOrderBy('payments.paid_at', 'ASC')
         .getOne();
-
       if (!order) {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
       }
@@ -423,6 +459,10 @@ export class OrderWorkflowService {
           proc.attachments = attachmentsMap.get(procKey) || [];
         });
       });
+
+
+
+      order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       // ─── FIRMADO DE URLs ─────────────────────────────────────────────────────
       await this.enrichAttachmentsWithSignedUrls(order);
@@ -875,6 +915,15 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.type', 'type')
         .leftJoinAndSelect('order.priority', 'priority')
         .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+        // ─── NOTAS PÚBLICAS ──────────────────────────────────────────────────
+        .leftJoinAndSelect(
+          'order.notes',
+          'notes',
+          'notes.isDeleted = :deleted AND notes.is_public = :notesPublic',
+          { deleted: false, notesPublic: true },
+        )
+        .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
+        // ────────────────────────────────────────────────────────────────────
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
@@ -888,8 +937,8 @@ export class OrderWorkflowService {
         .where('order.public_id = :publicId', { publicId })
         .orderBy('findings.createdAt', 'ASC')
         .addOrderBy('payments.paid_at', 'ASC')
+        .addOrderBy('notes.createdAt', 'ASC') // ← ordenar notas también
         .getOne();
-
       if (!order) {
         throw new RpcException(
           new NotFoundException('Orden no encontrada'),
@@ -1021,6 +1070,10 @@ export class OrderWorkflowService {
           file_url: a.file_url,
           file_type: a.file_type,
         })),
+        notes: order.notes?.map((n) => ({
+          note: n.note,
+          createdAt: n.createdAt,
+        })) ?? [],
       };
 
     } catch (error) {
@@ -1032,5 +1085,141 @@ export class OrderWorkflowService {
       }
       throw error;
     }
+  }
+
+
+  async createOrderNote(
+    dto: CreateOrderNoteDto,
+    user: { userId: string; companyId: string; branchId: string },
+  ) {
+    const order = await this.orderRepo.findOne({
+      where: {
+        id: dto.order_id,
+        company_id: user.companyId,
+      },
+    });
+
+    if (!order) {
+      throw new RpcException(
+        new NotFoundException('Orden no encontrada o no pertenece a la empresa'),
+      );
+    }
+
+    const note = this.orderNoteRepository.create({
+      order_id: dto.order_id,
+      created_by_id: user.userId,
+      note: dto.note,
+      is_public: dto.is_public ?? false,
+    });
+
+    const savedNote = await this.orderNoteRepository.save(note);
+
+    await this.orderNoteLogRepository.save(
+      this.orderNoteLogRepository.create({
+        note_id: savedNote.id,
+        changed_by_id: user.userId,
+        action: NoteLogAction.CREATED,
+        previous_note: null,
+        new_note: savedNote.note,
+        previous_is_public: null,
+        new_is_public: savedNote.is_public,
+      }),
+    );
+
+    return savedNote;
+  }
+
+  async deleteOrderNote(
+    noteId: number,
+    user: { userId: string; companyId: string; branchId: string },
+  ) {
+    const note = await this.orderNoteRepository.findOne({
+      where: { id: noteId, isDeleted: false },
+      relations: ['order'],
+    });
+
+    if (!note) {
+      throw new RpcException(
+        new NotFoundException('Nota no encontrada'),
+      );
+    }
+
+    if (note.order.company_id !== user.companyId) {
+      throw new RpcException(
+        new ForbiddenException('No tienes permiso para eliminar esta nota'),
+      );
+    }
+
+    note.isDeleted = true;
+    note.deletedAt = new Date();
+
+    const [deletedNote] = await Promise.all([
+      this.orderNoteRepository.save(note),
+      this.orderNoteLogRepository.save(
+        this.orderNoteLogRepository.create({
+          note_id: note.id,
+          changed_by_id: user.userId,
+          action: NoteLogAction.DELETED,
+          previous_note: note.note,
+          new_note: null,
+          previous_is_public: note.is_public,
+          new_is_public: null,
+        }),
+      ),
+    ]);
+
+    return deletedNote;
+  }
+
+  async updateOrderNote(
+    noteId: number,
+    dto: UpdateOrderNoteDto,
+    user: { userId: string; companyId: string; branchId: string },
+  ) {
+    const note = await this.orderNoteRepository.findOne({
+      where: { id: noteId, isDeleted: false },
+      relations: ['order'],
+    });
+
+    if (!note) {
+      throw new RpcException(new NotFoundException('Nota no encontrada'));
+    }
+
+    if (note.order.company_id !== user.companyId) {
+      throw new RpcException(
+        new ForbiddenException('No tienes permiso para editar esta nota'),
+      );
+    }
+
+    // Detectar qué cambió para el log
+    const noteChanged = dto.note !== undefined && dto.note !== note.note;
+    const publicChanged = dto.is_public !== undefined && dto.is_public !== note.is_public;
+
+    // Si no cambió nada, retornar sin tocar nada
+    if (!noteChanged && !publicChanged) {
+      return note;
+    }
+
+    // Construir el log
+    const logEntry = this.orderNoteLogRepository.create({
+      note_id: note.id,
+      changed_by_id: user.userId,
+      action: NoteLogAction.UPDATED, // ← faltaba esto
+      previous_note: noteChanged ? note.note : null,
+      new_note: noteChanged ? dto.note : null,
+      previous_is_public: publicChanged ? note.is_public : null,
+      new_is_public: publicChanged ? dto.is_public : null,
+    });
+
+    // Aplicar cambios
+    if (noteChanged) note.note = dto.note!;
+    if (publicChanged) note.is_public = dto.is_public!;
+
+    const [updatedNote] = await Promise.all([
+      this.orderNoteRepository.save(note),
+      this.orderNoteLogRepository.save(logEntry),
+    ]);
+
+    return updatedNote;
   }
 }

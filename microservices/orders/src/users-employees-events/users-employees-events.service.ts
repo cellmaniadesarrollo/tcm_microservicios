@@ -3,6 +3,8 @@ import { UserEmployeeCache } from './entities/user_employee_cache.entity';
 import { GroupCache } from './entities/group_cache.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Not, IsNull, DataSource, In } from 'typeorm';
+import { ORDER_TYPE_GROUPS } from './constants/order-type-groups.map';
+import { RpcException } from '@nestjs/microservices';
 
 @Injectable()
 export class UsersEmployeesEventsService {
@@ -15,7 +17,7 @@ export class UsersEmployeesEventsService {
         private readonly dataSource: DataSource,
     ) { }
     async syncUser(user: any) {
-       // console.log(user);
+        // console.log(user);
 
         const isCompanyAdmin = !user.employee;
 
@@ -224,26 +226,24 @@ export class UsersEmployeesEventsService {
 
 
 
-async findTechnicians(user: any) {
-     
-  return await this.useremployeeCacheRepo
-    .createQueryBuilder('employee')
-    .innerJoin('employee.groups', 'group')
+    async findTechniciansByOrderType(user: any, orderTypeId: number) {
+        const groupNames = ORDER_TYPE_GROUPS[orderTypeId];
 
-    // 🔒 MULTI-TENANT: solo empleados de la empresa
-    .where('employee.company_id = :companyId', {
-      companyId: user.companyId,
-    })
+        if (!groupNames?.length) {
+            throw new RpcException(
+                `No hay grupos configurados para el tipo de orden: ${orderTypeId}`,
+            );
+        }
 
-    // 🎯 solo técnicos
-    .andWhere('group.group_name = :groupName', {
-      groupName: 'TECHNICIANS',
-    })
-
-    .select([
-      'employee.id AS id',
-      `CONCAT(employee.first_name, ' ', employee.last_name) AS name`,
-    ])
-    .getRawMany();
-}
+        return await this.useremployeeCacheRepo
+            .createQueryBuilder('employee')
+            .innerJoin('employee.groups', 'group')
+            .where('employee.company_id = :companyId', { companyId: user.companyId })
+            .andWhere('group.group_name IN (:...groupNames)', { groupNames }) // 👈 soporta array
+            .select([
+                'employee.id AS id',
+                `CONCAT(employee.first_name, ' ', employee.last_name) AS name`,
+            ])
+            .getRawMany();
+    }
 } 
