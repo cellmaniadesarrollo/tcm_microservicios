@@ -30,6 +30,7 @@ import { OrderNote } from './entities/order-note.entity';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 import { NoteLogAction, OrderNoteLog } from './entities/order-note-log.entity';
 import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -60,6 +61,7 @@ export class OrderWorkflowService {
     private readonly orderNoteRepository: Repository<OrderNote>,
     @InjectRepository(OrderNoteLog)
     private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
+    private readonly notificationsService: NotificationsService,
   ) { }
 
 
@@ -185,7 +187,7 @@ export class OrderWorkflowService {
 
         attachments.push(await manager.save(attachment));
       }
-
+      await this.notificationsService.emitOrderCreated({ ...savedOrder });
       // Retornar la orden guardada + adjuntos
       return { ...savedOrder, attachments };
     });

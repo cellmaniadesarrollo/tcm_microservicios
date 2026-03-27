@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+# Necesario para chokidar y polling
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY package*.json ./
+
+RUN npm install
+
+# Copiamos el código (el volume lo sobrescribirá)
+COPY . .
+
+EXPOSE 3002
+
+# Usamos start:dev como en orders
+CMD ["npm", "run", "start"]

@@ -15,9 +15,10 @@ import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { Attachment } from '../order-findings/entities/attachment.entity';
 import { OrderNote } from './entities/order-note.entity';
 import { OrderNoteLog } from './entities/order-note-log.entity';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
+  imports: [NotificationsModule, AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
     OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment, Attachment, OrderNote, OrderNoteLog])],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService],

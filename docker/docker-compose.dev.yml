@@ -6,6 +6,7 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
+    restart: always
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -21,6 +22,7 @@ services:
   kafka:
     image: apache/kafka:3.8.0          # o :latest si prefieres, pero pinnea para reproducibilidad
     container_name: kafka
+    restart: always
     ports:
       - "9092:9092"   # Interno para otros contenedores
       - "9094:9094"   # Externo para herramientas locales (Conduktor, Kafka UI, etc.)
@@ -60,7 +62,7 @@ services:
     volumes:
       - ../gateway:/app
       - /app/node_modules
-    command: ["npm", "run", "start:dev"]
+    command: ["npm", "run", "start"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -210,9 +212,51 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+  redis:
+    image: redis:7-alpine
+    container_name: redis-realtime
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
+  realtime:
+    build:
+      context: ../realtime
+      dockerfile: Dockerfile.dev
+    container_name: ms-realtime
+    restart: always
+    volumes:
+      - ../realtime:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - RABBIT_URL=${RABBIT_URL}
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "3002:3002"          # ← expuesto directamente
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
 networks:
   backend:
 
 volumes:
   kafka_data:
+  redis_data:
