@@ -16,11 +16,14 @@ import { Attachment } from '../order-findings/entities/attachment.entity';
 import { OrderNote } from './entities/order-note.entity';
 import { OrderNoteLog } from './entities/order-note-log.entity';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
 
 @Module({
-  imports: [NotificationsModule, AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
+  imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
     OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment, Attachment, OrderNote, OrderNoteLog])],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService],
+
+  exports: [OrderWorkflowService],
 })
 export class OrderWorkflowModule { }

@@ -1,9 +1,9 @@
+// src/sync/sync.gateway.ts
 import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
-  SubscribeMessage,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '../common/jwt/jwt.service';
@@ -19,40 +19,21 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
   constructor(private readonly jwtService: JwtService) { }
 
   async handleConnection(client: Socket) {
-    console.log('🔌 Nueva conexión intentada. Handshake:', {
-      query: client.handshake.query,
-      auth: client.handshake.auth,
-      headers: client.handshake.headers,
-    });
-
-    // Intentar obtener el token de varias formas (la más completa)
     let token: string | undefined;
 
-    // 1. Desde Authorization header (la más común en Postman)
+    // Extraer token de diferentes posibles ubicaciones
     const authHeader = client.handshake.headers.authorization as string;
     if (authHeader?.startsWith('Bearer ')) {
-      token = authHeader.substring(7); // quita "Bearer "
+      token = authHeader.substring(7);
     } else if (authHeader) {
       token = authHeader;
     }
 
-    // 2. Desde header "token" (Postman a veces lo envía así)
-    if (!token) {
-      token = client.handshake.headers.token as string;
-    }
-
-    // 3. Desde query parameter (?token=xxx)
-    if (!token) {
-      token = client.handshake.query.token as string;
-    }
-
-    // 4. Desde handshake.auth.token (para clientes reales)
-    if (!token) {
-      token = client.handshake.auth?.token as string;
-    }
+    if (!token) token = client.handshake.headers.token as string;
+    if (!token) token = client.handshake.query.token as string;
+    if (!token) token = client.handshake.auth?.token as string;
 
     if (!token) {
-      console.log('❌ No se recibió ningún token');
       client.emit('error', { message: 'Token requerido' });
       client.disconnect(true);
       return;
@@ -61,27 +42,44 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
     try {
       const payload = this.jwtService.verifyToken(token);
       client.data.user = payload;
-      console.log(`✅ Cliente conectado correctamente → User ID: ${payload.sub || payload.id}`);
-      client.emit('connection_success', { message: 'Conectado', user: payload });
+
+      // === MULTITENANT: Obtener company_id del token ===
+      const companyId = payload.company_id || payload.companyId;
+
+      if (!companyId) {
+        client.emit('error', { message: 'company_id no encontrado en el token' });
+        client.disconnect(true);
+        return;
+      }
+
+      // Unir al usuario SOLO a la room de su empresa
+      const companyRoom = `company:${companyId}`;
+      client.join(companyRoom);
+
+      // Confirmación de conexión exitosa
+      client.emit('connection_success', {
+        message: '✅ Conexión WebSocket establecida correctamente',
+        userId: payload.sub || payload.id,
+        companyId: companyId,
+        room: companyRoom,
+        timestamp: new Date().toISOString(),
+      });
+
+      client.emit('welcome', {
+        message: `Bienvenido al servicio Sync - Empresa ${companyId}`,
+        status: 'connected',
+        companyId: companyId,
+      });
+
     } catch (error) {
-      console.log('❌ Token inválido o expirado:', error.message);
-      client.emit('error', { message: 'Token inválido' });
+      client.emit('error', { message: 'Token inválido o expirado' });
       client.disconnect(true);
     }
   }
 
   handleDisconnect(client: Socket) {
-    console.log(`❌ Cliente desconectado → User ID: ${client.data.user?.sub || 'unknown'}`);
+    // No se hace nada (puedes agregar logging si lo deseas)
   }
 
-  @SubscribeMessage('subscribe')
-  handleSubscribe(client: Socket, channel: string) {
-    client.join(channel);
-    client.emit('subscribed', { channel });
-  }
 
-  @SubscribeMessage('unsubscribe')
-  handleUnsubscribe(client: Socket, channel: string) {
-    client.leave(channel);
-  }
 }

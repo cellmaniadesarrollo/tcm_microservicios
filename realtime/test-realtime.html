@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Test Realtime Sync</title>
+  <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+</head>
+<body>
+  <h2>Prueba Realtime (Sync) - Notificaciones de Órdenes</h2>
+  <pre id="log"></pre>
+
+  <script>
+    const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiNjI1MzM5Ny1lZWIzLTRjN2MtYjJjNi0wMGZiNDFlZWZhODgiLCJlbWFpbCI6ImNvbnRhY3RvQHRlYW1jZWxsbWFuaWEuY29tIiwiY29tcGFueUlkIjoiZTcyZDdkNTUtYTk5Zi00NmQ1LTk5OWUtMjFhZjRjNWU0ODMxIiwiYnJhbmNoSWQiOiI5MTA4OTM2Yi1lOTBiLTRmMjgtYTQ3Yy0xYzQ5MWFhMTdlM2MiLCJwbGFuIjoiT1dORVIiLCJsaW1pdHMiOnsiYnJhbmNoZXMiOi0xLCJ1c2VycyI6LTF9LCJmZWF0dXJlcyI6WyJhbGwiXSwiZ3JvdXBzIjpbIkNPTVBBTllfQURNSU4iXSwiaWF0IjoxNzc0NjIyNjY3LCJleHAiOjE3NzcyMTQ2Njd9.bzJHJX8hKUPoxzb-bIzoqHZlcG30B_98al7gn6ZrSQc";   // ← pega tu JWT válido aquí
+
+    const socket = io('http://localhost:3002', {
+      query: { token: token },
+      transports: ['websocket']
+    });
+
+    const log = document.getElementById('log');
+
+    function addLog(msg) {
+      log.innerHTML += msg + '\n\n';
+      log.scrollTop = log.scrollHeight;
+    }
+
+    socket.on('connect', () => {
+      addLog('✅ Conectado al servidor Sync');
+    });
+
+    socket.on('connection_success', (data) => {
+      addLog('📨 connection_success → ' + JSON.stringify(data, null, 2));
+    });
+
+    socket.on('welcome', (data) => {
+      addLog('📨 welcome → ' + JSON.stringify(data, null, 2));
+    });
+
+    // === EVENTOS DE ÓRDENES ===
+    socket.on('order.created', (data) => {
+      addLog('🚀 ORDEN CREADA → ' + JSON.stringify(data, null, 2));
+    });
+
+    socket.on('order.updated', (data) => {
+      addLog('🔄 ORDEN ACTUALIZADA → ' + JSON.stringify(data, null, 2));
+    });
+
+    socket.on('error', (data) => {
+      addLog('❌ Error: ' + JSON.stringify(data));
+    });
+
+    socket.on('disconnect', () => {
+      addLog('❌ Desconectado');
+    });
+  </script>
+</body>
+</html>

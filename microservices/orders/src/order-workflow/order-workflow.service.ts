@@ -6,7 +6,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, DeepPartial } from 'typeorm';
+import { Repository, In, DeepPartial, EntityManager } from 'typeorm';
 import { Order } from './entities/order.entity';
 import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 import { CreateOrderDto } from './dto/create-order.dto';
@@ -31,6 +31,7 @@ import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 import { NoteLogAction, OrderNoteLog } from './entities/order-note-log.entity';
 import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -62,6 +63,7 @@ export class OrderWorkflowService {
     @InjectRepository(OrderNoteLog)
     private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
     private readonly notificationsService: NotificationsService,
+    private readonly userCacheService: UsersEmployeesEventsService,
   ) { }
 
 
@@ -187,7 +189,19 @@ export class OrderWorkflowService {
 
         attachments.push(await manager.save(attachment));
       }
-      await this.notificationsService.emitOrderCreated({ ...savedOrder });
+      const username = await this.userCacheService.getUsernameById(user.userId, user.companyId);
+      const orderfind = await this.getOrderNotificationData(savedOrder.id, user.companyId, manager);
+      if (orderfind && username) {
+        await this.notificationsService.emitOrderCreated(
+          { ...savedOrder },
+          orderfind,
+          username,
+          user.companyId,
+
+        );
+      } else {
+        console.log(savedOrder.id, user.companyId)
+      }
       // Retornar la orden guardada + adjuntos
       return { ...savedOrder, attachments };
     });
@@ -1223,5 +1237,37 @@ export class OrderWorkflowService {
     ]);
 
     return updatedNote;
+  }
+  async getOrderNotificationData(orderId: number, companyId: string, manager?: EntityManager) {
+    // Si recibimos el manager de la transacción lo usamos, si no, usamos el repositorio por defecto.
+    const queryBuilder = manager
+      ? manager.getRepository(Order).createQueryBuilder('order') // Reemplaza 'Order' por el nombre de tu entidad
+      : this.orderRepo.createQueryBuilder('order');
+
+    const data = await queryBuilder
+      .select([
+        'order.id',
+        'order.order_number',
+        'customer.firstName',
+        'customer.lastName',
+        'currentStatus.name',
+        'branch.name',
+      ])
+      .leftJoin('order.customer', 'customer')
+      .leftJoin('order.currentStatus', 'currentStatus')
+      .leftJoin('order.branch', 'branch')
+      .where('order.id = :orderId', { orderId })
+      .andWhere('order.company_id = :companyId', { companyId })
+      .getOne();
+
+    if (!data) return null;
+
+    return {
+      id: data.id,
+      orderNumber: data.order_number,
+      customerName: `${data.customer.firstName} ${data.customer.lastName}`,
+      status: data.currentStatus.name,
+      branch: data.branch.name,
+    };
   }
 }

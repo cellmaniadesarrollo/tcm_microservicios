@@ -1,23 +1,42 @@
 // src/sync/sync-rabbitmq.controller.ts
 import { Controller } from '@nestjs/common';
 import { EventPattern } from '@nestjs/microservices';
-import { SyncGateway } from './sync.gateway'; // ← inyectamos tu gateway
+import { SyncGateway } from './sync.gateway';
 
 @Controller()
 export class SyncRabbitmqController {
     constructor(private readonly syncGateway: SyncGateway) { }
 
-    @EventPattern('order.created')           // ← nombre del evento que enviará el MS Orders
+    @EventPattern('order.created')
     async handleOrderCreated(data: any) {
-        console.log('📨 Orden recibida de RabbitMQ:', data);
-        // Lo retransmitimos a TODOS los clientes conectados
-        this.syncGateway.server.emit('order.created', data);
+        const companyId = data.company_id || data.companyId;
+
+        if (!companyId) {
+            console.warn('[Sync] order.created recibido sin company_id');
+            return;
+        }
+
+        const companyRoom = `company:${companyId}`;
+
+
+
+        // Emitir SOLO a la empresa correspondiente
+        this.syncGateway.server.to(companyRoom).emit('order.created', data);
     }
 
     @EventPattern('order.updated')
     async handleOrderUpdated(data: any) {
-        this.syncGateway.server.emit('order.updated', data);
+        const companyId = data.company_id || data.companyId;
+
+        if (!companyId) {
+            console.warn('[Sync] order.updated recibido sin company_id');
+            return;
+        }
+
+        const companyRoom = `company:${companyId}`;
+
+        this.syncGateway.server.to(companyRoom).emit('order.updated', data);
     }
 
-    // agrega tantos @EventPattern como necesites
+    // Agrega aquí más eventos según necesites (order.deleted, notification.new, etc.)
 }

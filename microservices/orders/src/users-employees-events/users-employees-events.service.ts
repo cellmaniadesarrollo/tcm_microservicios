@@ -246,4 +246,15 @@ export class UsersEmployeesEventsService {
             ])
             .getRawMany();
     }
+
+    async getUsernameById(userId: string, companyId: string): Promise<string | null> {
+        const user = await this.useremployeeCacheRepo
+            .createQueryBuilder('user')
+            .select('user.username') // Solo pedimos la columna exacta
+            .where('user.id = :userId', { userId })
+            .andWhere('user.company_id = :companyId', { companyId })
+            .getOne();
+
+        return user?.username || null;
+    }
 } 
