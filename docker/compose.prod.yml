@@ -6,7 +6,7 @@
 # - Comandos en modo producción
 # - Variables DB_ específicas por microservicio
 
-version: '3.8'
+ 
 
 services:
   rabbitmq:
