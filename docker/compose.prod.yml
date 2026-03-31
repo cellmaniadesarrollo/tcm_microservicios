@@ -73,11 +73,11 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 15s
+      retries: 10
+      start_period: 60s
 
   gateway:
     build:
@@ -97,7 +97,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
 
   users:
     build:
@@ -118,7 +118,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
 
   orders:
     build:
@@ -151,9 +151,9 @@ services:
       - "host.docker.internal:host-gateway" 
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
       kafka:
-        condition: service_healthy
+        condition: service_started
 
   clients:
     build:
@@ -175,9 +175,9 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
       kafka:
-        condition: service_healthy
+        condition: service_started
 
   companies:
     build:
@@ -198,7 +198,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
 
   subscriptions:
     build:
@@ -219,7 +219,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
 
   realtime:
     build:
@@ -239,9 +239,9 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_started
       redis:
-        condition: service_healthy
+        condition: service_started
 
 networks:
   backend:
