@@ -65,7 +65,29 @@ export class OrderWorkflowService {
     private readonly notificationsService: NotificationsService,
     private readonly userCacheService: UsersEmployeesEventsService,
   ) { }
+  // ─── Helper privado para emitir notificaciones ────────────────────────────
+  private async emitNotification(
+    orderId: number,
+    companyId: string,
+    userId: string,
+    event: string,
+    message: string,
+  ) {
+    const [order, username] = await Promise.all([
+      this.getOrderNotificationData(orderId, companyId),
+      this.userCacheService.getUsernameById(userId, companyId),
+    ]);
 
+    if (!order) return;
+
+    await this.notificationsService.emitOrderUpdated(
+      order,
+      event,
+      message,
+      username || 'Usuario desconocido',
+      companyId || 'Compañía desconocida',
+    );
+  }
 
   async createOrder(
     dto: CreateOrderDto,
@@ -566,9 +588,7 @@ export class OrderWorkflowService {
       relations: ['currentStatus'],
     });
 
-    if (!order) {
-      throw new NotFoundException('Orden no encontrada');
-    }
+    if (!order) throw new NotFoundException('Orden no encontrada');
 
     if (order.current_status_id === toStatusId) {
       throw new BadRequestException('La orden ya tiene este estado');
@@ -576,12 +596,10 @@ export class OrderWorkflowService {
 
     const fromStatusId = order.current_status_id;
 
-    // 🔄 Actualizar estado actual
     order.current_status_id = toStatusId;
     order.currentStatus = { id: toStatusId } as any;
     await this.orderRepo.save(order);
 
-    // 📝 Guardar historial
     const history = this.orderStatusHistoryRepository.create({
       order_id: order.id,
       from_status_id: fromStatusId,
@@ -593,6 +611,15 @@ export class OrderWorkflowService {
     });
 
     await this.orderStatusHistoryRepository.save(history);
+
+    // 🔔 Notificación
+    await this.emitNotification(
+      order.id,
+      user.companyId,
+      user.userId,
+      'status_changed',
+      'Se actualizó el estado de la orden',
+    );
 
     return {
       success: true,
@@ -743,8 +770,8 @@ export class OrderWorkflowService {
     dto: CloseOrderDto,
     user: { userId: string; companyId: string; branchId: string },
   ): Promise<OrderDelivery> {
-    return this.orderRepo.manager.transaction(async (manager) => {
-      // 1. Obtener la orden con lo mínimo necesario
+    // 1. Ejecutar la transacción y guardar el resultado
+    const delivery = await this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
         relations: ['currentStatus', 'type'],
@@ -754,7 +781,6 @@ export class OrderWorkflowService {
         throw new RpcException(new NotFoundException('Orden no encontrada o no pertenece a la empresa'));
       }
 
-      // 2. Verificar que no tenga entrega previa (más eficiente que cargar la relación)
       const deliveryExists = await manager.exists(OrderDelivery, {
         where: { order_id: dto.orderId },
       });
@@ -763,7 +789,6 @@ export class OrderWorkflowService {
         throw new RpcException(new BadRequestException('La orden ya fue cerrada anteriormente'));
       }
 
-      // 3. Validar estado correcto
       if (order.current_status_id !== 7) {
         throw new RpcException(
           new BadRequestException(
@@ -772,10 +797,7 @@ export class OrderWorkflowService {
         );
       }
 
-      // 4. Determinar si es pago al cliente (egreso)
       const isOutgoing = order.order_type_id === 3;
-
-      // 5. Crear la entrega con INSERT directo
       const deliveryRepo = manager.getRepository(OrderDelivery);
       const deliveredAt = new Date();
 
@@ -797,15 +819,9 @@ export class OrderWorkflowService {
       const insertResult = await deliveryRepo.insert(deliveryData);
       const deliveryId = insertResult.identifiers[0].id as number;
 
-      console.log('Saved Delivery via insert:', {
-        id: deliveryId,
-        order_id: dto.orderId,
-        amount: dto.amount,
-      });
+      console.log('Saved Delivery via insert:', { id: deliveryId, order_id: dto.orderId, amount: dto.amount });
 
-      // 6. Registrar pago final
       const paymentTypeCode = isOutgoing ? 'PAGO_A_CLIENTE' : 'PAGO_FINAL';
-
       const paymentType = await manager.findOne(PaymentType, {
         where: { code: paymentTypeCode },
       });
@@ -834,17 +850,12 @@ export class OrderWorkflowService {
 
       await manager.save(finalPayment);
 
-      // 7. Cambiar estado a ENTREGADA (8) - forma más segura y sin problemas de alias/sintaxis
       const orderRepo = manager.getRepository(Order);
       await orderRepo.update(
         { id: order.id, company_id: user.companyId },
-        {
-          current_status_id: 8,
-          updatedAt: new Date()   // opcional: si quieres que se actualice el timestamp
-        }
+        { current_status_id: 8, updatedAt: new Date() },
       );
 
-      // 8. Registrar historial de estados
       await manager.save(OrderStatusHistory, {
         order_id: order.id,
         to_status_id: 8,
@@ -854,7 +865,6 @@ export class OrderWorkflowService {
         branch_id: user.branchId,
       });
 
-      // 9. Retornar objeto plano de OrderDelivery (sin cargar de BD)
       return deliveryRepo.create({
         id: deliveryId,
         order_id: dto.orderId,
@@ -873,6 +883,17 @@ export class OrderWorkflowService {
         updatedAt: deliveredAt,
       });
     });
+
+    // 🔔 Notificación — FUERA de la transacción, solo si todo fue exitoso
+    await this.emitNotification(
+      dto.orderId,
+      user.companyId,
+      user.userId,
+      'order_closed',
+      'La orden fue cerrada y entregada al cliente',
+    );
+
+    return delivery;
   }
 
 
@@ -1142,6 +1163,15 @@ export class OrderWorkflowService {
       }),
     );
 
+    // 🔔 Notificación
+    await this.emitNotification(
+      dto.order_id,
+      user.companyId,
+      user.userId,
+      'note_added',
+      'Se agregó una nota a la orden',
+    );
+
     return savedNote;
   }
 
@@ -1155,9 +1185,7 @@ export class OrderWorkflowService {
     });
 
     if (!note) {
-      throw new RpcException(
-        new NotFoundException('Nota no encontrada'),
-      );
+      throw new RpcException(new NotFoundException('Nota no encontrada'));
     }
 
     if (note.order.company_id !== user.companyId) {
@@ -1184,6 +1212,15 @@ export class OrderWorkflowService {
       ),
     ]);
 
+    // 🔔 Notificación — order_id viene de la relación ya cargada
+    await this.emitNotification(
+      note.order.id,
+      user.companyId,
+      user.userId,
+      'note_deleted',
+      'Se eliminó una nota de la orden',
+    );
+
     return deletedNote;
   }
 
@@ -1207,27 +1244,23 @@ export class OrderWorkflowService {
       );
     }
 
-    // Detectar qué cambió para el log
     const noteChanged = dto.note !== undefined && dto.note !== note.note;
     const publicChanged = dto.is_public !== undefined && dto.is_public !== note.is_public;
 
-    // Si no cambió nada, retornar sin tocar nada
     if (!noteChanged && !publicChanged) {
-      return note;
+      return note; // sin cambios, sin notificación
     }
 
-    // Construir el log
     const logEntry = this.orderNoteLogRepository.create({
       note_id: note.id,
       changed_by_id: user.userId,
-      action: NoteLogAction.UPDATED, // ← faltaba esto
+      action: NoteLogAction.UPDATED,
       previous_note: noteChanged ? note.note : null,
       new_note: noteChanged ? dto.note : null,
       previous_is_public: publicChanged ? note.is_public : null,
       new_is_public: publicChanged ? dto.is_public : null,
     });
 
-    // Aplicar cambios
     if (noteChanged) note.note = dto.note!;
     if (publicChanged) note.is_public = dto.is_public!;
 
@@ -1235,6 +1268,15 @@ export class OrderWorkflowService {
       this.orderNoteRepository.save(note),
       this.orderNoteLogRepository.save(logEntry),
     ]);
+
+    // 🔔 Notificación
+    await this.emitNotification(
+      note.order.id,
+      user.companyId,
+      user.userId,
+      'note_updated',
+      'Se actualizó una nota de la orden',
+    );
 
     return updatedNote;
   }

@@ -7,11 +7,12 @@ import { Contact } from './entities/contact.entity';
 import { Customer } from './entities/customer.entity';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { BroadcastModule } from '../broadcast/broadcast.module';
+import { KafkaModule } from '../kafka/kafka.module';
 @Module({
-  imports: [TypeOrmModule.forFeature([Address, Contact, Customer]),
- 
-  
- BroadcastModule,
+  imports: [KafkaModule, TypeOrmModule.forFeature([Address, Contact, Customer]),
+
+
+    BroadcastModule,
   ],
   providers: [CustomersService],
   controllers: [CustomersController]

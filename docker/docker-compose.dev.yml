@@ -20,29 +20,35 @@ services:
       start_period: 30s
 
   kafka:
-    image: apache/kafka:3.8.0          # o :latest si prefieres, pero pinnea para reproducibilidad
+    image: apache/kafka:3.8.0
     container_name: kafka
     restart: always
     ports:
-      - "9092:9092"   # Interno para otros contenedores
-      - "9094:9094"   # Externo para herramientas locales (Conduktor, Kafka UI, etc.)
+      - "9092:9092"   # Para Legacy Express y herramientas locales
+      - "9094:9094"   # Listener externo adicional
     environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-      KAFKA_LOG_RETENTION_HOURS: 168   # 7 días, ajusta si necesitas
+      # KRaft obligatorio
+      - KAFKA_NODE_ID
+      - KAFKA_PROCESS_ROLES
+      - KAFKA_CONTROLLER_QUORUM_VOTERS
+      - KAFKA_CONTROLLER_LISTENER_NAMES
+
+      # Listeners y Advertised (las más importantes)
+      - KAFKA_LISTENERS
+      - KAFKA_ADVERTISED_LISTENERS
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+      - KAFKA_INTER_BROKER_LISTENER_NAME
+
+      # Configuraciones de desarrollo
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+      - KAFKA_LOG_RETENTION_HOURS
+      - KAFKA_NUM_PARTITIONS
+      - CLUSTER_ID
     volumes:
-      - kafka_data:/bitnami/kafka   # ← Cambia el path si quieres, pero funciona
+      - kafka_data:/var/lib/kafka/data
     networks:
       - backend
     healthcheck:
@@ -147,7 +153,7 @@ services:
     volumes:
       - ../microservices/clients:/app
       - /app/node_modules
-    command: ["npm", "run", "start"]
+    command: ["npm", "run", "start:dev"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -157,6 +163,7 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME_CLIENTS}
       - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
     networks:
       - backend
     depends_on:

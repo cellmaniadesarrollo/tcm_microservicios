@@ -7,6 +7,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { BroadcastService } from '../broadcast/broadcast.service';
+import { KafkaProducerService } from '../kafka/kafka.producer';
+
 @Injectable()
 export class CustomersService {
     private readonly logger = new Logger(CustomersService.name);
@@ -20,6 +22,8 @@ export class CustomersService {
         @InjectRepository(Address)
         private readonly addressRepo: Repository<Address>,
         private readonly broadcast: BroadcastService,
+
+        private readonly kafkaProducer: KafkaProducerService,
     ) { }
 
     async create(data: any) {
@@ -78,7 +82,11 @@ export class CustomersService {
                     addresses: { city: true },
                 },
             });
-
+            if (!customerWithRelations) {
+                throw new RpcException(
+                    new InternalServerErrorException('Error al cargar el cliente creado'),
+                );
+            }
             // 5️⃣ Evento (NO bloquea creación)
             try {
                 await this.broadcast.publish('customer.updated', {
@@ -89,7 +97,17 @@ export class CustomersService {
                 // Log interno, pero no rompemos la operación
                 console.error('Error publicando evento customer.updated', eventError);
             }
-
+            try {
+                await this.kafkaProducer.emit(
+                    'ms.client.created',           // ← Topic en Kafka
+                    'CLIENT_CREATED',              // ← Tipo de evento
+                    customerWithRelations,         // ← Datos completos
+                    customerWithRelations.id.toString()   // ← Key (importante)
+                );
+            } catch (kafkaError) {
+                console.error('Error publicando evento a Kafka:', kafkaError);
+                // NO lanzamos error, para no romper la creación del cliente
+            }
             return customerWithRelations;
 
         } catch (error) {

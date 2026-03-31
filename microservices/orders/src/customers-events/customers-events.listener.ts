@@ -1,51 +1,44 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
-import * as amqp from 'amqplib';
+import { KafkaConsumerService } from '../kafka/kafka.consumer';
 import { CustomersEventsService } from './customers-events.service';
+
+const TOPICS = {
+  CLIENT_CREATED: 'ms.client.created',
+  CLIENT_UPDATED: 'ms.client.updated',
+} as const;
 
 @Injectable()
 export class CustomersEventsListener implements OnModuleInit {
-  constructor(private readonly cacheService: CustomersEventsService) {}
+  constructor(
+    private readonly cacheService: CustomersEventsService,
+    private readonly kafkaConsumer: KafkaConsumerService,
+  ) { }
 
   async onModuleInit() {
-    console.log('📡 Conectando a RabbitMQ para escuchar eventos Customer...');
-
-    const connection = await amqp.connect('amqp://guest:guest@rabbitmq:5672');
-    const channel = await connection.createChannel();
-
-    const exchange = 'customers_events';
-    const queue = `service_${process.pid}_customers_events`;
-
-    await channel.assertExchange(exchange, 'fanout', { durable: true });
-    await channel.assertQueue(queue, { durable: true });
-
-    await channel.bindQueue(queue, exchange, '');
-
-    console.log(
-      `🎧 Escuchando exchange [${exchange}] en la cola [${queue}]`
+    // 1. Primero registrar todos los handlers
+    this.kafkaConsumer.registerHandler(
+      TOPICS.CLIENT_CREATED,
+      (eventType, data) => this.handleClientCreated(eventType, data),
     );
 
-    channel.consume(
-      queue,
-      async (msg) => {
-        if (!msg) return;
-
-        const body = JSON.parse(msg.content.toString());
-
-      //  console.log('📩 Evento recibido:', body);
-
-        await this.handleEvent(body);
-
-        channel.ack(msg);
-      },
-      { noAck: false }
+    this.kafkaConsumer.registerHandler(
+      TOPICS.CLIENT_UPDATED,
+      (eventType, data) => this.handleClientUpdated(eventType, data),
     );
+
+    // 2. Recién ahora arrancar la suscripción con los handlers ya listos
+    await this.kafkaConsumer.start();
+
+    console.log('📡 CustomersEventsListener listo en Kafka');
   }
 
-  // 🟦 En vez de EventPattern —> AMQPLIB
-  async handleEvent(event: any) {
-    if (event.event === 'customer.updated') {
-     // console.log('🔵 Procesando customer.updated…');
-      await this.cacheService.syncCustomer(event.payload.customer);
-    }
+  private async handleClientCreated(eventType: string, data: any) {
+    console.log(`🟢 [${eventType}] Procesando cliente creado: ${data?.id}`);
+    await this.cacheService.syncCustomer(data);
+  }
+
+  private async handleClientUpdated(eventType: string, data: any) {
+    console.log(`🔵 [${eventType}] Procesando cliente actualizado: ${data?.id}`);
+    await this.cacheService.syncCustomer(data);
   }
 }

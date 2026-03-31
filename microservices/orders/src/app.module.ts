@@ -13,6 +13,7 @@ import { OrderFindingsModule } from './order-findings/order-findings.module';
 import { AwsS3Service } from './aws-s3/aws-s3.service';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { KafkaModule } from './kafka/kafka.module';
 @Module({
   imports: [   
      TypeOrmModule.forRoot({
@@ -24,7 +25,7 @@ import { NotificationsModule } from './notifications/notifications.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }),  CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule, MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule],
+    }),  CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule, MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule],
   controllers: [AppController],
   providers: [AppService ],
 })

@@ -4,11 +4,12 @@ import { AppService } from './app.service';
 import { CustomersModule } from './customers/customers.module';
 import { BillingModule } from './billing/billing.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
- import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { CompaniesModule } from './companies/companies.module';
+import { KafkaModule } from './kafka/kafka.module';
 @Module({
-  imports: [     
+  imports: [
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
@@ -18,8 +19,8 @@ import { CompaniesModule } from './companies/companies.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }),CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule,  ],
+    }), CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule,],
   controllers: [AppController],
-  providers: [AppService ],
+  providers: [AppService],
 })
-export class AppModule {}
+export class AppModule { }
