@@ -14,7 +14,7 @@ export class InternalAuthInterceptor implements NestInterceptor {
     const token = payload?.internalToken;
 
     if (token !== process.env.INTERNAL_SECRET) {
-      throw new UnauthorizedException('Token interno inválido');
+      throw new UnauthorizedException('Token interno inválido error');
     }
 
     return next.handle();
