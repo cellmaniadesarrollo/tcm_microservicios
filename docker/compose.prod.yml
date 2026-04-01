@@ -5,15 +5,17 @@
 # - Sin volúmenes de código (no hot-reload)
 # - Comandos en modo producción
 # - Variables DB_ específicas por microservicio
-
- 
+# - init-kafka crea los topics antes de levantar los microservicios
 
 services:
+  # ─────────────────────────────────────────
+  # INFRAESTRUCTURA
+  # ─────────────────────────────────────────
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
     # NO exponer puertos al exterior (seguridad)
-    # ports: []   # comentado o eliminado
     networks:
       - backend
     healthcheck:
@@ -29,7 +31,6 @@ services:
     container_name: kafka
     restart: always
     # NO exponer puertos al exterior (seguridad)
-    # ports: []
     environment:
       # KRaft obligatorio
       - KAFKA_NODE_ID
@@ -37,7 +38,7 @@ services:
       - KAFKA_CONTROLLER_QUORUM_VOTERS
       - KAFKA_CONTROLLER_LISTENER_NAMES
 
-      # Listeners y Advertised (las más importantes)
+      # Listeners y Advertised
       - KAFKA_LISTENERS
       - KAFKA_ADVERTISED_LISTENERS
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
@@ -62,22 +63,58 @@ services:
       retries: 5
       start_period: 60s
 
+  # ─────────────────────────────────────────
+  # JOB: Crear topics en Kafka
+  # Corre una sola vez y termina (exit 0).
+  # Los microservicios que usan Kafka esperan
+  # a que este job finalice exitosamente.
+  # ─────────────────────────────────────────
+
+  init-kafka:
+    image: apache/kafka:3.8.0
+    container_name: init-kafka
+    restart: "no"
+    networks:
+      - backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "⏳ Creando topics en Kafka..."
+
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+          --create --if-not-exists \
+          --topic ms.client.created \
+          --partitions 1 --replication-factor 1
+
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+          --create --if-not-exists \
+          --topic ms.client.updated \
+          --partitions 1 --replication-factor 1
+
+        echo "✅ Topics creados correctamente"
+
   redis:
     image: redis:7-alpine
     container_name: redis-realtime
     restart: always
     # NO exponer puertos al exterior (seguridad)
-    # ports: []
     volumes:
       - redis_data:/data
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "rabbitmqctl", "status"]
+      test: ["CMD", "redis-cli", "ping"]   # CORREGIDO: estaba usando rabbitmqctl por error
       interval: 30s
-      timeout: 15s
-      retries: 10
-      start_period: 60s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ─────────────────────────────────────────
+  # MICROSERVICIOS
+  # ─────────────────────────────────────────
 
   gateway:
     build:
@@ -92,12 +129,12 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/   # conexión interna local
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
 
   users:
     build:
@@ -118,14 +155,14 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
 
   orders:
     build:
       context: ../microservices/orders
       dockerfile: Dockerfile
     container_name: ms-orders
-    restart: always 
+    restart: always
     environment:
       - NODE_ENV=production
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -148,12 +185,12 @@ services:
     networks:
       - backend
     extra_hosts:
-      - "host.docker.internal:host-gateway" 
+      - "host.docker.internal:host-gateway"
     depends_on:
       rabbitmq:
-        condition: service_started
-      kafka:
-        condition: service_started
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully  # Espera que los topics estén creados
 
   clients:
     build:
@@ -175,9 +212,9 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_started
-      kafka:
-        condition: service_started
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully  # Espera que los topics estén creados
 
   companies:
     build:
@@ -198,7 +235,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
 
   subscriptions:
     build:
@@ -219,7 +256,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
 
   realtime:
     build:
@@ -239,9 +276,9 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
 
 networks:
   backend:
