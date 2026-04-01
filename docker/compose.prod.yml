@@ -66,8 +66,8 @@ services:
   # ─────────────────────────────────────────
   # JOB: Crear topics en Kafka
   # Corre una sola vez y termina (exit 0).
-  # Los microservicios que usan Kafka esperan
-  # a que este job finalice exitosamente.
+  # Para agregar un topic nuevo, solo añade
+  # una línea a la lista TOPICS.
   # ─────────────────────────────────────────
 
   init-kafka:
@@ -82,19 +82,22 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        TOPICS="
+          ms.client.created
+          ms.client.updated
+        "
+
         echo "⏳ Creando topics en Kafka..."
 
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
-          --create --if-not-exists \
-          --topic ms.client.created \
-          --partitions 1 --replication-factor 1
+        for TOPIC in $TOPICS; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+            --create --if-not-exists \
+            --topic $TOPIC \
+            --partitions 1 --replication-factor 1
+          echo "✅ Topic creado: $TOPIC"
+        done
 
-        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
-          --create --if-not-exists \
-          --topic ms.client.updated \
-          --partitions 1 --replication-factor 1
-
-        echo "✅ Topics creados correctamente"
+        echo "🎉 Todos los topics listos"
 
   redis:
     image: redis:7-alpine
@@ -106,7 +109,7 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]   # CORREGIDO: estaba usando rabbitmqctl por error
+      test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -190,7 +193,7 @@ services:
       rabbitmq:
         condition: service_healthy
       init-kafka:
-        condition: service_completed_successfully  # Espera que los topics estén creados
+        condition: service_completed_successfully
 
   clients:
     build:
@@ -214,7 +217,7 @@ services:
       rabbitmq:
         condition: service_healthy
       init-kafka:
-        condition: service_completed_successfully  # Espera que los topics estén creados
+        condition: service_completed_successfully
 
   companies:
     build:
