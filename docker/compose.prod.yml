@@ -89,12 +89,11 @@ services:
 
         echo "⏳ Creando topics en Kafka..."
 
-        for TOPIC in $TOPICS; do
+        for TOPIC in $$TOPICS; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists \
-            --topic $TOPIC \
+            --topic $$TOPIC \
             --partitions 1 --replication-factor 1
-          echo "✅ Topic creado: $TOPIC"
         done
 
         echo "🎉 Todos los topics listos"
