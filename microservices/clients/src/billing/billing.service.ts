@@ -299,7 +299,7 @@ export class BillingService {
                 });
 
                 billingSaved = await this.billingRepo.save(billing);
-                logger.log(`BillingData creado id: ${billingSaved.id}`);
+                logger.log(`BillingData creado  id: ${billingSaved.id}`);
             }
 
             // ── Buscar o crear Customer mínimo ────────────────────────────
