@@ -9,10 +9,12 @@ import { CustomerBillingData } from './entities/customer-billing-data.entity';
 import { IdType } from '../catalogs/entities/id-type.entity';
 import { ContactType } from '../catalogs/entities/contact-type.entity';
 import { BroadcastModule } from '../broadcast/broadcast.module';
+import { PersonType } from '../catalogs/entities/person-type.entity';
+import { Gender } from '../catalogs/entities/gender.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([BillingData, Customer, IdentificationType, CustomerBillingData, ContactType,  // 👈
-    IdType,]), BroadcastModule],
+  imports: [TypeOrmModule.forFeature([BillingData, Customer, IdentificationType, CustomerBillingData, ContactType,
+    IdType, PersonType, Gender]), BroadcastModule],
   providers: [BillingService],
   controllers: [BillingController]
 })

@@ -11,6 +11,7 @@ import { Customer } from '../customers/entities/customer.entity';
 import { ContactType } from '../catalogs/entities/contact-type.entity';
 import { IdType } from '../catalogs/entities/id-type.entity';
 import { BroadcastService } from '../broadcast/broadcast.service';
+import { PersonType } from '../catalogs/entities/person-type.entity';
 
 @Injectable()
 export class BillingService {
@@ -28,9 +29,18 @@ export class BillingService {
         @InjectRepository(ContactType)
         private readonly contactTypeRepo: Repository<ContactType>,
 
+
+        @InjectRepository(PersonType)
+        private readonly personTypeRepo: Repository<PersonType>,
+
+        @InjectRepository(ContactType)
+        private readonly genderRepo: Repository<ContactType>,
+
         @InjectRepository(IdType)
         private readonly idTypeRepo: Repository<IdType>,
         private readonly broadcast: BroadcastService,
+
+
     ) { }
 
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
@@ -58,7 +68,6 @@ export class BillingService {
 
                 // ← NUEVOS CAMPOS OBLIGATORIOS
                 personType: { id: data.personTypeId },
-                businessName: data.businessName,
                 mainEmail: data.mainEmail,
                 address: data.address,
 
@@ -237,7 +246,7 @@ export class BillingService {
                     isActive: true,
                 },
                 relations: { idType: true },
-                order: { businessName: 'ASC' },
+                order: { firstName: 'ASC' },
                 take: 10,
             });
 
@@ -247,6 +256,17 @@ export class BillingService {
         }
     }
 
+
+    async createFromLegacyRaw(raw: any) {
+        // companyId ya viene dentro del payload legacy
+        if (!raw?.company_id && !raw?.user?.companyId)
+            throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));
+
+        const companyId = raw.company_id ?? raw.user?.companyId;
+
+        const normalized = await this.normalizeLegacyPayload(raw, { companyId });
+        return this.createFromLegacy(normalized);
+    }
 
     async createFromLegacy(data: any) {
         const logger = new Logger('LegacyBilling');
@@ -285,7 +305,6 @@ export class BillingService {
                     personType: { id: data.personTypeId },
                     gender: data.genderId ? { id: data.genderId } : undefined,
                     idNumber: data.idNumber,
-                    businessName: data.businessName,
                     tradeName: data.tradeName,
                     firstName: data.firstName,
                     lastName: data.lastName,
@@ -372,5 +391,97 @@ export class BillingService {
                 new InternalServerErrorException('Error procesando billing desde legacy'),
             );
         }
+    }
+
+
+    // ── Mapa estático de nombres legacy → nombre normalizado en BD ────────────────
+    private readonly LEGACY_ID_TYPE_MAP: Record<string, string> = {
+        'Cédula': 'CÉDULA',
+        'RUC': 'RUC',
+        'Pasaporte': 'PASAPORTE',
+        'Venta a Consumidor Final': 'CONSUMIDOR FINAL',
+        'Identificación del Exterior': 'IDENTIFICACIÓN DEL EXTERIOR',
+    };
+
+    private readonly LEGACY_PERSON_TYPE_MAP: Record<string, string> = {
+        'natural': 'NATURAL',
+        'juridica': 'JURIDICA',
+    };
+
+    private readonly LEGACY_GENDER_MAP: Record<string, string> = {
+        'male': 'MASCULINO',
+        'female': 'FEMENINO',
+        'other': 'OTRO',
+    };
+
+    // ── Adaptador: convierte el payload legacy al contrato de createFromLegacy ────
+    async normalizeLegacyPayload(raw: any, user: { companyId: string }) {
+        const logger = new Logger('LegacyAdapter');
+
+        // 1. Resolver IdType
+        const idTypeName = this.LEGACY_ID_TYPE_MAP[raw.identification_type];
+        if (!idTypeName)
+            throw new RpcException(
+                new BadRequestException(`identification_type desconocido: ${raw.identification_type}`),
+            );
+
+        const idType = await this.idTypeRepo.findOne({ where: { name: idTypeName } });
+        if (!idType)
+            throw new RpcException(
+                new BadRequestException(`IdType no encontrado en BD: ${idTypeName}`),
+            );
+
+        // 2. Resolver PersonType
+        const personTypeName = this.LEGACY_PERSON_TYPE_MAP[raw.person_type];
+        if (!personTypeName)
+            throw new RpcException(
+                new BadRequestException(`person_type desconocido: ${raw.person_type}`),
+            );
+
+        const personType = await this.personTypeRepo.findOne({ where: { name: personTypeName } });
+        if (!personType)
+            throw new RpcException(
+                new BadRequestException(`PersonType no encontrado en BD: ${personTypeName}`),
+            );
+
+        // 3. Resolver Gender (opcional)
+        let genderId: number | undefined;
+        if (raw.sex && raw.sex !== 'N/A') {
+            const genderName = this.LEGACY_GENDER_MAP[raw.sex];
+            if (genderName) {
+                const gender = await this.genderRepo.findOne({ where: { name: genderName } });
+                genderId = gender?.id;
+                if (!gender)
+                    logger.warn(`Gender '${raw.sex}' → '${genderName}' no encontrado en BD, se omitirá`);
+            }
+        }
+
+        // 4. Normalizar birthdate → string 'YYYY-MM-DD' si viene como Date
+        let birthdate: string | undefined;
+        if (raw.birthdate) {
+            const d = new Date(raw.birthdate);
+            if (!isNaN(d.getTime()))
+                birthdate = d.toISOString().split('T')[0]; // '2026-04-06'
+        }
+
+        // 5. Construir el payload que espera createFromLegacy
+        return {
+            user,                               // { companyId }
+            idNumber: raw.identification,
+            idTypeId: idType.id,
+            personTypeId: personType.id,
+            genderId,
+            firstName: raw.first_name,
+            lastName: raw.last_name,
+            businessName: raw.business_name,   // undefined en persona natural → ok
+            tradeName: undefined,
+            mainEmail: raw.email,
+            cellphone: raw.cellphone,
+            phone: raw.phone,
+            birthdate,
+            address: raw.address,
+            city: raw.city,
+            isCompanyClient: raw.person_type === 'juridica',
+        };
     }
 }

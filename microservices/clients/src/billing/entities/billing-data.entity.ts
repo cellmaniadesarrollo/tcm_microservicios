@@ -31,14 +31,12 @@ export class BillingData {
   @Column({ type: 'varchar', length: 30 })
   idNumber: string;
 
-  @Column({ type: 'varchar', length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, })
   firstName: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   lastName: string;
 
-  @Column({ type: 'varchar', length: 200 })
-  businessName: string;
 
   @Column({ type: 'varchar', length: 200, nullable: true })
   tradeName: string;
@@ -83,7 +81,6 @@ export class BillingData {
   @BeforeInsert()
   @BeforeUpdate()
   normalizeFields() {
-    this.businessName = this.businessName?.trim().toUpperCase();
     this.tradeName = this.tradeName?.trim().toUpperCase();
     this.mainEmail = this.mainEmail?.trim().toLowerCase();
     this.address = this.address?.trim().toUpperCase();

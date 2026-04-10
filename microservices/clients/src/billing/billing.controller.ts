@@ -42,6 +42,6 @@ export class BillingController {
 
   @MessagePattern('legacy_create_billing')
   async handleLegacyBilling(@Payload() data: any) {
-    return this.billingService.createFromLegacy(data);
+    return this.billingService.createFromLegacyRaw(data);
   }
 }
