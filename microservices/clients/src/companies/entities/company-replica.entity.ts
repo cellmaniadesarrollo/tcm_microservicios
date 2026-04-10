@@ -1,3 +1,4 @@
+//microservices\clients\src\companies\entities\company-replica.entity.ts
 import {
   Entity,
   PrimaryColumn,
@@ -5,7 +6,7 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
-} from 'typeorm'; 
+} from 'typeorm';
 @Entity('companies_replica')
 export class CompanyReplica {
   @PrimaryColumn('uuid')
@@ -16,13 +17,13 @@ export class CompanyReplica {
 
   @Column({ default: true })
   status: boolean;
- 
- 
+
+
 
   // ⏱️ Fechas replicadas, NO generadas
   @Column({ type: 'timestamp', nullable: true })
   createdAt: Date;
 
   @Column({ type: 'timestamp', nullable: true })
-  updatedAt: Date; 
+  updatedAt: Date;
 } 

@@ -1,8 +1,10 @@
 name: teamcellmania-backend-dev
 
-version: '3.8'
-
 services:
+  # ─────────────────────────────────────────
+  # INFRAESTRUCTURA
+  # ─────────────────────────────────────────
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
@@ -24,22 +26,17 @@ services:
     container_name: kafka
     restart: always
     ports:
-      - "9092:9092"   # Para Legacy Express y herramientas locales
-      - "9094:9094"   # Listener externo adicional
+      - "9092:9092"
+      - "9094:9094"
     environment:
-      # KRaft obligatorio
       - KAFKA_NODE_ID
       - KAFKA_PROCESS_ROLES
       - KAFKA_CONTROLLER_QUORUM_VOTERS
       - KAFKA_CONTROLLER_LISTENER_NAMES
-
-      # Listeners y Advertised (las más importantes)
       - KAFKA_LISTENERS
       - KAFKA_ADVERTISED_LISTENERS
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
       - KAFKA_INTER_BROKER_LISTENER_NAME
-
-      # Configuraciones de desarrollo
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
@@ -52,123 +49,60 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-  gateway:
-    build:
-      context: ../gateway
-      dockerfile: Dockerfile.dev
-    container_name: ms-gateway
+
+  init-kafka:
+    image: apache/kafka:3.8.0
+    container_name: init-kafka
+    restart: "no"
+    networks:
+      - backend
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        TOPICS="
+          ms.client.created
+          ms.client.updated
+          ms.company.created
+          ms.company.updated
+        "
+        echo "⏳ Creando topics en Kafka..."
+        for TOPIC in $$TOPICS; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+            --create --if-not-exists \
+            --topic $$TOPIC \
+            --partitions 1 --replication-factor 1
+        done
+        echo "🎉 Todos los topics listos"
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-realtime
     restart: always
     ports:
-      - "3000:3000"
+      - "6379:6379"
     volumes:
-      - ../gateway:/app
-      - /app/node_modules
-    command: ["npm", "run", "start"]
-    environment:
-      - NODE_ENV=development
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
-      - RABBIT_URL=${RABBIT_URL}
+      - redis_data:/data
     networks:
       - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
-  users:
-    build:
-      context: ../microservices/users
-      dockerfile: Dockerfile.dev
-    container_name: ms-users
-    volumes:
-      - ../microservices/users:/app
-      - /app/node_modules
-    restart: always
-    command: ["npm", "run", "start"]
-    environment:
-      - NODE_ENV=development
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME_USERS}
-      - RABBIT_URL=${RABBIT_URL}
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-
-  orders:
-    build:
-      context: ../microservices/orders
-      dockerfile: Dockerfile.dev
-    container_name: ms-orders
-    restart: always
-    volumes:
-      - ../microservices/orders:/app
-      - /app/node_modules
-    command: ["npm", "run", "start:dev"]
-    environment:
-      - NODE_ENV=development
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME_ORDERS}
-      - RABBIT_URL=${RABBIT_URL}
-      - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
-      - MYSQL_DB_USER=${MYSQL_DB_USER}
-      - MYSQL_DB_PORT=${MYSQL_DB_PORT}
-      - MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD}
-      - MYSQL_DB_NAME=${MYSQL_DB_NAME}
-      - AWS_REGION=${AWS_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
-      # Descomenta cuando empieces con eventos de caja
-      # - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      # kafka:
-      #   condition: service_healthy   # ← activa cuando orders use Kafka
-
-  clients:
-    build:
-      context: ../microservices/clients
-      dockerfile: Dockerfile.dev
-    container_name: ms-clients
-    restart: always
-    volumes:
-      - ../microservices/clients:/app
-      - /app/node_modules
-    command: ["npm", "run", "start:dev"]
-    environment:
-      - NODE_ENV=development
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${DB_HOST}
-      - DB_PORT=${DB_PORT}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_NAME=${DB_NAME_CLIENTS}
-      - RABBIT_URL=${RABBIT_URL}
-      - KAFKA_BOOTSTRAP_SERVERS
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
+  # ─────────────────────────────────────────
+  # CAPA 1 — companies
+  # Espera: rabbitmq healthy + init-kafka completado
+  # ─────────────────────────────────────────
 
   companies:
     build:
@@ -194,6 +128,83 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s  # NestJS tarda en arrancar en dev
+
+  # ─────────────────────────────────────────
+  # CAPA 2 — clients, users, subscriptions
+  # Espera: companies healthy
+  # ─────────────────────────────────────────
+
+  clients:
+    build:
+      context: ../microservices/clients
+      dockerfile: Dockerfile.dev
+    container_name: ms-clients
+    restart: always
+    volumes:
+      - ../microservices/clients:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_CLIENTS}
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
+    networks:
+      - backend
+    depends_on:
+      companies:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  users:
+    build:
+      context: ../microservices/users
+      dockerfile: Dockerfile.dev
+    container_name: ms-users
+    volumes:
+      - ../microservices/users:/app
+      - /app/node_modules
+    restart: always
+    command: ["npm", "run", "start"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_USERS}
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
+    networks:
+      - backend
+    depends_on:
+      companies:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   subscriptions:
     build:
@@ -204,7 +215,8 @@ services:
     volumes:
       - ../microservices/subscriptions:/app
       - /app/node_modules
-    command: ["npm", "run", "start"]
+      - /app/dist
+    command: ["npm", "run", "start:dev"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -214,27 +226,97 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME_SUBSCRIPTIONS}
       - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
     networks:
       - backend
     depends_on:
-      rabbitmq:
+      companies:
         condition: service_healthy
-  redis:
-    image: redis:7-alpine
-    container_name: redis-realtime
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ─────────────────────────────────────────
+  # CAPA 3 — orders
+  # Espera: clients + users + subscriptions healthy
+  # ─────────────────────────────────────────
+
+  orders:
+    build:
+      context: ../microservices/orders
+      dockerfile: Dockerfile.dev
+    container_name: ms-orders
     restart: always
-    ports:
-      - "6379:6379"
     volumes:
-      - redis_data:/data
+      - ../microservices/orders:/app
+      - /app/node_modules
+    command: ["npm", "run", "start"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_ORDERS}
+      - RABBIT_URL=${RABBIT_URL}
+      - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
+      - MYSQL_DB_USER=${MYSQL_DB_USER}
+      - MYSQL_DB_PORT=${MYSQL_DB_PORT}
+      - MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD}
+      - MYSQL_DB_NAME=${MYSQL_DB_NAME}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - KAFKA_BOOTSTRAP_SERVERS
     networks:
       - backend
+    depends_on:
+      clients:
+        condition: service_healthy
+      users:
+        condition: service_healthy
+      subscriptions:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ─────────────────────────────────────────
+  # CAPA 4 — gateway, realtime
+  # Espera: orders healthy
+  # ─────────────────────────────────────────
+
+  gateway:
+    build:
+      context: ../gateway
+      dockerfile: Dockerfile.dev
+    container_name: ms-gateway
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../gateway:/app
+      - /app/node_modules
+    command: ["npm", "run", "start"]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+      - RABBIT_URL=${RABBIT_URL}
+    networks:
+      - backend
+    depends_on:
+      orders:
+        condition: service_healthy
 
   realtime:
     build:
@@ -245,7 +327,7 @@ services:
     volumes:
       - ../realtime:/app
       - /app/node_modules
-    command: ["npm", "run", "start:dev"]
+    command: ["npm", "run", "start"]
     environment:
       - NODE_ENV=development
       - INTERNAL_SECRET=${INTERNAL_SECRET}
@@ -253,14 +335,15 @@ services:
       - RABBIT_URL=${RABBIT_URL}
       - REDIS_URL=redis://redis:6379
     ports:
-      - "3002:3002"          # ← expuesto directamente
+      - "3002:3002"
     networks:
       - backend
     depends_on:
-      rabbitmq:
+      orders:
         condition: service_healthy
       redis:
         condition: service_healthy
+
 networks:
   backend:
 

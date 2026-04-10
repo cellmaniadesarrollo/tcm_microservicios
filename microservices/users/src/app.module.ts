@@ -1,18 +1,21 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { UsersModule } from './users/users.module'; 
-import { TypeOrmModule } from '@nestjs/typeorm'; 
+import { UsersModule } from './users/users.module';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from './users/entities/user.entity';
 import { Employee } from './users/entities/employee.entity';
 import { UserGroup } from './users/entities/user_group.entity';
 import { Gender } from './users/entities/gender.entity';
-import { Group } from './users/entities/group.entity';  
+import { Group } from './users/entities/group.entity';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { CompaniesModule } from './companies/companies.module';
+import { HealthModule } from './health/health.module';
+import { KafkaModule } from './kafka/kafka.module';
+import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 @Module({
-  imports: [UsersModule, 
-     TypeOrmModule.forRoot({
+  imports: [UsersModule,
+    TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
       port: parseInt(process.env.DB_PORT || '5432'),
@@ -20,14 +23,16 @@ import { CompaniesModule } from './companies/companies.module';
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       autoLoadEntities: true,
-      entities: [User, Employee, UserGroup, Gender,Group], 
+      entities: [User, Employee, UserGroup, Gender, Group],
       synchronize: true, // Solo para desarrollo
     }),
-     UsersModule,
-     BroadcastModule,
-     CompaniesModule,
-  ], 
+    UsersModule,
+    BroadcastModule,
+    CompaniesModule,
+    HealthModule,
+    KafkaModule,
+  ],
   controllers: [AppController],
-  providers: [AppService ],
-}) 
-export class AppModule {}
+  providers: [AppService, KafkaListenersOrchestrator],
+})
+export class AppModule { }

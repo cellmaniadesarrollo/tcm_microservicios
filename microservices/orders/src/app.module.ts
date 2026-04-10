@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
-import { AppService } from './app.service'; 
- import { TypeOrmModule } from '@nestjs/typeorm';
+import { AppService } from './app.service';
+import { TypeOrmModule } from '@nestjs/typeorm';
 import { CustomersEventsModule } from './customers-events/customers-events.module';
-import { UsersEmployeesEventsModule } from './users-employees-events/users-employees-events.module'; 
-import { OrderWorkflowModule } from './order-workflow/order-workflow.module'; 
+import { UsersEmployeesEventsModule } from './users-employees-events/users-employees-events.module';
+import { OrderWorkflowModule } from './order-workflow/order-workflow.module';
 import { DevicesModule } from './devices/devices.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
 import { MysqlRawModule } from './mysql-raw/mysql-raw.module';
@@ -14,9 +14,11 @@ import { AwsS3Service } from './aws-s3/aws-s3.service';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { KafkaModule } from './kafka/kafka.module';
+import { HealthModule } from './health/health.module';
+import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 @Module({
-  imports: [   
-     TypeOrmModule.forRoot({
+  imports: [
+    TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
       port: parseInt(process.env.DB_PORT || '5432'),
@@ -25,8 +27,8 @@ import { KafkaModule } from './kafka/kafka.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }),  CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule, MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule],
+    }), CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule, MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule, HealthModule],
   controllers: [AppController],
-  providers: [AppService ],
+  providers: [AppService, KafkaListenersOrchestrator],
 })
-export class AppModule {}
+export class AppModule { }

@@ -7,21 +7,22 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { UsersEventsListener } from './users-events.listener';
 
 @Module({
-        imports: [TypeOrmModule.forFeature([CompanyUser]),
-      ClientsModule.register([
-        {
-          name: 'USER_ASYNC',
-          transport: Transport.RMQ,
-          options: {
-            urls: [process.env.RABBIT_URL||'amqp://rabbitmq:5672'],
-            queue: 'users_queue_sync',  
-            queueOptions: { durable: true },
-            persistent:true 
-          }, 
-        },
-      ]),
-    ] ,
+  imports: [TypeOrmModule.forFeature([CompanyUser]),
+  ClientsModule.register([
+    {
+      name: 'USER_ASYNC',
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+        queue: 'users_queue_sync',
+        queueOptions: { durable: true },
+        persistent: true
+      },
+    },
+  ]),
+  ],
   controllers: [UsersController],
-  providers: [UsersService,UsersEventsListener],
+  providers: [UsersService, UsersEventsListener],
+  exports: [UsersEventsListener]
 })
-export class UsersModule {}
+export class UsersModule { }

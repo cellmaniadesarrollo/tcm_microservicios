@@ -1,3 +1,4 @@
+//microservices\clients\src\catalogs\catalogs.service.ts
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -13,21 +14,69 @@ import { ContactType } from './entities/contact-type.entity';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { IdentificationType } from './entities/identificationType.entity';
-
+import { PersonType } from './entities/person-type.entity'; // ← NUEVO
 @Injectable()
 export class CatalogsService implements OnModuleInit {
   constructor(
-@InjectRepository(Country) private readonly countryRepo: Repository<Country>,
+    @InjectRepository(Country) private readonly countryRepo: Repository<Country>,
     @InjectRepository(Province) private readonly provinceRepo: Repository<Province>,
     @InjectRepository(City) private readonly cityRepo: Repository<City>,
     @InjectRepository(Gender) private readonly genderRepo: Repository<Gender>,
     @InjectRepository(IdType) private readonly idTypeRepo: Repository<IdType>,
     @InjectRepository(ContactType) private readonly contactTypeRepo: Repository<ContactType>,
     @InjectRepository(IdentificationType) private readonly identificationTypeRepo: Repository<IdentificationType>,
+    @InjectRepository(PersonType) private readonly personTypeRepo: Repository<PersonType>, // ← NUEVO
   ) { }
-async onModuleInit() {
+  async onModuleInit() {
     console.log('--- Verificando catálogos iniciales ---');
-    await this.seedEcuador();
+    // await this.seedEcuador();
+    await this.migrateIdTypes();
+    await this.seedPersonTypes(); // ← NUEVO
+  }
+  private async migrateIdTypes() {
+    const migrations = [
+      { name: 'CÉDULA', code: '05', allowsBilling: true, isForCompany: false },
+      { name: 'RUC', code: '04', allowsBilling: true, isForCompany: true },
+      { name: 'PASAPORTE', code: '06', allowsBilling: true, isForCompany: false },
+      { name: 'CONSUMIDOR FINAL', code: '07', allowsBilling: true, isForCompany: false },
+      { name: 'IDENTIFICACIÓN DEL EXTERIOR', code: '08', allowsBilling: true, isForCompany: false },
+    ];
+
+    for (const item of migrations) {
+      const existing = await this.idTypeRepo.findOne({ where: { name: item.name } });
+
+      if (existing) {
+        // Ya existe (CÉDULA, RUC, PASAPORTE) — solo completamos los campos nuevos
+        await this.idTypeRepo.update(existing.id, {
+          code: item.code,
+          allowsBilling: item.allowsBilling,
+          isForCompany: item.isForCompany,
+        });
+        console.log(`✔ IdType actualizado: ${item.name} (id: ${existing.id})`);
+      } else {
+        // Nuevo tipo (CONSUMIDOR FINAL, IDENTIFICACIÓN DEL EXTERIOR)
+        await this.idTypeRepo.save(this.idTypeRepo.create(item));
+        console.log(`✔ IdType creado: ${item.name}`);
+      }
+    }
+
+    console.log('✔ Migración de IdTypes completada');
+  }
+  // ← NUEVA FUNCIÓN de seeding (igual estilo que migrateIdTypes)
+  private async seedPersonTypes() {
+    const count = await this.personTypeRepo.count();
+    if (count > 0) {
+      console.log('✅ PersonType ya está poblado');
+      return;
+    }
+
+    const personTypes = [
+      { name: 'NATURAL' },
+      { name: 'JURIDICA' },
+    ];
+
+    await this.personTypeRepo.save(personTypes);
+    console.log('✅ PersonType seeded correctamente (natural / juridica)');
   }
   private async loadLocalJson() {
     try {
@@ -219,8 +268,20 @@ async onModuleInit() {
       const identificationtype = await this.identificationTypeRepo.find({
         order: { code: 'ASC' },
       });
+
+      const genders = await this.genderRepo.find({
+        order: { name: 'ASC' },
+      });
+
+      // ← NUEVO: traemos también los tipos de persona (natural / juridica)
+      const personTypes = await this.personTypeRepo.find({
+        order: { name: 'ASC' },
+      });
+
       return {
         identificationtype,
+        genders,
+        personTypes,           // ← agregado
       };
     } catch (error) {
       console.error(error);

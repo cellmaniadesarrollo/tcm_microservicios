@@ -1,3 +1,4 @@
+//microservices\orders\src\order-workflow\order-workflow.module.ts
 import { Module } from '@nestjs/common';
 import { OrderWorkflowService } from './order-workflow.service';
 import { OrderWorkflowController } from './order-workflow.controller';

@@ -6,10 +6,11 @@ import { Company } from './entities/company.entity';
 import { Branch } from '../branches/entities/branch.entity';
 import { BroadcastModule } from '../broadcast/broadcast.module';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { BroadcastService } from '../broadcast/broadcast.service';
 
 @Module({
-   imports: [
-      ClientsModule.register([
+  imports: [
+    ClientsModule.register([
       {
         name: 'COMPANIES_PUBLISHER',
         transport: Transport.RMQ,
@@ -19,8 +20,8 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
           queueOptions: { durable: true },
         },
       },
-    ]),TypeOrmModule.forFeature([Company,Branch]),BroadcastModule],
+    ]), TypeOrmModule.forFeature([Company, Branch]), BroadcastModule],
   controllers: [CompaniesController],
   providers: [CompaniesService],
 })
-export class CompaniesModule {}
+export class CompaniesModule { }

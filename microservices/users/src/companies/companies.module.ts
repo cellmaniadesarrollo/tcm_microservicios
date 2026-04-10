@@ -11,25 +11,27 @@ import { UserGroup } from '../users/entities/user_group.entity';
 import { Group } from '../users/entities/group.entity';
 import { UsersModule } from '../users/users.module';
 
-@Module({  imports: [UsersModule,
+@Module({
+  imports: [UsersModule,
     TypeOrmModule.forFeature([
       CompanyReplica,
-      BranchReplica,User,UserGroup,Group
+      BranchReplica, User, UserGroup, Group
     ]),
-     ClientsModule.register([
-        {
-          name: 'COMPANIES_ASYNC',
-          transport: Transport.RMQ,
-          options: {
-            urls: [process.env.RABBIT_URL||'amqp://rabbitmq:5672'],
-            queue: 'companies_queue_sync',  
-            queueOptions: { durable: true },
-            persistent:true 
-          }, 
+    ClientsModule.register([
+      {
+        name: 'COMPANIES_ASYNC',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+          queue: 'companies_queue_sync',
+          queueOptions: { durable: true },
+          persistent: true
         },
-      ]),
+      },
+    ]),
   ],
   controllers: [CompaniesController],
-  providers: [CompaniesService,CompaniesEventsListener],
+  providers: [CompaniesService, CompaniesEventsListener],
+  exports: [CompaniesEventsListener]
 })
-export class CompaniesModule {}
+export class CompaniesModule { }

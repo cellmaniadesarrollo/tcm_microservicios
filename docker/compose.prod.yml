@@ -85,6 +85,12 @@ services:
         TOPICS="
           ms.client.created
           ms.client.updated
+          ms.company.created
+          ms.company.updated
+          ms.user.created
+          ms.user.updated
+          ms.client.billing.created
+          ms.client.billing.updated
         "
 
         echo "⏳ Creando topics en Kafka..."
@@ -153,6 +159,7 @@ services:
       - DB_PASSWORD=${USERS_DB_PASSWORD}
       - DB_NAME=${USERS_DB_NAME}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS
     networks:
       - backend
     depends_on:
@@ -233,6 +240,7 @@ services:
       - DB_PASSWORD=${COMPANIES_DB_PASSWORD}
       - DB_NAME=${COMPANIES_DB_NAME}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS
     networks:
       - backend
     depends_on:
@@ -254,6 +262,7 @@ services:
       - DB_PASSWORD=${SUBSCRIPTIONS_DB_PASSWORD}
       - DB_NAME=${SUBSCRIPTIONS_DB_NAME}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS
     networks:
       - backend
     depends_on:

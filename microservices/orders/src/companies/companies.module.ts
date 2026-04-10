@@ -6,26 +6,29 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyReplica } from './entities/company-replica.entity';
 import { BranchReplica } from './entities/branch-replica.entity';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { KafkaModule } from '../kafka/kafka.module';
 
-@Module({ imports: [
+@Module({
+  imports: [KafkaModule,
     TypeOrmModule.forFeature([
       CompanyReplica,
       BranchReplica
     ]),
-     ClientsModule.register([
-        {
-          name: 'COMPANIES_ASYNC',
-          transport: Transport.RMQ,
-          options: {
-            urls: [process.env.RABBIT_URL||'amqp://rabbitmq:5672'],
-            queue: 'companies_queue_sync',  
-            queueOptions: { durable: true },
-            persistent:true 
-          }, 
+    ClientsModule.register([
+      {
+        name: 'COMPANIES_ASYNC',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+          queue: 'companies_queue_sync',
+          queueOptions: { durable: true },
+          persistent: true
         },
-      ]),
+      },
+    ]),
   ],
   controllers: [CompaniesController],
-  providers: [CompaniesService,CompaniesEventsListener],
+  providers: [CompaniesService, CompaniesEventsListener],
+  exports: [CompaniesEventsListener]
 })
-export class CompaniesModule {}
+export class CompaniesModule { }

@@ -66,7 +66,7 @@ export class UsersService {
       phone_business,
       gender_id,
       group_ids,
-     user: createdByUser,
+      user: createdByUser,
     } = createUserDto;
 
     // 🔐 Hashear la contraseña
@@ -123,167 +123,164 @@ export class UsersService {
     // ===============================================
     // 🟪 4) Consultar el paquete completo (employee + user + groups)
     // ===============================================
-const fullData = await this.userRepo.findOne({
-  where: { id: user.id },
-  relations: {
-    company: true, // 👈 relación faltante
-    employee: {
-      gender: true,
-    },
-    userGroups: {
-      group: true,
-    },
-  },
-});
+    const fullData = await this.userRepo.findOne({
+      where: { id: user.id },
+      relations: {
+        company: true, // 👈 relación faltante
+        employee: {
+          gender: true,
+        },
+        userGroups: {
+          group: true,
+        },
+      },
+    });
 
     // ===============================================
     // 🟥 5) Publicar evento en Redis / microservicios
     // ===============================================
-    await this.broadcast.publish('users.updated', {
-      internalToken: process.env.INTERNAL_SECRET,
-      user: fullData,
-    });
+    await this.broadcast.publishUserCreated(fullData);
 
     return true;
   }
 
 
-async validateUser(
-  loginUserDto: LoginUserDto,
-): Promise<LoginResponseDto> {
-  const { username, password, latitude, longitude } = loginUserDto;
+  async validateUser(
+    loginUserDto: LoginUserDto,
+  ): Promise<LoginResponseDto> {
+    const { username, password, latitude, longitude } = loginUserDto;
 
-  const user =
-    await this.userQueryService.findByNameWithPasswordAndRelations(username);
+    const user =
+      await this.userQueryService.findByNameWithPasswordAndRelations(username);
 
-  if (!user) {
-    throw new RpcException(
-      new UnauthorizedException('Usuario no encontrado o inactivo'),
-    );
-  } 
-  const passwordMatches = await bcrypt.compare(
-    password,
-    user.password_user,
-  );
-
-  if (!passwordMatches) {
-    throw new RpcException(
-      new UnauthorizedException('Contraseña incorrecta'),
-    );
-  }
-
-  const branch = await this.resolveBranch(
-    user.company.id,
-    latitude,
-    longitude,
-  );
-
-  return {
-    id: user.id,
-    name: user.name_user,
-    email: user.email_user,
-    groups: user.userGroups.map(ug => ({
-      id: ug.group.id,
-      name: ug.group.name 
-    })),
-    company: {
-      id: user.company.id,
-      name: user.company.name,
-    },
-    branch,
-  };
-}
-
- // 👇 ESTO ES EL "HELPER" (pero es solo un método privado)
-private async resolveBranch(
-  companyId: string,
-  latitude?: number,
-  longitude?: number,
-): Promise<BranchReplica> {
-
-  const baseQb = this.branchRepo
-    .createQueryBuilder('branch')
-    .where('branch.companyId = :companyId', { companyId })
-    .andWhere('branch.status = true');
-
-  // 🔹 Total activas
-  const count = await baseQb.getCount();
-
-  if (count === 0) {
-    throw new RpcException(
-      new NotFoundException('La empresa no tiene sucursales activas'),
-    );
-  }
-
-  // 1️⃣ Solo una sucursal
-  if (count === 1) {
-    const branch = await baseQb.getOne();
-    if (!branch) {
+    if (!user) {
       throw new RpcException(
-        new NotFoundException('Sucursal no encontrada'),
+        new UnauthorizedException('Usuario no encontrado o inactivo'),
       );
     }
-    return branch;
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user.password_user,
+    );
+
+    if (!passwordMatches) {
+      throw new RpcException(
+        new UnauthorizedException('Contraseña incorrecta'),
+      );
+    }
+
+    const branch = await this.resolveBranch(
+      user.company.id,
+      latitude,
+      longitude,
+    );
+
+    return {
+      id: user.id,
+      name: user.name_user,
+      email: user.email_user,
+      groups: user.userGroups.map(ug => ({
+        id: ug.group.id,
+        name: ug.group.name
+      })),
+      company: {
+        id: user.company.id,
+        name: user.company.name,
+      },
+      branch,
+    };
   }
 
-  // 2️⃣ Buscar por cercanía
-  if (latitude && longitude) {
-    const nearby = await baseQb
-      .andWhere(
-        `
+  // 👇 ESTO ES EL "HELPER" (pero es solo un método privado)
+  private async resolveBranch(
+    companyId: string,
+    latitude?: number,
+    longitude?: number,
+  ): Promise<BranchReplica> {
+
+    const baseQb = this.branchRepo
+      .createQueryBuilder('branch')
+      .where('branch.companyId = :companyId', { companyId })
+      .andWhere('branch.status = true');
+
+    // 🔹 Total activas
+    const count = await baseQb.getCount();
+
+    if (count === 0) {
+      throw new RpcException(
+        new NotFoundException('La empresa no tiene sucursales activas'),
+      );
+    }
+
+    // 1️⃣ Solo una sucursal
+    if (count === 1) {
+      const branch = await baseQb.getOne();
+      if (!branch) {
+        throw new RpcException(
+          new NotFoundException('Sucursal no encontrada'),
+        );
+      }
+      return branch;
+    }
+
+    // 2️⃣ Buscar por cercanía
+    if (latitude && longitude) {
+      const nearby = await baseQb
+        .andWhere(
+          `
         ST_DWithin(
           branch.location,
           ST_SetSRID(ST_MakePoint(:lng, :lat), 4326),
           100
         )
         `,
-        { lat: latitude, lng: longitude },
-      )
-      .orderBy(
-        `
+          { lat: latitude, lng: longitude },
+        )
+        .orderBy(
+          `
         ST_Distance(
           branch.location,
           ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)
         )
         `,
-        'ASC',
-      )
+          'ASC',
+        )
+        .getOne();
+
+      if (nearby) {
+        return nearby;
+      }
+    }
+
+    // 3️⃣ Fallback → sucursal activa más antigua
+    const fallback = await baseQb
+      .orderBy('branch.createdAt', 'ASC')
       .getOne();
 
-    if (nearby) {
-      return nearby;
+    if (!fallback) {
+      throw new RpcException(
+        new NotFoundException('No se pudo resolver la sucursal'),
+      );
     }
+
+    return fallback;
   }
-
-  // 3️⃣ Fallback → sucursal activa más antigua
-  const fallback = await baseQb
-    .orderBy('branch.createdAt', 'ASC')
-    .getOne();
-
-  if (!fallback) {
-    throw new RpcException(
-      new NotFoundException('No se pudo resolver la sucursal'),
-    );
-  }
-
-  return fallback;
-}
 
   async findFullDataByCreatedAfter(date: Date | null): Promise<any[]> {
     console.log(date)
     const qb = await this.userRepo.find({
-    where: date
-      ? { updatedAt: MoreThan(date) }
-      : {},
-    relations: {
-      company: true,
-      employee: true,
-      userGroups: {
-        group: true, // si aplica
+      where: date
+        ? { updatedAt: MoreThan(date) }
+        : {},
+      relations: {
+        company: true,
+        employee: true,
+        userGroups: {
+          group: true, // si aplica
+        },
       },
-    },
-  });  
-    return  qb
+    });
+    return qb
   }
 
 
@@ -298,7 +295,7 @@ private async resolveBranch(
     }
 
     // 🔐 password temporal (nombre empresa)
-     const tempPassword = company.name.toLowerCase().replace(/\s+/g, '');
+    const tempPassword = company.name.toLowerCase().replace(/\s+/g, '');
     const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
     // 🔎 buscar grupo COMPANY_ADMIN
@@ -340,12 +337,9 @@ private async resolveBranch(
         },
       },
     });
-   // console.log(fullData)
-   // console.log('✅ COMPANY_ADMIN creado:', savedUser.email_user);
-    await this.broadcast.publish('users.updated', {
-      internalToken: process.env.INTERNAL_SECRET,
-      user: fullData,
-    });
+    // console.log(fullData)
+    // console.log('✅ COMPANY_ADMIN creado:', savedUser.email_user);
+    await this.broadcast.publishUserCreated(fullData);
     // 📩 aquí luego envías token por email
   }
 

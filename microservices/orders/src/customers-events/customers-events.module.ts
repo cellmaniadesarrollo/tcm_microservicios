@@ -24,6 +24,7 @@ import { KafkaModule } from '../kafka/kafka.module';
     ]),
   ],
   controllers: [CustomersEventsController],
-  providers: [CustomersEventsService, CustomersEventsListener]
+  providers: [CustomersEventsService, CustomersEventsListener],
+  exports: [CustomersEventsListener]
 })
 export class CustomersEventsModule { }

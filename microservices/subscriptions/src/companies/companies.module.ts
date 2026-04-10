@@ -8,25 +8,27 @@ import { BranchReplica } from './entities/branch-replica.entity';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { SubscriptionsModuleModule } from '../subscriptions-module/subscriptions-module.module';
 
-@Module({ imports: [
+@Module({
+  imports: [
     TypeOrmModule.forFeature([
       CompanyReplica,
       BranchReplica
     ]),
-     ClientsModule.register([
-        {
-          name: 'COMPANIES_ASYNC',
-          transport: Transport.RMQ,
-          options: {
-            urls: [process.env.RABBIT_URL||'amqp://rabbitmq:5672'],
-            queue: 'companies_queue_sync',  
-            queueOptions: { durable: true },
-            persistent:true 
-          }, 
+    ClientsModule.register([
+      {
+        name: 'COMPANIES_ASYNC',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+          queue: 'companies_queue_sync',
+          queueOptions: { durable: true },
+          persistent: true
         },
-      ]),SubscriptionsModuleModule
+      },
+    ]), SubscriptionsModuleModule
   ],
   controllers: [CompaniesController],
-  providers: [CompaniesService,CompaniesEventsListener],
+  providers: [CompaniesService, CompaniesEventsListener],
+  exports: [CompaniesEventsListener]
 })
-export class CompaniesModule {}
+export class CompaniesModule { }

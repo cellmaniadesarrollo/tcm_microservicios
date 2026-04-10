@@ -1,3 +1,4 @@
+//microservices\clients\src\catalogs\entities\gender.entity.ts
 import { Entity, PrimaryGeneratedColumn, Column } from 'typeorm';
 
 @Entity('genders')

@@ -1,0 +1,94 @@
+name: tcm-infra
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    restart: always
+    ports: ["5672:5672", "15672:15672"]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: kafka
+    restart: always
+    ports: ["9092:9092", "9094:9094"]
+    environment:
+      - KAFKA_NODE_ID
+      - KAFKA_PROCESS_ROLES
+      - KAFKA_CONTROLLER_QUORUM_VOTERS
+      - KAFKA_CONTROLLER_LISTENER_NAMES
+      - KAFKA_LISTENERS
+      - KAFKA_ADVERTISED_LISTENERS
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+      - KAFKA_INTER_BROKER_LISTENER_NAME
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS
+      - KAFKA_LOG_RETENTION_HOURS
+      - KAFKA_NUM_PARTITIONS
+      - CLUSTER_ID
+    volumes: [kafka_data:/var/lib/kafka/data]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  init-kafka:
+    image: apache/kafka:3.8.0
+    container_name: init-kafka
+    restart: "no"
+    networks: [backend]
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        TOPICS=(
+          ms.client.created
+          ms.client.updated
+          ms.company.created
+          ms.company.updated
+          ms.user.created
+          ms.user.updated
+          ms.client.billing.created
+          ms.client.billing.updated
+        )
+        for TOPIC in "$${TOPICS[@]}"; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+            --create --if-not-exists --topic $$TOPIC \
+            --partitions 1 --replication-factor 1
+        done
+        echo "Topics listos: $${#TOPICS[@]}"
+  redis:
+    image: redis:7-alpine
+    container_name: redis-realtime
+    restart: always
+    ports: ["6379:6379"]
+    volumes: [redis_data:/data]
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+networks:
+  backend:
+    external: true
+
+volumes:
+  kafka_data:
+  redis_data:

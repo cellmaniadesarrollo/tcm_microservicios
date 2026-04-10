@@ -10,6 +10,7 @@ import { CustomersModule } from './customers/customers.module';
 import { CompaniesModule } from './companies/companies.module';
 import { AuthModule } from './auth/auth.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
+import { LegacyModule } from './legacy/legacy.module';
 @Module({
   imports: [UsersModule,
     ConfigModule.forRoot({
@@ -19,7 +20,8 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
     CustomersModule,
     CompaniesModule,
     AuthModule,
-    SubscriptionsModule, 
+    SubscriptionsModule,
+    LegacyModule, 
      
   ],
   controllers: [AppController],

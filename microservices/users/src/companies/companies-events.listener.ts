@@ -1,75 +1,47 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import * as amqp from 'amqplib';
-// Asegúrate de tener este servicio creado para manejar la lógica de empresas
-import { CompaniesService } from './companies.service'; 
+import { Injectable } from '@nestjs/common';
+import { KafkaConsumerService } from '../kafka/kafka.consumer'; // Ajusta la ruta si es diferente en tu proyecto
+import { CompaniesService } from './companies.service';
 import { UsersService } from '../users/users.service';
 
+const TOPICS = {
+  COMPANY_CREATED: 'ms.company.created',
+  COMPANY_UPDATED: 'ms.company.updated',
+} as const;
+
 @Injectable()
-export class CompaniesEventsListener implements OnModuleInit {
-  constructor(private readonly companiesService: CompaniesService,private readonly usersService:UsersService) {}
+export class CompaniesEventsListener {   // ← sin OnModuleInit (nueva arquitectura)
+  constructor(
+    private readonly companiesService: CompaniesService,
+    private readonly usersService: UsersService,
+    private readonly kafkaConsumer: KafkaConsumerService,
+  ) { }
 
-  async onModuleInit() {
-    console.log('📡 Conectando a RabbitMQ para escuchar eventos de COMPANIES...,');
+  // El orquestador llama esto (nueva forma de registrar handlers)
+  registerHandlers() {
+    this.kafkaConsumer.registerHandler(
+      TOPICS.COMPANY_CREATED,
+      (eventType, data) => this.handleCompanyCreated(eventType, data),
+    );
 
-    try {
-      const connection = await amqp.connect('amqp://guest:guest@rabbitmq:5672');
-      const channel = await connection.createChannel();
-
-      // Definimos el exchange específico para empresas
-      const exchange = 'companies_events';
-      // Usamos el PID para que cada instancia del microservicio tenga su propia cola (útil en fanout)
-      const queue = `service_${process.pid}_companies_events`;
-
-      await channel.assertExchange(exchange, 'fanout', { durable: true });
-      await channel.assertQueue(queue, { durable: true });
-
-      await channel.bindQueue(queue, exchange, '');
-
-      console.log(
-        `🎧 Escuchando exchange [${exchange}] en la cola [${queue}]`
-      );
-
-      channel.consume(
-        queue,
-        async (msg) => {
-          if (!msg) return;
-
-          try {
-            const body = JSON.parse(msg.content.toString());
-            await this.handleEvent(body);
-            channel.ack(msg);
-          } catch (error) {
-            console.error('❌ Error procesando evento de compañía:', error);
-            // En caso de error, podrías decidir si hacer nack o no
-            channel.nack(msg, false, false); 
-          }
-        },
-        { noAck: false }
-      );
-    } catch (error) {
-      console.error('❌ Error de conexión en CompaniesEventsListener:', error);
-    }
+    this.kafkaConsumer.registerHandler(
+      TOPICS.COMPANY_UPDATED,
+      (eventType, data) => this.handleCompanyUpdated(eventType, data),
+    );
   }
- 
-  async handleEvent(event: any) {
-    switch (event.event) {
-      case 'companies.updated':
-        console.log('🏢 Procesando companies.updated…');
-        await this.companiesService.syncCompany(event.payload.company);
-        console.log(event.payload.company)
-        break;
 
-      case 'companies.created':
-        console.log('🏢 Procesando companies.created…');
-        await this.companiesService.syncCompany(event.payload.company);
-        await this.usersService.createCompanyAdmin(event.payload.company);
-        
-        break;
+  private async handleCompanyCreated(eventType: string, data: any) {
+    console.log(`🏢 [${eventType}] Compañía creada: ${data?.id}`);
 
-      default:
-        // console.log('❓ Evento de compañía no reconocido:', event.event);
-        break;
-    }
+    // En Kafka recibimos directamente el objeto de la compañía (no envuelto en { event, payload })
+    await this.companiesService.syncCompany(data);
+
+    // Lógica específica del evento created que tenías en RabbitMQ
+    await this.usersService.createCompanyAdmin(data);
   }
-  
+
+  private async handleCompanyUpdated(eventType: string, data: any) {
+    console.log(`🏢 [${eventType}] Compañía actualizada: ${data?.id}`);
+
+    await this.companiesService.syncCompany(data);
+  }
 }

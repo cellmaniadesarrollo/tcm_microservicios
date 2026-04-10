@@ -1,3 +1,4 @@
+//microservices\orders\src\customers-events\customers-events.controller.spec.ts
 import { Test, TestingModule } from '@nestjs/testing';
 import { CustomersEventsController } from './customers-events.controller';
 

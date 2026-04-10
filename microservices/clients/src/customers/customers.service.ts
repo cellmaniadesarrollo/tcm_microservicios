@@ -23,7 +23,6 @@ export class CustomersService {
         private readonly addressRepo: Repository<Address>,
         private readonly broadcast: BroadcastService,
 
-        private readonly kafkaProducer: KafkaProducerService,
     ) { }
 
     async create(data: any) {
@@ -89,24 +88,9 @@ export class CustomersService {
             }
             // 5️⃣ Evento (NO bloquea creación)
             try {
-                await this.broadcast.publish('customer.updated', {
-                    internalToken: process.env.INTERNAL_SECRET,
-                    customer: customerWithRelations,
-                });
+                await this.broadcast.publishClientCreated(customerWithRelations);
             } catch (eventError) {
-                // Log interno, pero no rompemos la operación
-                console.error('Error publicando evento customer.updated', eventError);
-            }
-            try {
-                await this.kafkaProducer.emit(
-                    'ms.client.created',           // ← Topic en Kafka
-                    'CLIENT_CREATED',              // ← Tipo de evento
-                    customerWithRelations,         // ← Datos completos
-                    customerWithRelations.id.toString()   // ← Key (importante)
-                );
-            } catch (kafkaError) {
-                console.error('Error publicando evento a Kafka:', kafkaError);
-                // NO lanzamos error, para no romper la creación del cliente
+                console.error('Error publicando evento CLIENT_CREATED:', eventError);
             }
             return customerWithRelations;
 
@@ -216,7 +200,7 @@ export class CustomersService {
             }
         });
 
-        await this.broadcast.publish('customer.updated', { internalToken: process.env.INTERNAL_SECRET, customer: customersavedata });
+        await this.broadcast.publishClientUpdated(customersavedata);
         return customersave;
     }
     async findPaginated(

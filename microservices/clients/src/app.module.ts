@@ -8,6 +8,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { BroadcastModule } from './broadcast/broadcast.module';
 import { CompaniesModule } from './companies/companies.module';
 import { KafkaModule } from './kafka/kafka.module';
+import { HealthModule } from './health/health.module';
+import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -19,8 +21,8 @@ import { KafkaModule } from './kafka/kafka.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }), CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule,],
+    }), CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule, HealthModule,],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, KafkaListenersOrchestrator],
 })
 export class AppModule { }

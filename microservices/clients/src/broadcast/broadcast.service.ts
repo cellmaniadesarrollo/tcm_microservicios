@@ -1,43 +1,52 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import * as amqp from 'amqplib';
+import { Injectable } from '@nestjs/common';
+import { KafkaProducerService } from '../kafka/kafka.producer';
+
+const TOPICS = {
+  CLIENT_CREATED: 'ms.client.created',
+  CLIENT_UPDATED: 'ms.client.updated',
+  CLIENT_BILLING_CREATED: 'ms.client.billing.created',
+  CLIENT_BILLING_UPDATED: 'ms.client.billing.updated',
+} as const;
 
 @Injectable()
-export class BroadcastService implements OnModuleInit, OnModuleDestroy {
-  private channel: amqp.Channel;
-  private connection: amqp.Connection;
+export class BroadcastService {
+  constructor(private readonly kafkaProducer: KafkaProducerService) { }
 
-  async onModuleInit() {
-    console.log('📡 Conectando a RabbitMQ...');
-
-    this.connection = await amqp.connect(process.env.RABBIT_URL||'amqp://rabbitmq:5672');
-    this.channel = await this.connection.createChannel();
-
-    console.log('✅ Conectado a RabbitMQ (BroadcastService)');
-  }
-
-  async onModuleDestroy() {
-    await this.channel?.close();
-    await this.connection?.close();
-  }
-
-  async publish(event: string, payload: any) {
-    const exchange = 'customers_events';
-
-    // Asegurar el exchange FANOUT
-    await this.channel.assertExchange(exchange, 'fanout', { durable: true });
-
-    const data = {
-      event,
-      payload,
-      emittedAt: new Date(),
-    };
-
-    this.channel.publish(
-      exchange,
-      '', // routingKey vacío en fanout
-      Buffer.from(JSON.stringify(data))
+  async publishClientCreated(customer: any): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.CLIENT_CREATED,
+      'CLIENT_CREATED',
+      customer,
+      customer.id?.toString(),
     );
+  }
 
-    console.log(`📤 Emitido en exchange [${exchange}] evento [${event}]`);
+  async publishClientUpdated(customer: any): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.CLIENT_UPDATED,
+      'CLIENT_UPDATED',
+      customer,
+      customer.id?.toString(),
+    );
+  }
+
+  // ==================== MÉTODOS DE BILLING ====================
+
+  async publishClientBillingCreated(billing: any): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.CLIENT_BILLING_CREATED,
+      'CLIENT_BILLING_CREATED',
+      billing,
+      billing.id?.toString(),
+    );
+  }
+
+  async publishClientBillingUpdated(billing: any): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.CLIENT_BILLING_UPDATED,
+      'CLIENT_BILLING_UPDATED',
+      billing,
+      billing.id?.toString(),
+    );
   }
 }

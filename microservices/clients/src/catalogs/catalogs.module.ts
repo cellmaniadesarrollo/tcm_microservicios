@@ -10,9 +10,10 @@ import { Gender } from './entities/gender.entity';
 import { IdType } from './entities/id-type.entity';
 import { ContactType } from './entities/contact-type.entity';
 import { IdentificationType } from './entities/identificationType.entity';
+import { PersonType } from './entities/person-type.entity';
 @Module({
-  imports: [TypeOrmModule.forFeature([Country, Province, City,Gender,IdType,ContactType,IdentificationType])],
+  imports: [TypeOrmModule.forFeature([Country, Province, City, Gender, IdType, ContactType, IdentificationType, PersonType])],
   controllers: [CatalogsController],
   providers: [CatalogsService]
 })
-export class CatalogsModule {}
+export class CatalogsModule { }

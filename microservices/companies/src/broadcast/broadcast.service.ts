@@ -1,52 +1,32 @@
-import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
-import * as amqp from 'amqplib';
+//microservices\companies\src\broadcast\broadcast.service.ts
+import { Injectable } from '@nestjs/common';
+import { KafkaProducerService } from '../kafka/kafka.producer';
+
+// Topics que emite este microservicio
+const TOPICS = {
+  COMPANY_CREATED: 'ms.company.created',
+  COMPANY_UPDATED: 'ms.company.updated',
+} as const;
+
 @Injectable()
-export class BroadcastService  
- implements OnModuleInit, OnModuleDestroy
-{
-  private channel: amqp.Channel;
-  private connection: amqp.Connection;
+export class BroadcastService {
+  constructor(private readonly kafkaProducer: KafkaProducerService) { }
 
-  async onModuleInit() {
-    console.log('🏢📡 Conectando a RabbitMQ (Companies)...');
-
-    this.connection = await amqp.connect(
-      process.env.RABBIT_URL || 'amqp://rabbitmq:5672',
-    );
-
-    this.channel = await this.connection.createChannel();
-
-    console.log('✅ Conectado a RabbitMQ (CompaniesBroadcastService)');
-  }
-
-  async onModuleDestroy() {
-    await this.channel?.close();
-    await this.connection?.close();
-  }
-
-  async publish(event: string, payload: any) {
-    const exchange = 'companies_events';
-
-    // Exchange FANOUT
-    await this.channel.assertExchange(exchange, 'fanout', {
-      durable: true,
-    });
-
-    const data = {
-      event,
-      payload,
-      emittedAt: new Date(),
-    };
-
-    this.channel.publish(
-      exchange,
-      '', // fanout no usa routingKey
-      Buffer.from(JSON.stringify(data)),
-    );
-
-    console.log(
-      `📤 [COMPANIES] Emitido evento [${event}] en exchange [${exchange}]`,
+  async publishCompanyCreated(company: any): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.COMPANY_CREATED,
+      'COMPANY_CREATED',
+      company,
+      company.id?.toString(),
     );
   }
 
+  async publishCompanyUpdated(company: any): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.COMPANY_UPDATED,
+      'COMPANY_UPDATED',
+      company,
+      company.id?.toString(),
+    );
+  }
 }

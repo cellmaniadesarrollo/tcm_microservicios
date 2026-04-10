@@ -12,7 +12,8 @@ import {
 } from 'typeorm';
 import { Contact } from './contact.entity';
 import { Address } from './address.entity';
-import { Billing } from '../../billing/entities/billing.entity';
+import { BillingData } from '../../billing/entities/billing-data.entity';
+import { CustomerBillingData } from '../../billing/entities/customer-billing-data.entity';
 import { IdType } from '../../catalogs/entities/id-type.entity';
 import { Gender } from '../../catalogs/entities/gender.entity';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
@@ -24,7 +25,6 @@ export class Customer {
   @PrimaryGeneratedColumn()
   id: number;
 
-  // 🔗 Solo relación por ID (CompanyReplica)
   @ManyToOne(() => CompanyReplica, { eager: true, nullable: false })
   company: CompanyReplica;
 
@@ -55,8 +55,12 @@ export class Customer {
   @OneToMany(() => Address, (address) => address.customer, { cascade: true })
   addresses: Address[];
 
-  @OneToMany(() => Billing, (billing) => billing.customer)
-  billings: Billing[];
+  @OneToMany(() => BillingData, (billing) => billing.customer)
+  billings: BillingData[];
+
+  // Nueva relación con la tabla pivote
+  @OneToMany(() => CustomerBillingData, (cbd) => cbd.customer, { cascade: true })
+  billingDataLinks: CustomerBillingData[];
 
   @BeforeInsert()
   @BeforeUpdate()
@@ -70,4 +74,5 @@ export class Customer {
 
   @UpdateDateColumn({ type: 'timestamp' })
   updatedAt: Date;
+
 }

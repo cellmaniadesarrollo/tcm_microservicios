@@ -1,51 +1,38 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import * as amqp from 'amqplib'; 
+import { Injectable } from '@nestjs/common';
+import { KafkaConsumerService } from '../kafka/kafka.consumer';
 import { UsersService } from './users.service';
 
+const TOPICS = {
+  USER_CREATED: 'ms.user.created',
+  USER_UPDATED: 'ms.user.updated',
+} as const;
+
 @Injectable()
-export class UsersEventsListener implements OnModuleInit {
-  constructor(private readonly cacheService: UsersService) {}
+export class UsersEventsListener {   // ← sin OnModuleInit (siguiendo la lógica del otro MS)
+  constructor(
+    private readonly cacheService: UsersService,
+    private readonly kafkaConsumer: KafkaConsumerService,
+  ) { }
 
-  async onModuleInit() {
-    console.log('📡 Conectando a RabbitMQ para escuchar eventos de Users...');
-
-    const connection = await amqp.connect('amqp://guest:guest@rabbitmq:5672');
-    const channel = await connection.createChannel();
- 
-    const exchange = 'users_events';
-    const queue = `service_${process.pid}_users_events`;
-
-    await channel.assertExchange(exchange, 'fanout', { durable: true });
-    await channel.assertQueue(queue, { durable: true });
-
-    await channel.bindQueue(queue, exchange, '');
-
-    console.log(
-      `🎧 Escuchando exchange [${exchange}] en la cola [${queue}]`
+  registerHandlers() {
+    this.kafkaConsumer.registerHandler(
+      TOPICS.USER_CREATED,
+      (eventType, data) => this.handleUserCreated(eventType, data),
     );
 
-    channel.consume(
-      queue,
-      async (msg) => {
-        if (!msg) return;
-
-        const body = JSON.parse(msg.content.toString());
-
-      //  console.log('📩 Evento recibido:', body);
-
-        await this.handleEvent(body);
-
-        channel.ack(msg);
-      },
-      { noAck: false }
+    this.kafkaConsumer.registerHandler(
+      TOPICS.USER_UPDATED,
+      (eventType, data) => this.handleUserUpdated(eventType, data),
     );
   }
 
-  // 🟦 En vez de EventPattern —> AMQPLIB
-  async handleEvent(event: any) {
-    if (event.event === 'users.updated') {
-      console.log('🔵 Procesando customer.updated…');
-      await this.cacheService.syncUser(event.payload.user);
-    }
+  private async handleUserCreated(eventType: string, data: any) {
+    console.log(`🔵 [${eventType}] Usuario creado: ${data?.id}`);
+    await this.cacheService.syncUser(data);   // ← data ya es el usuario completo (lógica del otro MS)
+  }
+
+  private async handleUserUpdated(eventType: string, data: any) {
+    console.log(`🔵 [${eventType}] Usuario actualizado: ${data?.id}`);
+    await this.cacheService.syncUser(data);   // ← data ya es el usuario completo (lógica del otro MS)
   }
 }
