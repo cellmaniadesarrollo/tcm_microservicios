@@ -138,6 +138,7 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - LEGACY_JWT_SECRET
     networks:
       - backend
     depends_on:
