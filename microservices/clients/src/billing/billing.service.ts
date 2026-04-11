@@ -285,15 +285,16 @@ export class BillingService {
             if (!data?.personTypeId)
                 throw new RpcException(new BadRequestException('personTypeId es requerido'));
 
-            // ── Buscar o crear BillingData ────────────────────────────────
-            const existingBilling = await this.billingRepo.findOne({
-                where: {
-                    idNumber: data.idNumber,
-                    company: { id: data.user.companyId },
-                },
-            });
+            let somethingWasCreated = false;
 
+            // ── Buscar o crear BillingData ────────────────────────────────
             let billingSaved: BillingData;
+
+            const existingBilling = await this.billingRepo
+                .createQueryBuilder('b')
+                .where('b.idNumber = :idNumber', { idNumber: data.idNumber })
+                .andWhere('b.companyId = :companyId', { companyId: data.user.companyId })
+                .getOne();
 
             if (existingBilling) {
                 logger.log(`BillingData ya existe id: ${existingBilling.id}`);
@@ -318,18 +319,20 @@ export class BillingService {
                 });
 
                 billingSaved = await this.billingRepo.save(billing);
-                logger.log(`BillingData creado  id: ${billingSaved.id}`);
+                somethingWasCreated = true;
+                logger.log(`BillingData creado id: ${billingSaved.id}`);
             }
 
             // ── Buscar o crear Customer mínimo ────────────────────────────
-            let customer = await this.customerRepo.findOne({
-                where: {
-                    idNumber: data.idNumber,
-                    company: { id: data.user.companyId },
-                },
-            });
+            let customer = await this.customerRepo
+                .createQueryBuilder('c')
+                .where('c.idNumber = :idNumber', { idNumber: data.idNumber })
+                .andWhere('c.companyId = :companyId', { companyId: data.user.companyId })
+                .getOne();
 
-            if (!customer) {
+            if (customer) {
+                logger.log(`Customer ya existe id: ${customer.id}`);
+            } else {
                 const emailContactType = await this.contactTypeRepo.findOne({
                     where: { name: 'EMAIL' },
                 });
@@ -351,6 +354,7 @@ export class BillingService {
                 });
 
                 customer = await this.customerRepo.save(newCustomer);
+                somethingWasCreated = true;
                 logger.log(`Cliente mínimo creado id: ${customer.id}`);
             }
 
@@ -362,7 +366,9 @@ export class BillingService {
                 },
             });
 
-            if (!alreadyLinked) {
+            if (alreadyLinked) {
+                logger.log(`Vínculo ya existe customer ${customer.id} ↔ billing ${billingSaved.id}`);
+            } else {
                 await this.pivotRepo.save(
                     this.pivotRepo.create({
                         customer: { id: customer.id },
@@ -370,20 +376,28 @@ export class BillingService {
                         isDefault: false,
                     }),
                 );
+                somethingWasCreated = true;
                 logger.log(`Vínculo creado customer ${customer.id} ↔ billing ${billingSaved.id}`);
             }
 
             // ── Retornar resultado completo ───────────────────────────────
-            const customerBillingWithRelations = await this.billingRepo.findOne({
+            const result = await this.billingRepo.findOne({
                 where: { id: billingSaved.id },
                 relations: { idType: true, personType: true, customerLinks: { customer: true } },
             });
-            try {
-                await this.broadcast.publishClientBillingCreated(customerBillingWithRelations);
-            } catch (eventError) {
-                console.error('Error publicando evento CLIENT_CREATED:', eventError);
+
+            if (somethingWasCreated) {
+                try {
+                    await this.broadcast.publishClientBillingCreated(result);
+                } catch (eventError) {
+                    console.error('Error publicando evento CLIENT_CREATED:', eventError);
+                }
+            } else {
+                logger.log(`Todo ya existía, evento no publicado para idNumber: ${data.idNumber}`);
             }
-            return customerBillingWithRelations
+
+            return result;
+
         } catch (error) {
             logger.error(error);
             if (error instanceof RpcException) throw error;

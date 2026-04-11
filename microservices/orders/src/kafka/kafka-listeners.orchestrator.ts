@@ -14,14 +14,15 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
     ) { }
 
     async onModuleInit() {
-        // 1. Todos registran sus handlers (preparar los temas)
-        this.companiesListener.registerHandlers();
-        this.usersListener.registerHandlers();
-        this.customersListener.registerHandlers(); // <-- 2. Registramos los de clientes
+        try { this.companiesListener.registerHandlers(); }
+        catch (e) { console.error('❌ Companies handler error :', e); }
 
-        // 2. Un solo start() con todos los topics listos y suscritos
+        try { this.usersListener.registerHandlers(); }
+        catch (e) { console.error('❌ Users handler error: ', e); }
+
+        try { this.customersListener.registerHandlers(); }
+        catch (e) { console.error('❌ Customers handler error:', e); }
+
         await this.kafkaConsumer.start();
-
-        console.log('✅ Kafka — todos los listeners activos (Companies, Users, Customers)');
     }
 }

@@ -7,21 +7,20 @@ import { CustomerContactCache } from './entities/customer-contact-cache.entity';
 
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { CustomersEventsListener } from './customers-events.listener';
-import { KafkaModule } from '../kafka/kafka.module';
 @Module({
-  imports: [KafkaModule, TypeOrmModule.forFeature([CustomerCache, CustomerContactCache]),
-    ClientsModule.register([
-      {
-        name: 'CUSTOMER_ASYNC',
-        transport: Transport.RMQ,
-        options: {
-          urls: ['amqp://rabbitmq:5672'],
-          queue: 'customers_queue_sync',
-          queueOptions: { durable: true },
-          persistent: true
-        },
+  imports: [TypeOrmModule.forFeature([CustomerCache, CustomerContactCache]),
+  ClientsModule.register([
+    {
+      name: 'CUSTOMER_ASYNC',
+      transport: Transport.RMQ,
+      options: {
+        urls: ['amqp://rabbitmq:5672'],
+        queue: 'customers_queue_sync',
+        queueOptions: { durable: true },
+        persistent: true
       },
-    ]),
+    },
+  ]),
   ],
   controllers: [CustomersEventsController],
   providers: [CustomersEventsService, CustomersEventsListener],

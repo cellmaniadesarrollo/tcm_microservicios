@@ -6,10 +6,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyReplica } from './entities/company-replica.entity';
 import { BranchReplica } from './entities/branch-replica.entity';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { KafkaModule } from '../kafka/kafka.module';
+
 
 @Module({
-  imports: [KafkaModule,
+  imports: [
     TypeOrmModule.forFeature([
       CompanyReplica,
       BranchReplica

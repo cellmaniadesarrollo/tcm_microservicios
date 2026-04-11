@@ -1,14 +1,21 @@
-//microservices\clients\src\billing\entities\billing-data.entity.ts
+// microservices\clients\src\billing\entities\billing-data.entity.ts
 import {
-  Entity, PrimaryGeneratedColumn, Column,
-  ManyToOne, OneToMany,
-  BeforeInsert, BeforeUpdate,
-  CreateDateColumn, UpdateDateColumn,
+  Entity,
+  PrimaryColumn,           // ← Cambiado
+  Column,
+  ManyToOne,
+  OneToMany,
+  BeforeInsert,
+  BeforeUpdate,
+  CreateDateColumn,
+  UpdateDateColumn,
   Index,
 } from 'typeorm';
+import { ObjectId } from 'mongodb';   // ← NUEVO (para generar ObjectId)
+
 import { IdType } from '../../catalogs/entities/id-type.entity';
 import { Gender } from '../../catalogs/entities/gender.entity';
-import { PersonType } from '../../catalogs/entities/person-type.entity'; // ← NUEVO
+import { PersonType } from '../../catalogs/entities/person-type.entity';
 import { CustomerBillingData } from './customer-billing-data.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
@@ -17,8 +24,8 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 @Entity('billing_data')
 export class BillingData {
 
-  @PrimaryGeneratedColumn()
-  id: number;
+  @PrimaryColumn({ type: 'varchar', length: 24 })   // ← Cambiado a varchar(24)
+  id: string;                                       // ← Ahora es string (ObjectId)
 
   @ManyToOne(() => CompanyReplica, { eager: true, nullable: false })
   company: CompanyReplica;
@@ -26,17 +33,14 @@ export class BillingData {
   @ManyToOne(() => IdType, { eager: true, nullable: false })
   idType: IdType;
 
-  // ← REMOVIDO: identificationCode (ya lo tienes normalizado en la tabla IdType)
-
   @Column({ type: 'varchar', length: 30 })
   idNumber: string;
 
-  @Column({ type: 'varchar', length: 100, })
+  @Column({ type: 'varchar', length: 100 })
   firstName: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   lastName: string;
-
 
   @Column({ type: 'varchar', length: 200, nullable: true })
   tradeName: string;
@@ -56,7 +60,6 @@ export class BillingData {
   @ManyToOne(() => Gender, { eager: true, nullable: true })
   gender: Gender;
 
-  // ← NUEVO: ahora es una relación (igual que Gender o IdType)
   @ManyToOne(() => PersonType, { eager: true, nullable: false })
   personType: PersonType;
 
@@ -78,6 +81,15 @@ export class BillingData {
   @ManyToOne(() => Customer, (customer) => customer.billings, { nullable: true })
   customer: Customer;
 
+  // ← NUEVO: Genera ObjectId automáticamente al insertar
+  @BeforeInsert()
+  generateObjectId() {
+    if (!this.id) {
+      this.id = new ObjectId().toHexString();
+    }
+  }
+
+  // ← Método original (se mantiene igual)
   @BeforeInsert()
   @BeforeUpdate()
   normalizeFields() {

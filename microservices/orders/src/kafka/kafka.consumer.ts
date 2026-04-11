@@ -1,3 +1,4 @@
+//microservices\orders\src\kafka\kafka.consumer.ts
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Kafka, Consumer, EachMessagePayload, logLevel } from 'kafkajs';
 
@@ -11,7 +12,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
     constructor() {
         this.kafka = new Kafka({
-            clientId: 'ms-orders-consumer',        // ← cambiado a orders
+            clientId: 'ms-orders-consumer1',        // ← cambiado a orders
             brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092'],
             retry: {
                 initialRetryTime: 100,
@@ -25,7 +26,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.consumer = this.kafka.consumer({
-            groupId: 'ms-orders-consumer-group',   // ← cambiado a orders
+            groupId: 'ms-orders-consumer-group1',   // ← cambiado a orders
             sessionTimeout: 45000,
             heartbeatInterval: 5000,
             rebalanceTimeout: 60000,
@@ -59,7 +60,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
             await this.consumer.subscribe({
                 topics,
-                fromBeginning: false,
+                //  fromBeginning: false,
             });
 
             console.log(`📥 Suscrito a topics: ${topics.join(', ')}`);
