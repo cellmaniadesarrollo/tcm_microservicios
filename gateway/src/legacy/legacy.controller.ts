@@ -1,5 +1,5 @@
 // src/legacy/legacy.controller.ts
-import { Controller, Post, Body, UseGuards, HttpCode, Request } from '@nestjs/common';
+import { Controller, Post, Put, Body, UseGuards, HttpCode, Request, Param } from '@nestjs/common';
 import { LegacyAuthGuard } from './legacy-auth/legacy-auth.guard';
 import { LegacyService } from './legacy.service';
 
@@ -14,5 +14,16 @@ export class LegacyController {
         const tokenData = req.user;
         const result = await this.legacyService.publishLegacyBilling(payload, tokenData);
         return result;
+    }
+    @Put('billing/:id')
+    @UseGuards(LegacyAuthGuard)
+    @HttpCode(200)
+    async updateLegacyBilling(
+        @Param('id') id: string,        // 👈 capturar el id
+        @Body() payload: any,
+        @Request() req: any,
+    ) {
+        const tokenData = req.user;
+        return this.legacyService.publishLegacyBillingUpdate(id, payload, tokenData);
     }
 }

@@ -16,6 +16,7 @@ export class LegacyJwtStrategy extends PassportStrategy(Strategy, 'legacy-jwt') 
 
     async validate(payload: any) {
         // Puedes agregar validaciones extras aquí si quieres
+        console.log('Contenido del Token Decodificado:', payload);
         return payload;
     }
 }

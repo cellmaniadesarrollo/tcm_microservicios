@@ -1,6 +1,7 @@
 import {
     BadRequestException, ForbiddenException,
     Injectable, InternalServerErrorException, Logger,
+    NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Like, QueryFailedError, Repository } from 'typeorm';
@@ -258,6 +259,7 @@ export class BillingService {
 
 
     async createFromLegacyRaw(raw: any) {
+        console.log(`[RAW] antes de normalize: ${JSON.stringify(raw)}`);
         // companyId ya viene dentro del payload legacy
         if (!raw?.company_id && !raw?.user?.companyId)
             throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));
@@ -407,6 +409,91 @@ export class BillingService {
         }
     }
 
+    async updateFromLegacyRaw(raw: any) {
+        if (!raw?.company_id && !raw?.user?.companyId)
+            throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));
+
+        if (!raw?.billingId)
+            throw new RpcException(new BadRequestException('billingId ausente en payload'));
+
+        const companyId = raw.company_id ?? raw.user?.companyId;
+        const normalized = await this.normalizeLegacyPayload(raw, { companyId });
+
+        return this.updateFromLegacy({ ...normalized, billingId: raw.billingId }); // 👈 pasa el id
+    }
+
+    async updateFromLegacy(data: any) {
+        const logger = new Logger('LegacyBillingUpdate');
+
+        try {
+            // ── Validaciones ──────────────────────────────────────────────
+            if (!data?.user?.companyId)
+                throw new RpcException(new BadRequestException('companyId ausente'));
+            if (!data?.billingId)
+                throw new RpcException(new BadRequestException('billingId es requerido'));
+            if (!data?.idNumber)
+                throw new RpcException(new BadRequestException('idNumber es requerido'));
+            if (!data?.idTypeId)
+                throw new RpcException(new BadRequestException('idTypeId es requerido'));
+            if (!data?.personTypeId)
+                throw new RpcException(new BadRequestException('personTypeId es requerido'));
+
+            // ── Buscar billing por id — 404 si no existe ──────────────────
+            const existingBilling = await this.billingRepo.findOne({
+                where: {
+                    id: data.billingId,
+                    company: { id: data.user.companyId },
+                },
+            });
+
+            if (!existingBilling)
+                throw new RpcException(
+                    new NotFoundException(`BillingData no encontrado id: ${data.billingId}`),
+                );
+
+            logger.log(`Actualizando BillingData id: ${existingBilling.id}`);
+
+            // ── Actualizar todos los campos editables ─────────────────────
+            await this.billingRepo.update(existingBilling.id, {
+                idType: { id: data.idTypeId },
+                personType: { id: data.personTypeId },
+                gender: data.genderId ? { id: data.genderId } : undefined,
+                idNumber: data.idNumber,
+                tradeName: data.tradeName,
+                firstName: data.firstName,
+                lastName: data.lastName,
+                mainEmail: data.mainEmail,
+                cellphone: data.cellphone,
+                phone: data.phone,
+                birthdate: data.birthdate,
+                address: data.address,
+                city: data.city,
+                isCompanyClient: data.isCompanyClient ?? false,
+            });
+
+            // ── Retornar resultado actualizado ────────────────────────────
+            const result = await this.billingRepo.findOne({
+                where: { id: existingBilling.id },
+                relations: { idType: true, personType: true, customerLinks: { customer: true } },
+            });
+
+            // ── Emitir evento Kafka ───────────────────────────────────────
+            try {
+                await this.broadcast.publishClientBillingUpdated(result);
+            } catch (eventError) {
+                logger.error('Error publicando evento publishClientBillingUpdated:', eventError);
+            }
+
+            return result;
+
+        } catch (error) {
+            logger.error(error);
+            if (error instanceof RpcException) throw error;
+            throw new RpcException(
+                new InternalServerErrorException('Error actualizando billing desde legacy'),
+            );
+        }
+    }
 
     // ── Mapa estático de nombres legacy → nombre normalizado en BD ────────────────
     private readonly LEGACY_ID_TYPE_MAP: Record<string, string> = {
