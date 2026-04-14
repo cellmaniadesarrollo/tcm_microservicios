@@ -259,7 +259,6 @@ export class BillingService {
 
 
     async createFromLegacyRaw(raw: any) {
-        console.log(`[RAW] antes de normalize: ${JSON.stringify(raw)}`);
         // companyId ya viene dentro del payload legacy
         if (!raw?.company_id && !raw?.user?.companyId)
             throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));

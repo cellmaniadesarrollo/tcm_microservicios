@@ -19,7 +19,6 @@ export class LegacyService {
             },
             ...payload,
         };
-        this.logger.log(`[GATEWAY] mensaje RPC: ${JSON.stringify(message)}`);
         // 👇 send en lugar de emit — espera respuesta
         return firstValueFrom(
             this.customersService.send('legacy_create_billing', message),

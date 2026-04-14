@@ -42,7 +42,6 @@ export class BillingController {
 
   @MessagePattern('legacy_create_billing')
   async handleLegacyBilling(@Payload() data: any) {
-    console.log(`[HANDLER] payload recibido: ${JSON.stringify(Payload)}`);
     return this.billingService.createFromLegacyRaw(data);
   }
   @MessagePattern('legacy_update_billing')

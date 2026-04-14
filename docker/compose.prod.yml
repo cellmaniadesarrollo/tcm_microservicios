@@ -30,7 +30,9 @@ services:
     image: apache/kafka:3.8.0
     container_name: kafka
     restart: always
-    # NO exponer puertos al exterior (seguridad)
+    ports:
+      - "9092:9092"
+      - "9094:9094"   # ← este es el que falt
     environment:
       # KRaft obligatorio
       - KAFKA_NODE_ID=${KAFKA_NODE_ID:-1}
