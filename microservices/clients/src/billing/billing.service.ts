@@ -13,6 +13,7 @@ import { ContactType } from '../catalogs/entities/contact-type.entity';
 import { IdType } from '../catalogs/entities/id-type.entity';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { PersonType } from '../catalogs/entities/person-type.entity';
+import { Gender } from '../catalogs/entities/gender.entity';
 
 @Injectable()
 export class BillingService {
@@ -34,8 +35,8 @@ export class BillingService {
         @InjectRepository(PersonType)
         private readonly personTypeRepo: Repository<PersonType>,
 
-        @InjectRepository(ContactType)
-        private readonly genderRepo: Repository<ContactType>,
+        @InjectRepository(Gender)
+        private readonly genderRepo: Repository<Gender>,
 
         @InjectRepository(IdType)
         private readonly idTypeRepo: Repository<IdType>,
@@ -266,6 +267,7 @@ export class BillingService {
         const companyId = raw.company_id ?? raw.user?.companyId;
 
         const normalized = await this.normalizeLegacyPayload(raw, { companyId });
+
         return this.createFromLegacy(normalized);
     }
 
@@ -549,7 +551,9 @@ export class BillingService {
         if (raw.sex && raw.sex !== 'N/A') {
             const genderName = this.LEGACY_GENDER_MAP[raw.sex];
             if (genderName) {
+                console.log(genderName)
                 const gender = await this.genderRepo.findOne({ where: { name: genderName } });
+
                 genderId = gender?.id;
                 if (!gender)
                     logger.warn(`Gender '${raw.sex}' → '${genderName}' no encontrado en BD, se omitirá`);

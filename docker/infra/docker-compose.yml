@@ -55,22 +55,21 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        TOPICS=(
-          ms.client.created
-          ms.client.updated
-          ms.company.created
-          ms.company.updated
-          ms.user.created
-          ms.user.updated
-          ms.client.billing.created
-          ms.client.billing.updated
-        )
-        for TOPIC in "$${TOPICS[@]}"; do
+        for TOPIC in \
+          ms.client.created \
+          ms.client.updated \
+          ms.company.created \
+          ms.company.updated \
+          ms.user.created \
+          ms.user.updated \
+          ms.client.billing.created \
+          ms.client.billing.updated; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic $$TOPIC \
             --partitions 1 --replication-factor 1
+          echo "Topic listo: $$TOPIC"
         done
-        echo "Topics listos: $${#TOPICS[@]}"
+        echo "Todos los topics creados"
   redis:
     image: redis:7-alpine
     container_name: redis-realtime
