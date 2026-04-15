@@ -143,8 +143,8 @@ export class UsersEmployeesEventsService {
                     email: isCompanyAdmin
                         ? user.email_user
                         : user.employee?.email_business ?? user.email_user,
-                    phone: isCompanyAdmin ? '' : user.employee?.phone_personal ?? '',
-                    company: user.company,               // 🔥 SIEMPRE
+                    phone: isCompanyAdmin ? '' : user.employee?.phone_business ?? '',
+                    company: user.company,
                     createdAt: user.createdAt,
                     updatedAt: user.updatedAt,
                 };
