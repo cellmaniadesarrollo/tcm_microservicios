@@ -1,5 +1,5 @@
 // dto/close-order-gateway.dto.ts
-import { IsInt, IsPositive, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { IsInt, IsPositive, IsOptional, IsString, IsBoolean, Min } from 'class-validator';
 
 export class CloseOrderGatewayDto {
     @IsInt()
@@ -22,7 +22,7 @@ export class CloseOrderGatewayDto {
     @IsInt()
     paymentMethodId?: number;
 
-    @IsPositive({ message: 'El monto final debe ser mayor que cero' })
+    @Min(0, { message: 'El monto final debe ser mayor o igual a cero' })
     amount: number;
 
     @IsOptional()
