@@ -1,0 +1,92 @@
+{
+  "basics": {
+    "name": "Byron Paramo",
+    "headline": "Software Developer & Systems Architect",
+    "email": "byron.pato@hotmail.com",
+    "phone": "",
+    "location": "Guayaquil, Ecuador",
+    "url": {
+      "label": "",
+      "href": ""
+    },
+    "customFields": [],
+    "picture": {
+      "url": "",
+      "effects": {
+        "hidden": false,
+        "border": false,
+        "grayscale": false
+      }
+    }
+  },
+  "sections": {
+    "summary": {
+      "name": "Resumen Profesional",
+      "columns": 1,
+      "content": "Desarrollador Full-stack especializado en arquitectura de microservicios y sistemas escalables. Experiencia sólida implementando soluciones de sincronización en tiempo real y mensajería distribuida.",
+      "visible": true
+    },
+    "experience": {
+      "name": "Experiencia Laboral",
+      "columns": 1,
+      "visible": true,
+      "items": [
+        {
+          "id": "1",
+          "visible": true,
+          "company": "TeamCellmania",
+          "position": "Lead Developer / Architect",
+          "date": "2024 - Presente",
+          "summary": "Liderazgo técnico en la implementación de microservicios para gestión de órdenes y suscripciones.",
+          "url": {
+            "label": "",
+            "href": ""
+          }
+        }
+      ]
+    },
+    "skills": {
+      "name": "Habilidades Técnicas",
+      "columns": 1,
+      "visible": true,
+      "items": [
+        {
+          "id": "1",
+          "visible": true,
+          "name": "Backend",
+          "description": "NestJS, Node.js, PostgreSQL, Kafka, RabbitMQ",
+          "level": 5
+        },
+        {
+          "id": "2",
+          "visible": true,
+          "name": "Frontend & Herramientas",
+          "description": "Angular, Astro, Docker, pnpm",
+          "level": 4
+        }
+      ]
+    }
+  },
+  "metadata": {
+    "template": "chameleon",
+    "layout": [],
+    "css": {
+      "value": "",
+      "visible": false
+    },
+    "theme": {
+      "primary": "#2563eb",
+      "text": "#000000",
+      "background": "#ffffff"
+    },
+    "typography": {
+      "font": {
+        "family": "Inter",
+        "subset": "latin",
+        "variants": ["400", "700"],
+        "size": 14
+      },
+      "lineHeight": 1.5
+    }
+  }
+}
