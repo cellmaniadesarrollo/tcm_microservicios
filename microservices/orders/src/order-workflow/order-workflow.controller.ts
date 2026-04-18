@@ -10,6 +10,7 @@ import { CloseOrderDto } from '../order-findings/dto/close-order.dto';
 import { OrderDelivery } from './entities/order-delivery.entity';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
+import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
@@ -149,5 +150,12 @@ export class OrderWorkflowController {
     user: { userId: string; companyId: string; branchId: string };
   }) {
     return this.orderWorkflowService.updateOrderNote(data.noteId, data.dto, data.user);
+  }
+  @MessagePattern({ cmd: 'get_order_payment' })
+  async getOrderPayment(data: {
+    dto: GetOrderPaymentDto;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.getOrderPayment(data.dto, data.user);
   }
 }

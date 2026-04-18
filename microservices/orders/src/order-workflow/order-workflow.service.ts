@@ -32,6 +32,7 @@ import { NoteLogAction, OrderNoteLog } from './entities/order-note-log.entity';
 import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
+import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -65,30 +66,6 @@ export class OrderWorkflowService {
     private readonly notificationsService: NotificationsService,
     private readonly userCacheService: UsersEmployeesEventsService,
   ) { }
-  // ─── Helper privado para emitir notificaciones ────────────────────────────
-  private async emitNotification(
-    orderId: number,
-    companyId: string,
-    userId: string,
-    event: string,
-    message: string,
-  ) {
-    const [order, username] = await Promise.all([
-      this.getOrderNotificationData(orderId, companyId),
-      this.userCacheService.getUsernameById(userId, companyId),
-    ]);
-
-    if (!order) return;
-
-    await this.notificationsService.emitOrderUpdated(
-      order,
-      event,
-      message,
-      username || 'Usuario desconocido',
-      companyId || 'Compañía desconocida',
-    );
-  }
-
   async createOrder(
     dto: CreateOrderDto,
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
@@ -228,6 +205,31 @@ export class OrderWorkflowService {
       return { ...savedOrder, attachments };
     });
   }
+  // ─── Helper privado para emitir notificaciones ────────────────────────────
+  private async emitNotification(
+    orderId: number,
+    companyId: string,
+    userId: string,
+    event: string,
+    message: string,
+  ) {
+    const [order, username] = await Promise.all([
+      this.getOrderNotificationData(orderId, companyId),
+      this.userCacheService.getUsernameById(userId, companyId),
+    ]);
+
+    if (!order) return;
+
+    await this.notificationsService.emitOrderUpdated(
+      order,
+      event,
+      message,
+      username || 'Usuario desconocido',
+      companyId || 'Compañía desconocida',
+    );
+  }
+
+
 
   async listOrders(
     user: { companyId: string; branchId: string; userId: string },
@@ -800,7 +802,7 @@ export class OrderWorkflowService {
       const isOutgoing = order.order_type_id === 3;
       const deliveryRepo = manager.getRepository(OrderDelivery);
       const deliveredAt = new Date();
-
+      console.log(dto)
       const deliveryData = {
         order_id: dto.orderId,
         delivered_at: deliveredAt,
@@ -1311,5 +1313,51 @@ export class OrderWorkflowService {
       status: data.currentStatus.name,
       branch: data.branch.name,
     };
+  }
+
+
+
+  async getOrderPayment(
+    dto: GetOrderPaymentDto,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    const payment = await this.paymentRepository
+      .createQueryBuilder('payment')
+      .leftJoinAndSelect('payment.order', 'order')
+      .leftJoinAndSelect('order.company', 'company')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+      .leftJoinAndSelect('payment.paymentType', 'paymentType')
+      .leftJoinAndSelect('payment.paymentMethod', 'paymentMethod')
+      .leftJoinAndSelect('payment.receivedBy', 'receivedBy')
+
+      // ✅ NUEVOS JOINS PARA TRAER MODELO Y MARCA
+      .leftJoinAndSelect('order.device', 'device')           // Device de la orden
+      .leftJoinAndSelect('device.model', 'model')            // Modelo del dispositivo
+      .leftJoinAndSelect('model.brand', 'brand')             // ← Marca (ajusta el nombre si en tu entidad Model se llama distinto)
+
+      .where('payment.id = :paymentId', { paymentId: dto.payment_id })
+      .andWhere('payment.company_id = :companyId', { companyId: user.companyId })
+      .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+      .getOne();
+    if (!payment) {
+      throw new RpcException({
+        statusCode: 404,
+        message: `Pago con id ${dto.payment_id} no encontrado`,
+      });
+    }
+
+    // Doble check de seguridad (defensa adicional)
+    if (
+      payment.company_id !== user.companyId ||
+      payment.order?.company_id !== user.companyId
+    ) {
+      throw new RpcException({
+        statusCode: 403,
+        message: 'No tienes acceso a este recurso',
+      });
+    }
+
+    return payment;
   }
 }
