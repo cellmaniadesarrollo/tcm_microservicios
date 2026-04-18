@@ -680,6 +680,25 @@ export class OrdersController {
       ),
     );
   }
+
+  @Get('payments/:paymentId')
+  @Groups('CASHIERS')
+  async getOrderPayment(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_order_payment' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto: { payment_id: paymentId },
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
+
 }
 // Type guard (fuera o dentro de la clase)
 function isMultipartFile(part: any): part is { file: any; filename: string; mimetype: string } {
