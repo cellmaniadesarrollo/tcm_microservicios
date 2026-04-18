@@ -135,7 +135,7 @@ export class OrderWorkflowController {
     console.log(data)
     return this.orderWorkflowService.createOrderNote(data.dto, data.user);
   }
-
+  //para rebuild test
   @MessagePattern({ cmd: 'delete_order_note' })
   async deleteOrderNote(data: {
     dto: { note_id: number };
