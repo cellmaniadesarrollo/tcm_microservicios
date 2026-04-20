@@ -51,7 +51,7 @@ async function bootstrap() {
       'https://localhost:4200',
       'https://ventas.teamcellmania.com',
       'https://main.d390e7o0gs41o8.amplifyapp.com',
-      'https://www.teamcellmania.com/',
+      'https://www.teamcellmania.com',
       'https://teamcellmania.com',
       'https://master.d20yuczo7axzff.amplifyapp.com'
 
