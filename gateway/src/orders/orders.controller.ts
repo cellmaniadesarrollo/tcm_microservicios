@@ -699,6 +699,17 @@ export class OrdersController {
     );
   }
 
+
+  @Get('warranty/check/:imei')
+  @Public()
+  async checkWarranty(@Param('imei') imei: string) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'check_warranty_by_imei' },
+        { dto: { imei } },
+      ),
+    );
+  }
 }
 // Type guard (fuera o dentro de la clase)
 function isMultipartFile(part: any): part is { file: any; filename: string; mimetype: string } {

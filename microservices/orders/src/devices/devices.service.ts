@@ -8,9 +8,14 @@ import { randomUUID } from 'crypto';
 import { DeviceResponseDto } from './dto/device-response.dto';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { RpcException } from '@nestjs/microservices';
+import { CheckWarrantyDto } from './dto/check-warranty.dto';
+import { FindingProcedure } from '../order-findings/entities/finding-procedure.entity';
+import { AwsS3Service } from '../aws-s3/aws-s3.service';
+import { Attachment, AttachmentEntityType } from '../order-findings/entities/attachment.entity';
 @Injectable()
 export class DevicesService {
   constructor(
+    private readonly awsS3Service: AwsS3Service,
     @InjectRepository(Device)
     private readonly deviceRepo: Repository<Device>,
 
@@ -19,6 +24,10 @@ export class DevicesService {
 
     @InjectRepository(DeviceAccount)
     private readonly accountRepo: Repository<DeviceAccount>,
+    @InjectRepository(FindingProcedure)
+    private readonly findingProcedureRepository: Repository<FindingProcedure>,
+    @InjectRepository(Attachment)
+    private readonly attachmentRepository: Repository<Attachment>,
   ) { }
 
   async createDevice(data: any) {
@@ -379,4 +388,141 @@ export class DevicesService {
     };
   }
 
+
+  async checkWarrantyByImei(dto: CheckWarrantyDto) {
+    // 1️⃣ Buscar el IMEI
+    const imeiRecords = await this.imeiRepo.find({
+      where: { imei_number: dto.imei },
+      relations: {
+        device: {
+          model: true,
+          type: true,
+          imeis: true,
+        },
+      },
+    });
+
+    if (!imeiRecords.length) {
+      throw new RpcException({
+        statusCode: 404,
+        message: `No se encontró un dispositivo con IMEI ${dto.imei}`,
+      });
+    }
+
+    // 2️⃣ Device IDs para este IMEI
+    const deviceIds = imeiRecords.map((r) => r.device.device_id);
+
+    // 3️⃣ Procedimientos con garantía (sin join de attachments)
+    const procedures = await this.findingProcedureRepository
+      .createQueryBuilder('fp')
+      .innerJoinAndSelect('fp.finding', 'finding')
+      .innerJoinAndSelect('finding.order', 'order')
+      .leftJoinAndSelect('order.currentStatus', 'status')
+      .leftJoinAndSelect('order.company', 'company')
+      .leftJoinAndSelect('fp.performedBy', 'tech')
+      // ❌ Ya no hay leftJoinAndSelect de attachments aquí
+      .where('order.device_id IN (:...deviceIds)', { deviceIds })
+      .andWhere('fp.warranty_days IS NOT NULL')
+      .andWhere('fp.warranty_days > 0')
+      .andWhere('fp.was_solved = true')
+      .andWhere('fp.is_active = true')
+      .andWhere('finding.is_active = true')
+      .orderBy('fp.createdAt', 'DESC')
+      .getMany();
+
+    // 4️⃣ Carga manual de attachments (igual que getOrderFullData)
+    const procedureIds = procedures.map((fp) => fp.id);
+
+    const allAttachments = procedureIds.length
+      ? await this.attachmentRepository.find({
+        where: {
+          entity_type: AttachmentEntityType.PROCEDURE,
+          entity_id: In(procedureIds),
+          is_active: true,
+        },
+        order: { createdAt: 'ASC' },
+      })
+      : [];
+
+    // 5️⃣ Firmar URLs de los attachments
+    if (allAttachments.length) {
+      await Promise.all(
+        allAttachments.map((att) =>
+          this.awsS3Service
+            .getPresignedUrl(att.file_url, 3600)
+            .then((signed) => { att.file_url = signed; })
+            .catch((err) =>
+              console.error(`[ERROR] Presigned PROCEDURE att ${att.id}:`, err.message),
+            ),
+        ),
+      );
+    }
+
+    // 6️⃣ Mapa entity_type_id → Attachment[]
+    const attachmentsMap = new Map<string, Attachment[]>();
+    allAttachments.forEach((att) => {
+      const key = `${att.entity_type}_${att.entity_id}`;
+      if (!attachmentsMap.has(key)) attachmentsMap.set(key, []);
+      attachmentsMap.get(key)!.push(att);
+    });
+
+    // 7️⃣ Calcular vigencia + asignar attachments firmados
+    const now = new Date();
+
+    const warranties = procedures.map((fp) => {
+      const expiresAt = new Date(fp.createdAt);
+      expiresAt.setDate(expiresAt.getDate() + fp.warranty_days);
+
+      const isActive = expiresAt > now;
+      const daysRemaining = isActive
+        ? Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+        : 0;
+
+      const procKey = `${AttachmentEntityType.PROCEDURE}_${fp.id}`;
+      const attachments = attachmentsMap.get(procKey) ?? [];
+
+      return {
+        // ❌ procedure_id removido
+        description: fp.description,
+        warranty_days: fp.warranty_days,
+        issued_at: fp.createdAt,
+        expires_at: expiresAt,
+        is_active: isActive,
+        days_remaining: daysRemaining,
+        performed_by: fp.performedBy
+          ? { name: fp.performedBy.username }  // ❌ id removido
+          : null,
+        attachments: attachments.map((a) => ({
+          file_name: a.file_name,
+          file_url: a.file_url,
+          file_type: a.file_type,
+        })),
+        order: {
+          // ❌ id removido
+          order_number: fp.finding.order.order_number,
+          // ❌ public_id removido
+          status: fp.finding.order.currentStatus?.name ?? null,
+          company: fp.finding.order.company
+            ? { name: fp.finding.order.company.name }  // ❌ id removido
+            : null,
+        },
+      };
+    });
+
+    const device = imeiRecords[0].device;
+
+    return {
+      imei: dto.imei,
+      device: {
+        // ❌ device_id removido
+        model: device.model?.models_name ?? null,
+        type: device.type?.name ?? null,
+        color: device.color ?? null,
+        storage: device.storage ?? null,
+        all_imeis: device.imeis.map((i) => i.imei_number),
+      },
+      has_active_warranty: warranties.some((w) => w.is_active),
+      warranties,
+    };
+  }
 }
