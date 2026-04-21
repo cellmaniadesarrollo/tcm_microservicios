@@ -32,12 +32,7 @@ export class GroupDto {
 export class BranchDto {
   id: string;
   name: string;
-  address: string;
-  code: string;
-  location?: {
-    type: 'Point';
-    coordinates: [number, number];
-  };
+
 }
 
 export class CompanyDto {
@@ -54,7 +49,7 @@ export class LoginResponseDto {
   groups: GroupDto[];
 
   company: CompanyDto;
-  branch: BranchDto;
+  branch?: BranchDto | null;
 }
 
 
