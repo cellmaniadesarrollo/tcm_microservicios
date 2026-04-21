@@ -29,7 +29,7 @@ export class AuthService {
         email: user.email,
         companyId: user.company.id,
         companyName: user.company.name,
-        branchId: user.branch.name,
+        branchId: user.branch.id,
         branchName: user.branch.name,
         plan: subscription.plan.code,
         limits: subscription.limits,

@@ -76,6 +76,7 @@ export class OrderWorkflowController {
       branchId: string;
     };
   }) {
+    console.log(data)
     return this.orderWorkflowService.changeOrderStatus(
       data.dto,
       data.user,
