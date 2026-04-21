@@ -1,0 +1,18 @@
+name: tcm-notifications
+
+services:
+  notifications:
+    build:
+      context: ../../microservices/notifications
+      dockerfile: Dockerfile.dev
+    container_name: ms-notifications
+    restart: always
+    volumes:
+      - ../../microservices/notifications:/app
+      - /app/node_modules 
+    command: ["npm", "run", "start"]
+    env_file: [../.env]
+    environment:
+      - DB_NAME=${DB_NAME_NOTIFICATIONS}
+    networks: [backend]
+    healthcheck: *node-health
