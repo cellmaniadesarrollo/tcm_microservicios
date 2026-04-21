@@ -36,7 +36,7 @@ export class UsersService {
     private userGroupRepo: Repository<UserGroup>,
 
     @InjectRepository(BranchReplica)
-    private readonly branchRepo: Repository<BranchReplica>,
+    private readonly branchReplicaRepository: Repository<BranchReplica>,
     private readonly broadcast: BroadcastService,
   ) { }
 
@@ -145,9 +145,7 @@ export class UsersService {
   }
 
 
-  async validateUser(
-    loginUserDto: LoginUserDto,
-  ): Promise<LoginResponseDto> {
+  async validateUser(loginUserDto: LoginUserDto): Promise<LoginResponseDto> {
     const { username, password, latitude, longitude } = loginUserDto;
 
     const user =
@@ -158,10 +156,8 @@ export class UsersService {
         new UnauthorizedException('Usuario no encontrado o inactivo'),
       );
     }
-    const passwordMatches = await bcrypt.compare(
-      password,
-      user.password_user,
-    );
+
+    const passwordMatches = await bcrypt.compare(password, user.password_user);
 
     if (!passwordMatches) {
       throw new RpcException(
@@ -171,8 +167,8 @@ export class UsersService {
 
     const branch = await this.resolveBranch(
       user.company.id,
-      latitude,
-      longitude,
+      latitude || 0,   // -2.7395
+      longitude || 0,  // -78.9847
     );
 
     return {
@@ -181,7 +177,7 @@ export class UsersService {
       email: user.email_user,
       groups: user.userGroups.map(ug => ({
         id: ug.group.id,
-        name: ug.group.name
+        name: ug.group.name,
       })),
       company: {
         id: user.company.id,
@@ -194,76 +190,40 @@ export class UsersService {
   // 👇 ESTO ES EL "HELPER" (pero es solo un método privado)
   private async resolveBranch(
     companyId: string,
-    latitude?: number,
-    longitude?: number,
-  ): Promise<BranchReplica> {
-
-    const baseQb = this.branchRepo
+    latitude: number,
+    longitude: number,
+  ): Promise<{ id: string; name: string } | null> {
+    const RADIUS_METERS = 2000;//2000 = 2km 
+    const branch = await this.branchReplicaRepository
       .createQueryBuilder('branch')
-      .where('branch.companyId = :companyId', { companyId })
-      .andWhere('branch.status = true');
-
-    // 🔹 Total activas
-    const count = await baseQb.getCount();
-
-    if (count === 0) {
-      throw new RpcException(
-        new NotFoundException('La empresa no tiene sucursales activas'),
-      );
-    }
-
-    // 1️⃣ Solo una sucursal
-    if (count === 1) {
-      const branch = await baseQb.getOne();
-      if (!branch) {
-        throw new RpcException(
-          new NotFoundException('Sucursal no encontrada'),
-        );
-      }
-      return branch;
-    }
-
-    // 2️⃣ Buscar por cercanía
-    if (latitude && longitude) {
-      const nearby = await baseQb
-        .andWhere(
-          `
-        ST_DWithin(
-          branch.location,
-          ST_SetSRID(ST_MakePoint(:lng, :lat), 4326),
-          100
-        )
-        `,
-          { lat: latitude, lng: longitude },
-        )
-        .orderBy(
-          `
-        ST_Distance(
-          branch.location,
-          ST_SetSRID(ST_MakePoint(:lng, :lat), 4326)
-        )
-        `,
-          'ASC',
-        )
-        .getOne();
-
-      if (nearby) {
-        return nearby;
-      }
-    }
-
-    // 3️⃣ Fallback → sucursal activa más antigua
-    const fallback = await baseQb
-      .orderBy('branch.createdAt', 'ASC')
+      .innerJoin('branch.company', 'company')
+      .where('company.id = :companyId', { companyId })
+      .andWhere('branch.status = true')
+      .andWhere('branch.location IS NOT NULL')
+      .andWhere(
+        `ST_DWithin(
+        branch.location,
+        ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography,
+        :radius
+      )`,
+        { longitude, latitude, radius: RADIUS_METERS },
+      )
+      .orderBy(
+        `ST_Distance(
+        branch.location,
+        ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
+      )`,
+        'ASC',
+      )
+      .setParameters({ longitude, latitude })
       .getOne();
 
-    if (!fallback) {
-      throw new RpcException(
-        new NotFoundException('No se pudo resolver la sucursal'),
-      );
-    }
+    if (!branch) return null;
 
-    return fallback;
+    return {
+      id: branch.id,
+      name: branch.name,
+    };
   }
 
   async findFullDataByCreatedAfter(date: Date | null): Promise<any[]> {
