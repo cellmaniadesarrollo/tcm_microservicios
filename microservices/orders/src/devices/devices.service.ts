@@ -429,7 +429,7 @@ export class DevicesService {
       .andWhere('finding.is_active = true')
       .orderBy('fp.createdAt', 'DESC')
       .getMany();
-    console.log(procedures)
+
     // 4️⃣ Carga manual de attachments (igual que getOrderFullData)
     const procedureIds = procedures.map((fp) => fp.id);
 
