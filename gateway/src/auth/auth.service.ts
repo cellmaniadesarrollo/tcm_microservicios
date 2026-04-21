@@ -22,13 +22,15 @@ export class AuthService {
         await this.subscriptionsClient.validateCompanySubscription(
           user.company.id,
         );
-      
+
       // 3️⃣ Payload del token
       const payload = {
         sub: user.id,
         email: user.email,
         companyId: user.company.id,
-        branchId: user.branch.id,
+        companyName: user.company.name,
+        branchId: user.branch.name,
+        branchName: user.branch.name,
         plan: subscription.plan.code,
         limits: subscription.limits,
         features: subscription.features,
