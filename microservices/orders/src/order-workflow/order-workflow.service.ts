@@ -33,6 +33,7 @@ import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
 import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
+import { BroadcastService } from '../broadcast/broadcast.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -65,6 +66,7 @@ export class OrderWorkflowService {
     private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
     private readonly notificationsService: NotificationsService,
     private readonly userCacheService: UsersEmployeesEventsService,
+    private readonly broadcastService: BroadcastService,
   ) { }
   async createOrder(
     dto: CreateOrderDto,
@@ -201,6 +203,7 @@ export class OrderWorkflowService {
       } else {
         console.log(savedOrder.id, user.companyId)
       }
+      this.handleBroadcast(savedOrder.id, 'created');
       // Retornar la orden guardada + adjuntos
       return { ...savedOrder, attachments };
     });
@@ -1360,7 +1363,112 @@ export class OrderWorkflowService {
 
     return payment;
   }
+  private async getFullOrderForBroadcast(orderId: number) {
+    const order = await this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.company', 'company')
+      .leftJoinAndSelect('order.branch', 'branch')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('customer.contacts', 'contacts')
+      .leftJoinAndSelect('order.device', 'device')
+      .leftJoinAndSelect('device.imeis', 'imeis')
+      .leftJoinAndSelect('device.accounts', 'accounts')
+      .leftJoinAndSelect('device.model', 'model')
+      .leftJoinAndSelect('device.type', 'deviceType')
+      .leftJoinAndSelect('order.type', 'type')
+      .leftJoinAndSelect('order.priority', 'priority')
+      .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+      .leftJoinAndSelect('order.createdBy', 'createdBy')
+      .leftJoinAndSelect('order.technicians', 'technicians')
+      .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
+      .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
+      .leftJoinAndSelect('order.payments', 'payments')
+      .leftJoinAndSelect('payments.paymentType', 'paymentType')
+      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
+      .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+      .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', { findingActive: true })
+      .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
+      .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
+      .leftJoinAndSelect('procedures.performedBy', 'performedBy')
+      .where('order.id = :orderId', { orderId })
+      .orderBy('findings.createdAt', 'ASC')
+      .addOrderBy('payments.paid_at', 'ASC')
+      .getOne();
 
+    if (!order) return null;
 
+    // Ordenamiento de procedimientos dentro de cada finding
+    order.findings?.forEach((finding) => {
+      finding.procedures?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    });
 
+    // ─── ATTACHMENTS ────────────────────────────────────────────────────────────
+    const findingIds = order.findings?.map((f) => f.id) ?? [];
+    const procedureIds = order.findings?.flatMap((f) => f.procedures?.map((p) => p.id) ?? []) ?? [];
+
+    const whereConditions: any[] = [
+      { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
+    ];
+
+    if (findingIds.length) {
+      whereConditions.push({
+        entity_type: AttachmentEntityType.FINDING,
+        entity_id: In(findingIds),
+        is_active: true,
+      });
+    }
+
+    if (procedureIds.length) {
+      whereConditions.push({
+        entity_type: AttachmentEntityType.PROCEDURE,
+        entity_id: In(procedureIds),
+        is_active: true,
+      });
+    }
+
+    const allAttachments = await this.attachmentRepository.find({
+      where: whereConditions,
+      order: { createdAt: 'ASC' },
+    });
+
+    const attachmentsMap = new Map<string, Attachment[]>();
+    allAttachments.forEach((att) => {
+      const key = `${att.entity_type}_${att.entity_id}`;
+      if (!attachmentsMap.has(key)) attachmentsMap.set(key, []);
+      attachmentsMap.get(key)!.push(att);
+    });
+
+    (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) ?? [];
+
+    order.findings?.forEach((finding) => {
+      finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) ?? [];
+      finding.procedures?.forEach((proc) => {
+        proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) ?? [];
+      });
+    });
+
+    order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+    await this.enrichAttachmentsWithSignedUrls(order);
+
+    return order;
+  }
+
+  private async handleBroadcast(orderId: number, action: 'created' | 'updated') {
+    try {
+      const fullOrder = await this.getFullOrderForBroadcast(orderId);
+
+      if (action === 'created') {
+        await this.broadcastService.publishOrderCreated(fullOrder);
+      } else {
+        await this.broadcastService.publishOrderUpdated(fullOrder);
+      }
+
+    } catch (error) {
+      console.error(
+        `[Kafka Error] No se pudo emitir el evento 'order_${action}' para el ID: ${orderId}.`,
+        error
+      );
+    }
+  }
 }

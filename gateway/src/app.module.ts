@@ -11,6 +11,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { AuthModule } from './auth/auth.module';
 import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { LegacyModule } from './legacy/legacy.module';
+import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 @Module({
   imports: [UsersModule,
@@ -23,7 +24,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuthModule,
     SubscriptionsModule,
     LegacyModule,
-    NotificationsModule
+    ReportsModule, 
+     
   ],
   controllers: [AppController],
   providers: [AppService ]  
