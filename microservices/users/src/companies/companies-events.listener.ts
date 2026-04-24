@@ -36,7 +36,13 @@ export class CompaniesEventsListener {   // ← sin OnModuleInit (nueva arquitec
     await this.companiesService.syncCompany(data);
 
     // Lógica específica del evento created que tenías en RabbitMQ
-    await this.usersService.createCompanyAdmin(data);
+    setTimeout(async () => {
+      try {
+        await this.usersService.createCompanyAdmin(data);
+      } catch (error) {
+        console.error("Error tardío creando admin:", error);
+      }
+    }, 2000);
   }
 
   private async handleCompanyUpdated(eventType: string, data: any) {

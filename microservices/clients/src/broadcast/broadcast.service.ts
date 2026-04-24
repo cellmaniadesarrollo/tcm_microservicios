@@ -1,3 +1,4 @@
+//microservices\clients\src\broadcast\broadcast.service.ts
 import { Injectable } from '@nestjs/common';
 import { KafkaProducerService } from '../kafka/kafka.producer';
 
