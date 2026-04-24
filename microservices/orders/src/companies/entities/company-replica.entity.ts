@@ -1,3 +1,4 @@
+//microservices\orders\src\companies\entities\company-replica.entity.ts
 import {
   Entity,
   PrimaryColumn,
@@ -33,6 +34,6 @@ export class CompanyReplica {
 
   @Column({ type: 'timestamp', nullable: true })
   updatedAt: Date;
-@OneToMany(() => UserEmployeeCache, user => user.company)
-users: UserEmployeeCache[];
+  @OneToMany(() => UserEmployeeCache, user => user.company)
+  users: UserEmployeeCache[];
 } 
