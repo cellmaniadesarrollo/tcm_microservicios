@@ -424,7 +424,11 @@ export class DevicesService {
       .where('order.device_id IN (:...deviceIds)', { deviceIds })
       .andWhere('fp.warranty_days IS NOT NULL')
       .andWhere('fp.warranty_days > 0')
+<<<<<<< HEAD
+      .andWhere('fp.was_solved = true')
+=======
       //.andWhere('fp.was_solved = true')
+>>>>>>> origin/dev
       .andWhere('fp.is_active = true')
       .andWhere('finding.is_active = true')
       .orderBy('fp.createdAt', 'DESC')
@@ -510,6 +514,9 @@ export class DevicesService {
     });
 
     const device = imeiRecords[0].device;
+<<<<<<< HEAD
+
+=======
     // 🚨 VALIDACIÓN NUEVA: Si no hay garantías en la lista, lanzamos error
     if (warranties.length === 0) {
       throw new RpcException({
@@ -517,6 +524,7 @@ export class DevicesService {
         message: `No se encontraron registros de garantía para el IMEI ${dto.imei}`,
       });
     }
+>>>>>>> origin/dev
     return {
       imei: dto.imei,
       device: {
