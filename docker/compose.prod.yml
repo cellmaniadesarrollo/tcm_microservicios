@@ -147,9 +147,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
-      reports:         
-        condition: service_healthy
+        condition: service_healthy 
 
   users:
     build:
