@@ -10,7 +10,6 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   imports: [
     MongooseModule.forFeature([
       { name: CompanyReplica.name, schema: CompanyReplicaSchema },
-      // ☝️ ya no necesitas registrar BranchReplica — está embebida
     ]),
     ClientsModule.register([
       {
@@ -27,6 +26,8 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
   ],
   controllers: [CompaniesController],
   providers: [CompaniesService, CompaniesEventsListener],
-  exports: [CompaniesEventsListener],
+  exports: [CompaniesEventsListener, MongooseModule.forFeature([
+    { name: CompanyReplica.name, schema: CompanyReplicaSchema },
+  ]),],
 })
 export class CompaniesModule { }

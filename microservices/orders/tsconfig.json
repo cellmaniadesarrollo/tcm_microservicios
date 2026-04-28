@@ -1,15 +1,20 @@
 {
   "compilerOptions": {
-    "module": "commonjs",
+    "module": "commonjs", // Mantenemos CommonJS para este módulo/proyecto
+    "target": "ES2023",
+    "outDir": "./dist",
+    
+    /* Cambiamos baseUrl por paths para silenciar el error */
+    "paths": {
+      "*": ["./*"]
+    },
+
     "declaration": true,
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "allowSyntheticDefaultImports": true,
-    "target": "ES2023",
     "sourceMap": true,
-    "outDir": "./dist",
-    "baseUrl": "./",
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,

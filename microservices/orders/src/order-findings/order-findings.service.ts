@@ -15,6 +15,7 @@ import { UploadAttachmentGatewayDto } from './dto/upload-attachment.gateway.dto'
 import { NotificationsService } from '../notifications/notifications.service';
 import { OrderWorkflowService } from '../order-workflow/order-workflow.service';
 import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
+import { BroadcastService } from '../broadcast/broadcast.service';
 
 @Injectable()
 export class OrderFindingsService {
@@ -35,6 +36,7 @@ export class OrderFindingsService {
     private readonly notificationsService: NotificationsService,
     private readonly orderWorkflow: OrderWorkflowService,
     private readonly userCacheService: UsersEmployeesEventsService,
+    private readonly broadcastService: BroadcastService
   ) { }
 
   // ─── Helper privado para emitir notificaciones ────────────────────────────
@@ -80,7 +82,19 @@ export class OrderFindingsService {
     });
 
     await this.orderFindingRepository.save(finding);
-
+    await this.broadcastService.publishOrderUpdated(order.id, 'finding_added', {
+      finding: {
+        id: finding.id,
+        description: finding.description,
+        is_active: finding.is_active,
+        is_resolved: finding.is_resolved,
+        reportedBy: { id: user.userId },
+        procedures: [],
+        attachments: [],
+        createdAt: finding.createdAt,
+        updatedAt: finding.updatedAt,
+      },
+    });
     // 🔔 Notificación — usando el helper
     await this.emitNotification(
       order.id,
@@ -145,7 +159,26 @@ export class OrderFindingsService {
         .add(technicianId);
       console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId}`);
     }
-
+    await this.broadcastService.publishOrderUpdated(orderId, 'procedure_added', {
+      finding_id: finding.id,
+      procedure: {
+        id: procedure.id,
+        description: procedure.description,
+        is_active: procedure.is_active,
+        is_public: procedure.is_public,
+        time_spent_minutes: procedure.time_spent_minutes,
+        procedure_cost: procedure.procedure_cost,
+        warranty_days: procedure.warranty_days,
+        client_approved: procedure.client_approved,
+        was_solved: procedure.was_solved,
+        requires_followup: procedure.requires_followup,
+        followup_notes: procedure.followup_notes,
+        performedBy: { id: user.userId },
+        attachments: [],
+        createdAt: procedure.createdAt,
+        updatedAt: procedure.updatedAt,
+      },
+    });
     // 🔔 Notificación — usando el helper
     await this.emitNotification(
       orderId,
@@ -188,7 +221,13 @@ export class OrderFindingsService {
 
     Object.assign(finding, dto);
     const saved = await this.orderFindingRepository.save(finding);
-
+    await this.broadcastService.publishOrderUpdated(finding.order_id, 'finding_updated', {
+      finding_id: saved.id,
+      description: saved.description,
+      is_active: saved.is_active,
+      is_resolved: saved.is_resolved,
+      updatedAt: saved.updatedAt,
+    });
     // 🔔 Notificación
     await this.emitNotification(
       finding.order_id,
@@ -229,7 +268,25 @@ export class OrderFindingsService {
 
     Object.assign(procedure, dto);
     const saved = await this.procedureRepository.save(procedure);
-
+    await this.broadcastService.publishOrderUpdated(
+      procedure.finding.order_id,
+      'procedure_updated',
+      {
+        finding_id: procedure.finding_id,
+        procedure_id: saved.id,
+        description: saved.description,
+        is_active: saved.is_active,
+        is_public: saved.is_public,
+        time_spent_minutes: saved.time_spent_minutes,
+        procedure_cost: saved.procedure_cost,
+        warranty_days: saved.warranty_days,
+        client_approved: saved.client_approved,
+        was_solved: saved.was_solved,
+        requires_followup: saved.requires_followup,
+        followup_notes: saved.followup_notes,
+        updatedAt: saved.updatedAt,
+      },
+    );
     // 🔔 Notificación — detecta si el cliente acaba de aprobar
     const event = dto.client_approved === true ? 'procedure_approved' : 'procedure_updated';
     const message =
@@ -272,7 +329,9 @@ export class OrderFindingsService {
 
     finding.is_active = false;
     await this.orderFindingRepository.save(finding);
-
+    await this.broadcastService.publishOrderUpdated(finding.order_id, 'finding_deleted', {
+      finding_id: finding.id,
+    });
     // 🔔 Notificación
     await this.emitNotification(
       finding.order_id,
@@ -312,7 +371,14 @@ export class OrderFindingsService {
 
     procedure.is_active = false;
     await this.procedureRepository.save(procedure);
-
+    await this.broadcastService.publishOrderUpdated(
+      procedure.finding.order_id,
+      'procedure_deleted',
+      {
+        finding_id: procedure.finding_id,
+        procedure_id: procedure.id,
+      },
+    );
     // 🔔 Notificación
     await this.emitNotification(
       procedure.finding.order_id,
@@ -384,6 +450,24 @@ export class OrderFindingsService {
 
     // 🔔 Notificación (una sola vez, después de subir todos los archivos)
     if (orderId) {
+      await this.broadcastService.publishOrderUpdated(orderId, 'attachment_added', {
+        entity_type: dto.entityType,
+        entity_id: dto.entityId,
+        finding_id: dto.entityType === 'FINDING' ? dto.entityId : undefined,
+        procedure_id: dto.entityType === 'PROCEDURE' ? dto.entityId : undefined,
+        attachments: uploaded.map((a) => ({
+          id: a.id,
+          is_public: a.is_public,
+          entity_type: a.entity_type,
+          entity_id: a.entity_id,
+          file_name: a.file_name,
+          file_url: a.file_url,
+          file_type: a.file_type,
+          uploaded_by_id: a.uploaded_by_id,
+          is_active: a.is_active,
+          createdAt: a.createdAt,
+        })),
+      });
       await this.emitNotification(
         orderId,
         user.companyId,
@@ -439,6 +523,11 @@ export class OrderFindingsService {
 
     // 🔔 Notificación
     if (orderId) {
+      await this.broadcastService.publishOrderUpdated(orderId, 'attachment_deleted', {
+        entity_type: attachment.entity_type,
+        entity_id: attachment.entity_id,
+        attachment_id: attachment.id,
+      });
       await this.emitNotification(
         orderId,
         user.companyId,

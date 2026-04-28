@@ -93,6 +93,8 @@ services:
           ms.user.updated
           ms.client.billing.created
           ms.client.billing.updated
+          ms.order.created
+          ms.order.updated
         "
 
         echo "⏳ Creando topics en Kafka..."
@@ -145,7 +147,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy
+        condition: service_healthy 
 
   users:
     build:
@@ -271,6 +273,26 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
+
+  reports:
+    build:
+      context: ../microservices/reporting-hub
+      dockerfile: Dockerfile
+    container_name: ms-reports
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_NAME=${MONGODB_DB_REPORTS}
+      - MONGODB_URI=${MONGODB_URI}
+    networks:
+      - backend 
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
 
   realtime:
     build:

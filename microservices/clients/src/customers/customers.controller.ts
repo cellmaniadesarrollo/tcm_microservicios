@@ -32,7 +32,7 @@ export class CustomersController {
       */
     @MessagePattern({ cmd: 'async_customers_start' })
     async onSyncStart(@Payload() payload: any) {
-        // console.log('🔄 Solicitud de sincronización recibida', payload);
+        console.log('🔄 Solicitud de sincronización recibida', payload);
 
         const data = await this.customerService.getCustomersUpdatedAfter(payload.fromCache);
         //console.log(data)

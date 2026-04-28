@@ -13,7 +13,6 @@ import {
   imports: [
     MongooseModule.forFeature([
       { name: UserEmployeeCache.name, schema: UserEmployeeCacheSchema },
-      // ☝️ GroupCache ya no necesita registro — está embebido
     ]),
     ClientsModule.register([
       {
@@ -30,6 +29,8 @@ import {
   ],
   providers: [UsersEmployeesEventsService, UsersEventsListener],
   controllers: [UsersEmployeesEventsController],
-  exports: [UsersEmployeesEventsService, UsersEventsListener],
+  exports: [UsersEmployeesEventsService, UsersEventsListener, MongooseModule.forFeature([
+    { name: UserEmployeeCache.name, schema: UserEmployeeCacheSchema },
+  ]),],
 })
 export class UsersEmployeesEventsModule { }

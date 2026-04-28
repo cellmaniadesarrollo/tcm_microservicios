@@ -23,6 +23,15 @@ async function bootstrap() {
       },
     });
 
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+        queue: 'orders_queue_sync',
+        queueOptions: { durable: true },
+        persistent: true,
+      },
+    });
     // ── 3. Interceptor global y microservicios ──
     app.useGlobalInterceptors(new InternalAuthInterceptor());
     await app.startAllMicroservices();

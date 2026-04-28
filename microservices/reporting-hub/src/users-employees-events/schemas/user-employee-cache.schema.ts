@@ -5,10 +5,10 @@ import { HydratedDocument } from 'mongoose';
 @Schema({ _id: false })
 export class GroupCache {
     @Prop({ required: true })
-    id: string;
+    id!: string;
 
     @Prop({ required: true })
-    group_name: string;
+    group_name!: string;
 }
 export const GroupCacheSchema = SchemaFactory.createForClass(GroupCache);
 
@@ -19,41 +19,41 @@ export type UserEmployeeCacheDocument = HydratedDocument<UserEmployeeCache>;
 export class UserEmployeeCache {
     /** UUID replicado del MS de usuarios — identificador de negocio */
     @Prop({ required: true, unique: true })
-    id: string;
+    id!: string;
 
     @Prop({ required: true })
-    username: string;
+    username!: string;
 
     @Prop({ required: true })
-    first_name: string;
+    first_name!: string;
 
     @Prop({ default: '' })
-    last_name: string;
+    last_name!: string;
 
     @Prop({ type: String, default: null })
-    dni: string | null;
+    dni!: string | null;
 
     @Prop({ required: true })
-    email: string;
+    email!: string;
 
     @Prop({ default: '' })
-    phone: string;
+    phone!: string;
 
     /**
      * Referencia a CompanyReplica por UUID de negocio.
      * No usamos ObjectId porque la FK de negocio es el UUID replicado.
      */
     @Prop({ required: true })
-    companyId: string;
+    companyId!: string;
 
     @Prop({ type: [GroupCacheSchema], default: [] })
-    groups: GroupCache[];
+    groups!: GroupCache[];
 
     @Prop({ type: Date, default: null })
-    createdAt: Date;
+    createdAt!: Date;
 
     @Prop({ type: Date, default: null })
-    updatedAt: Date;
+    updatedAt!: Date;
 }
 
 export const UserEmployeeCacheSchema =

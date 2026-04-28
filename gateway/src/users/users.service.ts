@@ -15,7 +15,7 @@ export class UsersService {
     @Inject('USER_SERVICE')
     private readonly userService: ClientProxy,
     private readonly subscriptionsService: SubscriptionsService,
-  ) {}
+  ) { }
 
   getAllUsers() {
     return firstValueFrom(
