@@ -88,8 +88,9 @@ export class OrdersReportsService {
     }
     // ─── LA FUNCIÓN QUE FALTABA ───────────────────────────────
     async getOrdersList(companyId: string, dto: GetOrdersFilterDto) {
-        const filter = this.buildMongoFilter(companyId, dto);
 
+        const filter = this.buildMongoFilter(companyId, dto);
+        console.log(filter)
         const [data, total] = await Promise.all([
             this.orderReplicaModel
                 .find(filter)

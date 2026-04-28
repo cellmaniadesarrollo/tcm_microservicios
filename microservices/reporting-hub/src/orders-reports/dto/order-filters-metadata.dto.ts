@@ -2,11 +2,13 @@ import {
     IsArray, IsOptional, IsString,
     IsDateString, IsIn, ArrayUnique
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export class GetOrdersFilterDto {
 
-    /** IDs de OrderType  (ej: ["1","2"]) */
+    /** IDs de OrderType (ej: ["1","2"]) */
     @IsOptional()
+    @Transform(({ value }) => (Array.isArray(value) ? value : [value])) // <--- TRUCO AQUÍ
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
@@ -14,6 +16,7 @@ export class GetOrdersFilterDto {
 
     /** IDs de OrderStatus */
     @IsOptional()
+    @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
@@ -21,13 +24,15 @@ export class GetOrdersFilterDto {
 
     /** IDs de Branch */
     @IsOptional()
+    @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
     branch?: string[];
 
-    /** IDs de técnicos (UserSnapshot.id) */
+    /** IDs de técnicos */
     @IsOptional()
+    @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
@@ -35,27 +40,24 @@ export class GetOrdersFilterDto {
 
     /** IDs de cajeros / receptores */
     @IsOptional()
+    @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
     receptionist?: string[];
 
-    /** Modo de período: preset o custom */
     @IsOptional()
     @IsIn(['preset', 'custom'])
     periodMode?: 'preset' | 'custom';
 
-    /** Mes preset en formato "YYYY-MM" */
     @IsOptional()
     @IsString()
-    presetPeriod?: string; // ej: "2026-04"
+    presetPeriod?: string;
 
-    /** Inicio rango personalizado */
     @IsOptional()
     @IsDateString()
     dateFrom?: string;
 
-    /** Fin rango personalizado */
     @IsOptional()
     @IsDateString()
     dateTo?: string;
