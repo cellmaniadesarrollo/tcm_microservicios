@@ -286,10 +286,7 @@ services:
       - DB_NAME=${MONGODB_DB_REPORTS}
       - MONGODB_URI=${MONGODB_URI}
     networks:
-      - backend
-    depends_on:
-      orders:
-        condition: service_healthy
+      - backend 
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
