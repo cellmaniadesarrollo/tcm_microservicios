@@ -243,4 +243,19 @@ export class CatalogsService {
             orderPriorities,
         };
     }
+
+    /**
+     * Obtiene los catálogos necesarios para la sincronización de normalizaciones
+     */
+    async getNormalizationsData() {
+        const [orderStatuses, orderTypes] = await Promise.all([
+            this.orderStatusRepo.find(),
+            this.orderTypeRepo.find(),
+        ]);
+
+        return {
+            orderStatuses,
+            orderTypes
+        };
+    }
 }

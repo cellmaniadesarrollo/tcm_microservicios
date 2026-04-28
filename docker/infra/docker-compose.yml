@@ -63,7 +63,9 @@ services:
           ms.user.created \
           ms.user.updated \
           ms.client.billing.created \
-          ms.client.billing.updated; do
+          ms.client.billing.updated \
+          ms.order.created \
+          ms.order.updated; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic $$TOPIC \
             --partitions 1 --replication-factor 1

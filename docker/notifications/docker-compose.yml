@@ -1,0 +1,108 @@
+# docker/notifications/docker-compose.yml
+x-node-health: &node-health
+  test: ["CMD", "node", "-e", "require('http').get('http://localhost:${NOTIFICATIONS_PORT:-3010}', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+x-mongo-health: &mongo-health
+  test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+x-rabbit-health: &rabbit-health
+  test: ["CMD", "rabbitmq-diagnostics", "ping"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+
+services:
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: ms-notifications-rabbitmq
+    restart: always
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - default
+    healthcheck: *rabbit-health
+
+  mongodb:
+    image: mongo:6
+    container_name: ms-notifications-mongodb
+    restart: always
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-password}
+      - MONGO_INITDB_DATABASE=${DB_NAME_NOTIFICATIONS:-notifications_db}
+    healthcheck: *mongo-health
+    command: ["mongod", "--bind_ip_all"]
+    networks:
+      - default
+
+  notifications:   # ← SERVICIO NOTIFICATIONS
+    build:
+      context: ../../microservices/notifications
+      dockerfile: Dockerfile.dev
+    container_name: ms-notifications
+    restart: always
+    ports:
+      - "${NOTIFICATIONS_PORT:-3010}:3010"
+    volumes:
+      - ../../microservices/notifications:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    environment:   # ← SECCIÓN QUE PREGUNTAS (AQUÍ ESTÁ)
+      - DB_NAME=${DB_NAME_NOTIFICATIONS:-notifications_db}
+      - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/${DB_NAME_NOTIFICATIONS:-notifications_db}?authSource=admin
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      - PORT=${NOTIFICATIONS_PORT:-3010}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - default
+    healthcheck: *node-health
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: ms-notifications-mongo-express
+    restart: unless-stopped
+    ports:
+      - "${MONGO_EXPRESS_PORT:-8081}:8081"
+    environment:
+      - ME_CONFIG_MONGODB_SERVER=mongodb
+      - ME_CONFIG_MONGODB_PORT=27017
+      - ME_CONFIG_MONGODB_ADMINUSERNAME=${MONGO_USER:-admin}
+      - ME_CONFIG_MONGODB_ADMINPASSWORD=${MONGO_PASSWORD:-password}
+      - ME_CONFIG_MONGODB_URL=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - default
+
+networks:
+  default:
+    name: tcm-backend
+    external: true
+
+volumes:
+  mongodb_data:
+  mongodb_config:
+  rabbitmq_data:

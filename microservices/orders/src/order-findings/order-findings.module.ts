@@ -14,10 +14,12 @@ import { UserEmployeeCache } from '../users-employees-events/entities/user_emplo
 import { NotificationsModule } from '../notifications/notifications.module';
 import { OrderWorkflowModule } from '../order-workflow/order-workflow.module';
 import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
+import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
-  imports: [UsersEmployeesEventsModule, OrderWorkflowModule, NotificationsModule, AwsS3Module, TypeOrmModule.forFeature([Attachment, FindingProcedure, OrderFinding, Order
-  ])],
+  imports: [UsersEmployeesEventsModule, OrderWorkflowModule, NotificationsModule,
+    AwsS3Module, TypeOrmModule.forFeature([Attachment, FindingProcedure, OrderFinding, Order
+    ]), BroadcastModule],
   controllers: [OrderFindingsController],
   providers: [OrderFindingsService],
 })

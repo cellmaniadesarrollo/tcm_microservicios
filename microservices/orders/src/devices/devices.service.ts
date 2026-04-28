@@ -429,7 +429,7 @@ export class DevicesService {
       .andWhere('finding.is_active = true')
       .orderBy('fp.createdAt', 'DESC')
       .getMany();
-    console.log(procedures)
+
     // 4️⃣ Carga manual de attachments (igual que getOrderFullData)
     const procedureIds = procedures.map((fp) => fp.id);
 
@@ -520,7 +520,6 @@ export class DevicesService {
     return {
       imei: dto.imei,
       device: {
-        // ❌ device_id removido
         model: device.model?.models_name ?? null,
         type: device.type?.name ?? null,
         color: device.color ?? null,

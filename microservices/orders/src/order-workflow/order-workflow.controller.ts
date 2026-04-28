@@ -16,6 +16,13 @@ import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 export class OrderWorkflowController {
   constructor(private readonly orderWorkflowService: OrderWorkflowService) { }
 
+  @MessagePattern({ cmd: 'async_orders_start' })
+  async onSyncStart(@Payload() payload: any) {
+    console.log('🔄 Sync órdenes solicitada | fromCache:', payload.fromCache ?? 'inicio');
+    return this.orderWorkflowService.findFullDataForSync(payload.fromCache);
+  }
+
+
   @MessagePattern({ cmd: 'create_order' })
   async createOrder(data: {
     dto: CreateOrderDto;
@@ -76,7 +83,6 @@ export class OrderWorkflowController {
       branchId: string;
     };
   }) {
-    console.log(data)
     return this.orderWorkflowService.changeOrderStatus(
       data.dto,
       data.user,
@@ -161,3 +167,4 @@ export class OrderWorkflowController {
   }
 
 }
+

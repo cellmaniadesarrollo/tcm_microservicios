@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    
+    /* Sustituto de baseUrl: */
+    "paths": {
+      "*": ["./*"]
+    },
+
+    "outDir": "./dist",
+    "declaration": true,
+    "sourceMap": true,
+    "incremental": true,
+    
+    /* Configuración de compatibilidad */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    
+    /* Decoradores y Metadatos */
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+
+    /* Strictness (ajustado a tu preferencia actual) */
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false,
+    "isolatedModules": true,
+    "removeComments": true
+  }
+}

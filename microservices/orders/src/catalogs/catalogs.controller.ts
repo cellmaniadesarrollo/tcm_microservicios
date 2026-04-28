@@ -15,6 +15,11 @@ export class CatalogsController {
       console.error('❌ Error solicitando sincronización inicial :', err);
     }
   }
+
+  @MessagePattern({ cmd: 'async_normalizations_start' })
+  async onNormalizationsSync() {
+    return await this.catalogsService.getNormalizationsData();
+  }
   @MessagePattern({ cmd: 'get_brands' })
   async listBrands() {
     return this.catalogsService.listBrands();

@@ -1,3 +1,4 @@
+//microservices\orders\src\companies\entities\branch-replica.entity.ts 
 import {
   Entity,
   PrimaryColumn,
@@ -19,7 +20,7 @@ export class BranchReplica {
 
   @Column()
   address: string;
- 
+
 
   @Column()
   code: string;
@@ -41,6 +42,6 @@ export class BranchReplica {
   })
   company: CompanyReplica;
 
- 
+
 }
 

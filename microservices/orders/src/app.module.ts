@@ -27,7 +27,9 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }), CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule, MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule, HealthModule],
+    }), CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule,
+    MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule,
+    HealthModule],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],
 })
