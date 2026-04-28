@@ -8,6 +8,8 @@ import { CompanyReplica, CompanyReplicaDocument } from '../companies/schemas/com
 import { UserEmployeeCache, UserEmployeeCacheDocument } from '../users-employees-events/schemas/user-employee-cache.schema';
 import { GetOrdersFilterDto } from './dto/order-filters-metadata.dto';
 import { OrderReplica, OrderReplicaDocument } from '../orders-relay/schemas/order-replica.schema';
+import { OrderListItemDto } from './dto/order-metadata.dto';
+import { RpcException } from '@nestjs/microservices';
 
 @Injectable()
 export class OrdersReportsService {
@@ -86,32 +88,110 @@ export class OrdersReportsService {
             })),
         };
     }
-    // ─── LA FUNCIÓN QUE FALTABA ───────────────────────────────
-    async getOrdersList(companyId: string, dto: GetOrdersFilterDto) {
-
+    // ─── LA FUNCIÓN  ───────────────────────────────
+    // ─── Servicio ─────────────────────────────────────────────────────────────────
+    async getOrdersList(companyId: string, dto: GetOrdersFilterDto): Promise<{
+        data: OrderListItemDto[];
+        total: number;
+    }> {
         const filter = this.buildMongoFilter(companyId, dto);
-        console.log(filter)
-        const [data, total] = await Promise.all([
+
+        const [raw, total] = await Promise.all([
             this.orderReplicaModel
                 .find(filter)
                 .select({
                     id: 1,
                     order_number: 1,
+                    revisadoAntes: 1,
                     currentStatus: 1,
                     type: 1,
                     branch: 1,
                     customer: 1,
                     device: 1,
                     technicians: 1,
-                    createdBy: 1,
                     entry_date: 1,
                     estimated_price: 1,
+                    // necesarios para calcular los 4 campos derivados
+                    statusHistory: 1,
+                    findings: 1,
+                    payments: 1,
                 })
                 .sort({ entry_date: -1 })
                 .lean(),
 
             this.orderReplicaModel.countDocuments(filter),
         ]);
+
+        const now = new Date();
+        const data = raw.map((order): OrderListItemDto => {
+
+            // ── 1. Fecha completado ───────────────────────────────────
+            // Última vez que la orden llegó al estado ENTREGADA (id = 8)
+            const completedAt = order.statusHistory
+                ?.filter(h => h.toStatus?.id === 8)
+                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+            [0]?.changed_at ?? null;
+
+            // ── 2. Costos de procedimientos ───────────────────────────
+            const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
+                sumF + (finding.procedures?.reduce((sumP, proc) =>
+                    sumP + (proc.is_active ? (proc.procedure_cost ?? 0) : 0),
+                    0) ?? 0),
+                0) ?? 0;
+
+            // ── 3. Total pagado (solo INGRESO) ────────────────────────
+            const totalPaid = order.payments?.reduce((sum, p) =>
+                sum + (p.flow_type === 'INGRESO' ? (p.amount ?? 0) : 0),
+                0) ?? 0;
+
+            // ── 4. Resumen de hallazgos ───────────────────────────────
+            const activeFindings = order.findings?.filter(f => f.is_active) ?? [];
+            const findingsSummary = {
+                total: activeFindings.length,
+                resolved: activeFindings.filter(f => f.is_resolved).length,
+                pending: activeFindings.filter(f => !f.is_resolved).length,
+            };
+
+            // ── 5. Garantía activa ────────────────────────────────────
+            // Al menos un procedimiento activo con warranty_days > 0
+            // cuya fecha de vencimiento (completedAt + warranty_days) aún no pasó.
+            // Si la orden no fue entregada aún, se considera garantía "pendiente de activar" → true
+            const hasActiveWarranty = order.findings?.some(finding =>
+                finding.procedures?.some(proc => {
+                    if (!proc.is_active || !proc.warranty_days || proc.warranty_days <= 0) return false;
+                    if (!completedAt) return true; // entregada aún no → garantía existe pero no ha iniciado
+                    const expiresAt = new Date(completedAt);
+                    expiresAt.setDate(expiresAt.getDate() + proc.warranty_days);
+                    return expiresAt > now;
+                }),
+            ) ?? false;
+
+            // ── Mapeo limpio de device ────────────────────────────────
+            const device = order.device ? {
+                model: order.device.model?.models_name,
+                brand: order.device.model?.brand_name,
+                type: order.device.type?.name,
+            } : undefined;
+
+            return {
+                id: order.id,
+                order_number: order.order_number,
+                revisadoAntes: order.revisadoAntes,
+                currentStatus: order.currentStatus,
+                type: order.type,
+                branch: { id: order.branch.id, name: order.branch.name },
+                customer: { id: order.customer.id, firstName: order.customer.firstName, lastName: order.customer.lastName },
+                device,
+                technicians: order.technicians?.map(t => ({ id: t.id, first_name: t.first_name, last_name: t.last_name })) ?? [],
+                entry_date: order.entry_date,
+                completed_at: completedAt,
+                estimated_price: order.estimated_price ?? null,
+                total_procedures_cost: totalProceduresCost,
+                total_paid: totalPaid,
+                findings_summary: findingsSummary,
+                has_active_warranty: hasActiveWarranty,
+            };
+        });
 
         return { data, total };
     }
@@ -157,5 +237,17 @@ export class OrdersReportsService {
         }
 
         return filter;
+    }
+    async getOrderDetail(companyId: string, orderId: number) {
+        const order = await this.orderReplicaModel
+            .findOne({
+                id: orderId,
+                'company.id': companyId,
+            })
+            .lean();
+
+        if (!order) throw new RpcException({ statusCode: 404, message: 'Orden no encontrada' });
+
+        return order;
     }
 }
