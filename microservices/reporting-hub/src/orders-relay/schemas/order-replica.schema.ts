@@ -406,7 +406,31 @@ export class FindingSnapshot {
     updatedAt!: Date;
 }
 export const FindingSnapshotSchema = SchemaFactory.createForClass(FindingSnapshot);
+// ═══════════════════════════════════════════════════════════════
+// STATUS HISTORY SNAPSHOT
+// ═══════════════════════════════════════════════════════════════
 
+@Schema({ _id: false })
+export class StatusHistorySnapshot {
+    @Prop({ required: true })
+    id!: number;
+
+    @Prop({ type: CatalogSnapshotSchema, default: null })
+    fromStatus!: CatalogSnapshot | null;
+
+    @Prop({ type: CatalogSnapshotSchema, required: true })
+    toStatus!: CatalogSnapshot;
+
+    @Prop({ type: UserSnapshotSchema, required: true })
+    changedBy!: UserSnapshot;
+
+    @Prop({ type: String, default: null })
+    observation?: string | null;
+
+    @Prop({ type: Date, required: true })
+    changed_at!: Date;
+}
+export const StatusHistorySnapshotSchema = SchemaFactory.createForClass(StatusHistorySnapshot);
 // ═══════════════════════════════════════════════════════════════
 // ORDER REPLICA — DOCUMENTO RAÍZ
 // ═══════════════════════════════════════════════════════════════
@@ -492,6 +516,9 @@ export class OrderReplica {
 
     @Prop({ type: Date })
     updatedAt?: Date;
+    // ── Historias de estados ─────────────────────────────────────────
+    @Prop({ type: [StatusHistorySnapshotSchema], default: [] })
+    statusHistory!: StatusHistorySnapshot[];
 }
 
 export const OrderReplicaSchema = SchemaFactory.createForClass(OrderReplica);
@@ -503,4 +530,5 @@ OrderReplicaSchema.index({ 'company.id': 1, 'currentStatus.id': 1 });
 OrderReplicaSchema.index({ 'company.id': 1, 'type.id': 1 });
 OrderReplicaSchema.index({ 'technicians.id': 1 });
 OrderReplicaSchema.index({ 'customer.id': 1 });
-OrderReplicaSchema.index({ updatedAt: -1 }); 
+OrderReplicaSchema.index({ updatedAt: -1 });
+OrderReplicaSchema.index({ 'statusHistory.toStatus.id': 1 });

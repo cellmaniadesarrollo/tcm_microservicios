@@ -257,4 +257,14 @@ export class UsersEmployeesEventsService {
 
         return user?.username || null;
     }
+    async getUserById(userId: string, companyId: string): Promise<UserEmployeeCache | null> {
+        return this.useremployeeCacheRepo.findOne({
+            where: {
+                id: userId,
+                company: {
+                    id: companyId
+                },
+            },
+        });
+    }
 } 
