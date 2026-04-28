@@ -625,7 +625,9 @@ export class OrderWorkflowService {
       'status_changed',
       'Se actualizó el estado de la orden',
     );
-
+    await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
+      currentStatus: { id: toStatusId },
+    });
     return {
       success: true,
       message: 'Estado de la orden actualizado correctamente',
@@ -763,7 +765,25 @@ export class OrderWorkflowService {
 
       // 7. Persistir
       const savedPayment = await transactionalEntityManager.save(payment);
-
+      await this.broadcastService.publishOrderUpdated(savedPayment.order_id, 'payment_added', {
+        payment: {
+          id: savedPayment.id,
+          amount: savedPayment.amount,
+          flow_type: savedPayment.flow_type,
+          payment_type_id: savedPayment.payment_type_id,
+          payment_type_code: paymentType.code,
+          payment_type_name: paymentType.name,
+          payment_method_id: savedPayment.payment_method_id ?? undefined,
+          payment_method_name: paymentMethod?.name ?? undefined,
+          paid_at: savedPayment.paid_at,
+          receivedBy: receivedBy ? { id: receivedBy.id, username: receivedBy.username, first_name: receivedBy.first_name, last_name: receivedBy.last_name } : undefined,
+          reference: savedPayment.reference,
+          observation: savedPayment.observation,
+          company_id: savedPayment.company_id,
+          branch_id: savedPayment.branch_id,
+          createdAt: savedPayment.createdAt,
+        },
+      });
 
       return savedPayment;
     });
@@ -805,7 +825,7 @@ export class OrderWorkflowService {
       const isOutgoing = order.order_type_id === 3;
       const deliveryRepo = manager.getRepository(OrderDelivery);
       const deliveredAt = new Date();
-      console.log(dto)
+
       const deliveryData = {
         order_id: dto.orderId,
         delivered_at: deliveredAt,
@@ -897,7 +917,9 @@ export class OrderWorkflowService {
       'order_closed',
       'La orden fue cerrada y entregada al cliente',
     );
-
+    await this.broadcastService.publishOrderUpdated(dto.orderId, 'closed', {
+      currentStatus: { id: 8, name: 'CERRADO' },
+    });
     return delivery;
   }
 
@@ -1176,7 +1198,17 @@ export class OrderWorkflowService {
       'note_added',
       'Se agregó una nota a la orden',
     );
-
+    await this.broadcastService.publishOrderUpdated(dto.order_id, 'note_added', {
+      note: {
+        id: savedNote.id,
+        note: savedNote.note,
+        is_public: savedNote.is_public,
+        isDeleted: false,
+        createdBy: { id: user.userId },   // el relay buscará el snapshot en el doc
+        createdAt: savedNote.createdAt,
+        updatedAt: savedNote.updatedAt,
+      },
+    });
     return savedNote;
   }
 
@@ -1216,7 +1248,10 @@ export class OrderWorkflowService {
         }),
       ),
     ]);
-
+    await this.broadcastService.publishOrderUpdated(note.order.id, 'note_deleted', {
+      note_id: note.id,
+      deletedAt: note.deletedAt,
+    });
     // 🔔 Notificación — order_id viene de la relación ya cargada
     await this.emitNotification(
       note.order.id,
@@ -1273,7 +1308,12 @@ export class OrderWorkflowService {
       this.orderNoteRepository.save(note),
       this.orderNoteLogRepository.save(logEntry),
     ]);
-
+    await this.broadcastService.publishOrderUpdated(note.order.id, 'note_updated', {
+      note_id: note.id,
+      note: note.note,
+      is_public: note.is_public,
+      updatedAt: updatedNote.updatedAt,
+    });
     // 🔔 Notificación
     await this.emitNotification(
       note.order.id,
@@ -1460,8 +1500,6 @@ export class OrderWorkflowService {
 
       if (action === 'created') {
         await this.broadcastService.publishOrderCreated(fullOrder);
-      } else {
-        await this.broadcastService.publishOrderUpdated(fullOrder);
       }
 
     } catch (error) {
@@ -1471,4 +1509,217 @@ export class OrderWorkflowService {
       );
     }
   }
+
+  /**
+ * Devuelve órdenes para sincronización bulk al orders-relay.
+ * - Sin fromCache → todas las órdenes
+ * - Con fromCache → solo modificadas/creadas después de esa fecha
+ */
+  async findFullDataForSync(fromCache: string | null) {
+    const qb = this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.company', 'company')
+      .leftJoinAndSelect('order.branch', 'branch')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('customer.contacts', 'contacts')
+      .leftJoinAndSelect('order.device', 'device')
+      .leftJoinAndSelect('device.imeis', 'imeis')
+      .leftJoinAndSelect('device.accounts', 'accounts')
+      .leftJoinAndSelect('device.model', 'model')
+      .leftJoinAndSelect('model.brand', 'brand')
+      .leftJoinAndSelect('device.type', 'deviceType')
+      .leftJoinAndSelect('order.type', 'type')
+      .leftJoinAndSelect('order.priority', 'priority')
+      .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+      .leftJoinAndSelect('order.createdBy', 'createdBy')
+      .leftJoinAndSelect('order.technicians', 'technicians')
+      .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
+      .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
+      .leftJoinAndSelect('order.payments', 'payments')
+      .leftJoinAndSelect('payments.paymentType', 'paymentType')
+      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
+      .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+      .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', { findingActive: true })
+      .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
+      .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
+      .leftJoinAndSelect('procedures.performedBy', 'performedBy')
+      .orderBy('order.updatedAt', 'ASC')
+      .addOrderBy('findings.createdAt', 'ASC')
+      .addOrderBy('payments.paid_at', 'ASC');
+
+    if (fromCache) {
+      const date = new Date(fromCache);
+      qb.where('order.createdAt > :date', { date })
+        .orWhere('order.updatedAt > :date', { date });
+    }
+
+    const orders = await qb.getMany();
+    // console.log(orders)
+    if (!orders.length) return [];
+
+    // ── Attachments agrupados por entidad ──────────────────────────────────────
+    const orderIds = orders.map((o) => o.id);
+    const findingIds = orders.flatMap((o) => o.findings?.map((f) => f.id) ?? []);
+    const procedureIds = orders.flatMap((o) =>
+      o.findings?.flatMap((f) => f.procedures?.map((p) => p.id) ?? []) ?? [],
+    );
+
+    const whereConditions: any[] = [
+      { entity_type: AttachmentEntityType.ORDER, entity_id: In(orderIds), is_active: true },
+    ];
+    if (findingIds.length)
+      whereConditions.push({ entity_type: AttachmentEntityType.FINDING, entity_id: In(findingIds), is_active: true });
+    if (procedureIds.length)
+      whereConditions.push({ entity_type: AttachmentEntityType.PROCEDURE, entity_id: In(procedureIds), is_active: true });
+
+    const allAttachments = await this.attachmentRepository.find({
+      where: whereConditions,
+      order: { createdAt: 'ASC' },
+    });
+
+    // Map<"TYPE_id", Attachment[]>
+    const attMap = new Map<string, any[]>();
+    allAttachments.forEach((att) => {
+      const key = `${att.entity_type}_${att.entity_id}`;
+      if (!attMap.has(key)) attMap.set(key, []);
+      attMap.get(key)!.push(att);
+    });
+
+    // ── Shape final fiel al schema MongoDB ────────────────────────────────────
+    return orders.map((order) => ({
+      id: order.id,
+      order_number: order.order_number,
+
+      currentStatus: { id: order.currentStatus?.id, name: order.currentStatus?.name },
+      company: { id: order.company?.id, name: order.company?.name, status: order.company?.status },
+      branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
+      type: { id: order.type?.id, name: order.type?.name },
+      priority: { id: order.priority?.id, name: order.priority?.name },
+
+      customer: {
+        id: order.customer?.id,
+        idNumber: order.customer?.idNumber,
+        idTypeName: order.customer?.idTypeName,
+        firstName: order.customer?.firstName,
+        lastName: order.customer?.lastName,
+        contacts: (order.customer?.contacts ?? []).map((c) => ({
+          id: c.id,
+          typeName: c.typeName,
+          value: c.value,
+          isPrimary: c.isPrimary,
+        })),
+      },
+
+      createdBy: mapUser(order.createdBy),
+      technicians: (order.technicians ?? []).map(mapUser),
+
+      device: order.device ? {
+        device_id: order.device.device_id,
+        serial_number: order.device.serial_number,
+        color: order.device.color,
+        storage: order.device.storage,
+        type: order.device.type ? { id: order.device.type.id, name: order.device.type.name } : undefined,
+        model: order.device.model ? {
+          models_id: order.device.model.models_id,
+          models_name: order.device.model.models_name,
+          models_img_url: order.device.model.models_img_url,
+          brand_id: order.device.model.brand?.brands_id,
+          brand_name: order.device.model.brand?.brands_name,
+        } : undefined,
+        imeis: (order.device.imeis ?? []).map((i) => ({ imei_id: i.imei_id, imei_number: i.imei_number })),
+        accounts: (order.device.accounts ?? []).map((a) => ({
+          account_id: a.account_id,
+          username: a.username,
+          password: a.password,
+          account_type: a.account_type,
+        })),
+      } : undefined,
+
+      // Escalares opcionales
+      ...(order.previous_order_id !== undefined && { previous_order_id: order.previous_order_id }),
+      ...(order.patron !== undefined && { patron: order.patron }),
+      ...(order.password !== undefined && { password: order.password }),
+      ...(order.estimated_price !== undefined && { estimated_price: order.estimated_price }),
+
+      revisadoAntes: order.revisadoAntes,
+      detalleIngreso: order.detalleIngreso,
+      entry_date: order.entry_date,
+
+      notes: (order.notes ?? []).map((n) => ({
+        id: n.id,
+        note: n.note,
+        is_public: n.is_public,
+        isDeleted: n.isDeleted,
+        createdBy: mapUser(n.createdBy),
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt,
+      })),
+
+      payments: (order.payments ?? []).map((p) => ({
+        id: p.id,
+        amount: p.amount,
+        flow_type: p.flow_type,
+        payment_type_id: p.paymentType?.id,
+        payment_type_code: p.paymentType?.code,
+        payment_type_name: p.paymentType?.name,
+        payment_method_id: p.paymentMethod?.id,
+        payment_method_name: p.paymentMethod?.name,
+        paid_at: p.paid_at,
+        receivedBy: p.receivedBy ? mapUser(p.receivedBy) : undefined,
+        reference: p.reference,
+        observation: p.observation,
+        company_id: p.company_id,
+        branch_id: p.branch_id,
+        createdAt: p.createdAt,
+      })),
+
+      findings: (order.findings ?? []).map((f) => ({
+        id: f.id,
+        description: f.description,
+        is_active: f.is_active,
+        is_resolved: f.is_resolved,
+        reportedBy: mapUser(f.reportedBy),
+        attachments: attMap.get(`FINDING_${f.id}`) ?? [],
+        procedures: (f.procedures ?? []).map((p) => ({
+          id: p.id,
+          description: p.description,
+          is_active: p.is_active,
+          is_public: p.is_public,
+          time_spent_minutes: p.time_spent_minutes,
+          procedure_cost: p.procedure_cost,
+          warranty_days: p.warranty_days,
+          client_approved: p.client_approved,
+          was_solved: p.was_solved,
+          requires_followup: p.requires_followup,
+          followup_notes: p.followup_notes,
+          performedBy: mapUser(p.performedBy),
+          attachments: attMap.get(`PROCEDURE_${p.id}`) ?? [],
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        })),
+        createdAt: f.createdAt,
+        updatedAt: f.updatedAt,
+      })),
+
+      attachments: attMap.get(`ORDER_${order.id}`) ?? [],
+
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    }));
+  }
+
+
+}
+
+function mapUser(u: any) {
+  if (!u) return undefined;
+  return {
+    id: u.id,
+    username: u.username,
+    first_name: u.first_name,
+    last_name: u.last_name,
+    ...(u.dni !== undefined && { dni: u.dni }),
+    ...(u.email !== undefined && { email: u.email }),
+    ...(u.phone !== undefined && { phone: u.phone }),
+  };
 }

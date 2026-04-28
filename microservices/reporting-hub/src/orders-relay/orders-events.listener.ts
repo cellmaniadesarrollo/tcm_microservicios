@@ -1,6 +1,7 @@
 // src/orders/orders-events.listener.ts
 import { Injectable } from '@nestjs/common';
 import { KafkaConsumerService } from '../kafka/kafka.consumer';
+import { OrdersRelayService } from './orders-relay.service';
 //import { OrdersService } from './orders.service';
 
 const TOPICS = {
@@ -11,7 +12,7 @@ const TOPICS = {
 @Injectable()
 export class OrdersEventsListener {
     constructor(
-        //   private readonly ordersService: OrdersService,
+        private readonly ordersRelayService: OrdersRelayService,
         private readonly kafkaConsumer: KafkaConsumerService,
     ) { }
 
@@ -24,7 +25,7 @@ export class OrdersEventsListener {
 
         this.kafkaConsumer.registerHandler(
             TOPICS.ORDER_UPDATED,
-            (eventType, data) => this.handleOrderUpdated(eventType, data),
+            (_, data) => this.handleOrderUpdated(data),
         );
     }
 
@@ -32,12 +33,17 @@ export class OrdersEventsListener {
         console.log(`🧾 [${eventType}] Orden creada: ${data?.id}`);
 
         // Aquí defines tu lógica (ej: persistir, cachear, relay, etc.)
-        // await this.ordersService.createOrSync(data);
+        await this.ordersRelayService.syncOrder(data);
     }
 
-    private async handleOrderUpdated(eventType: string, data: any) {
-        console.log(`🧾 [${eventType}] Orden actualizada: ${data?.id}`);
-
-        // await this.ordersService.createOrSync(data);
+    private async handleOrderUpdated(data: {
+        order_id: number;
+        changed_scope: string;
+        payload: any;
+        updatedAt: string;
+    }) {
+        const { order_id, changed_scope, payload, updatedAt } = data;
+        console.log(`🧾 [order.updated] scope: ${changed_scope} | order: ${order_id}`);
+        await this.ordersRelayService.applyUpdate(order_id, changed_scope, payload, updatedAt);
     }
 }

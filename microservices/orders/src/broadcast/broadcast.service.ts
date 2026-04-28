@@ -12,7 +12,7 @@ export class BroadcastService {
   constructor(private readonly kafkaProducer: KafkaProducerService) { }
 
   async publishOrderCreated(order: any): Promise<void> {
-    console.log(order)
+    // console.log(order)
     await this.kafkaProducer.emit(
       TOPICS.ORDER_CREATED,
       'ORDER_CREATED',
@@ -21,12 +21,21 @@ export class BroadcastService {
     );
   }
 
-  async publishOrderUpdated(order: any): Promise<void> {
+  async publishOrderUpdated(
+    orderId: number,
+    changedScope: string,
+    payload: Record<string, any>,
+  ): Promise<void> {
     await this.kafkaProducer.emit(
       TOPICS.ORDER_UPDATED,
       'ORDER_UPDATED',
-      order,
-      order.id?.toString(),
+      {
+        order_id: orderId,
+        changed_scope: changedScope,
+        payload,
+        updatedAt: new Date().toISOString(),
+      },
+      orderId.toString(),
     );
   }
 }

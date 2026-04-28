@@ -15,7 +15,7 @@ export class UsersService {
     @Inject('USER_SERVICE')
     private readonly userService: ClientProxy,
     private readonly subscriptionsService: SubscriptionsService,
-  ) {}
+  ) { }
 
   getAllUsers() {
     return firstValueFrom(
@@ -47,6 +47,9 @@ export class UsersService {
         { cmd: 'login_user' },
         {
           ...dto,
+          // PARCHE TEMPORAL: Coordenadas de prueba para desarrollo
+          longitude: -78.8483057,
+          latitude: -2.739735,
           internalToken: process.env.INTERNAL_SECRET,
         },
       ),
