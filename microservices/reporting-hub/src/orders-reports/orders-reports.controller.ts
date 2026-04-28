@@ -34,7 +34,17 @@ export class OrdersReportsController {
     return this.ordersReportsService.getOrdersList(data.user.companyId, data.data);
   }
 
-
+  @MessagePattern({ cmd: 'get_order_detail' })
+  async getOrderDetail(data: {
+    user: {
+      userId: string;
+      companyId: string;
+      branchId: string;
+    };
+    orderId: number;
+  }) {
+    return this.ordersReportsService.getOrderDetail(data.user.companyId, data.orderId);
+  }
   @MessagePattern({ cmd: 'fetch_customer_for_dashboard_orders' })
   async listOrders(
     user: {
@@ -46,4 +56,5 @@ export class OrdersReportsController {
 
     return true
   }
+
 }

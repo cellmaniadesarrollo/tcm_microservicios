@@ -85,7 +85,16 @@ export class OrdersRelayService {
             case 'closed':
                 await this.orderModel.findOneAndUpdate(
                     { id: orderId },
-                    { $set: { 'currentStatus.id': payload.currentStatus.id, updatedAt: ts } },
+                    {
+                        $set: {
+                            'currentStatus.id': payload.currentStatus.id,
+                            'currentStatus.name': payload.currentStatus.name,
+                            updatedAt: ts,
+                        },
+                        ...(payload.statusHistoryEntry && {
+                            $push: { statusHistory: payload.statusHistoryEntry },
+                        }),
+                    },
                 );
                 break;
 
