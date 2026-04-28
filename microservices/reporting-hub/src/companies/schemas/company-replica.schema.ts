@@ -5,10 +5,10 @@ import { HydratedDocument } from 'mongoose';
 @Schema({ _id: false })
 export class GeoPoint {
     @Prop({ type: String, enum: ['Point'], default: 'Point' })
-    type: string;
+    type!: string;
 
     @Prop({ type: [Number] }) // [longitude, latitude]
-    coordinates: number[];
+    coordinates!: number[];
 }
 export const GeoPointSchema = SchemaFactory.createForClass(GeoPoint);
 
@@ -16,22 +16,22 @@ export const GeoPointSchema = SchemaFactory.createForClass(GeoPoint);
 @Schema({ _id: false })
 export class BranchReplica {
     @Prop({ required: true })
-    id: string;
+    id!: string;
 
     @Prop({ required: true })
-    name: string;
+    name!: string;
 
     @Prop()
-    address: string;
+    address!: string;
 
     @Prop()
-    code: string;
+    code!: string;
 
     @Prop({ type: GeoPointSchema, default: null })
-    location: GeoPoint | null;
+    location!: GeoPoint | null;
 
     @Prop({ default: true })
-    status: boolean;
+    status!: boolean;
 }
 export const BranchReplicaSchema = SchemaFactory.createForClass(BranchReplica);
 
@@ -42,26 +42,26 @@ export type CompanyReplicaDocument = HydratedDocument<CompanyReplica>;
 export class CompanyReplica {
     /** UUID del MS de compañías — es nuestro identificador de negocio */
     @Prop({ required: true, unique: true })
-    id: string;
+    id!: string;
 
     @Prop({ required: true })
-    name: string;
+    name!: string;
 
     @Prop({ default: true })
-    status: boolean;
+    status!: boolean;
 
     @Prop({ type: Number, default: 5 })
-    maxUsers: number;
+    maxUsers!: number;
 
     @Prop({ type: [BranchReplicaSchema], default: [] })
-    branches: BranchReplica[];
+    branches!: BranchReplica[];
 
     /** Fechas replicadas del MS origen, NO auto-generadas */
     @Prop({ type: Date, default: null })
-    createdAt: Date;
+    createdAt!: Date;
 
     @Prop({ type: Date, default: null })
-    updatedAt: Date;
+    updatedAt!: Date;
 }
 
 export const CompanyReplicaSchema = SchemaFactory.createForClass(CompanyReplica);
