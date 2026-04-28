@@ -30,6 +30,7 @@ export class ReportsController {
     @Param('id', ParseIntPipe) id: number,
     @User() user: any,
   ) {
+    console.log(user)
     return this.reportsService.getOrderDetail(user, id);
   }
   @Get('dashboard')
