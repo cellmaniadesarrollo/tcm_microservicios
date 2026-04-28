@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
-import { JwtService as NestJwtService } from '@nestjs/jwt';
+import { JwtService as NestJwtService, JwtSignOptions } from '@nestjs/jwt'; // Añade JwtSignOptions
 
 @Injectable()
 export class JwtService {
-  constructor(private readonly jwtService: NestJwtService) {}
+  constructor(private readonly jwtService: NestJwtService) { }
 
-  generateToken(payload: any, expiresIn: string | number) {
+  // Cambiamos el segundo parámetro para que acepte las opciones oficiales
+  generateToken(payload: any, expiresIn: JwtSignOptions['expiresIn']) {
     return this.jwtService.sign(payload, { expiresIn });
   }
 
