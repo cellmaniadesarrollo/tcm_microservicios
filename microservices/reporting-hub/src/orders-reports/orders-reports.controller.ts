@@ -58,12 +58,15 @@ export class OrdersReportsController {
   }
   @MessagePattern({ cmd: 'get_dashboard' })
   async getDashboard(data: {
-    user: { userId: string; companyId: string; groups: string[] }
+    user: { sub: string; companyId: string; groups: string[] }
   }) {
-    return this.ordersReportsService.getDashboard(
+
+    const datas = await this.ordersReportsService.getDashboard(
       data.user.companyId,
-      data.user.userId,
+      data.user.sub,
       data.user.groups,
     );
+    console.log(datas)
+    return datas
   }
 }

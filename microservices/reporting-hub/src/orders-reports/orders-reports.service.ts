@@ -262,7 +262,7 @@ export class OrdersReportsService {
 
         const [technician, cashier, admin] = await Promise.all([
             isTechnician ? this.getTechnicianDashboard(companyId, userId) : Promise.resolve(undefined),
-            isCashier ? this.getCashierDashboard(companyId) : Promise.resolve(undefined),
+            isCashier ? this.getCashierDashboard(companyId, userId) : Promise.resolve(undefined),
             isAdmin ? this.getAdminDashboard(companyId) : Promise.resolve(undefined),
         ]);
 
@@ -315,7 +315,8 @@ export class OrdersReportsService {
     }
 
     // ── CASHIERS ──────────────────────────────────────────────────────────────────
-    private async getCashierDashboard(companyId: string): Promise<any> {
+    // En getDashboard, pasar userId al cashier
+    private async getCashierDashboard(companyId: string, userId: string): Promise<any> {
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         const todayEnd = new Date(todayStart.getTime() + 86_400_000);
@@ -334,6 +335,7 @@ export class OrdersReportsService {
                 {
                     $match: {
                         'company.id': companyId,
+                        'createdBy.id': userId,
                         entry_date: { $gte: todayStart, $lt: todayEnd },
                     },
                 },
@@ -353,6 +355,7 @@ export class OrdersReportsService {
                 {
                     $match: {
                         'company.id': companyId,
+                        'createdBy.id': userId,
                         entry_date: { $gte: lastMonday, $lt: lastSunday },
                     },
                 },
