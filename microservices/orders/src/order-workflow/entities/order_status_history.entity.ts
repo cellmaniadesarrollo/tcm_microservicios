@@ -7,7 +7,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 
-import { Order } from './order.entity'; 
+import { Order } from './order.entity';
 import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 import { BranchReplica } from '../../companies/entities/branch-replica.entity';
@@ -17,68 +17,68 @@ import { OrderStatus } from '../../catalogs/entities/order_status.entity';
 export class OrderStatusHistory {
 
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   // -------------------------
   // 🔗 ORDEN
   // -------------------------
   @ManyToOne(() => Order)
   @JoinColumn({ name: 'order_id' })
-  order: Order;
+  order!: Order;
 
   @Column()
-  order_id: number;
+  order_id!: number;
 
   // -------------------------
   // 🔁 ESTADOS
   // -------------------------
   @ManyToOne(() => OrderStatus)
   @JoinColumn({ name: 'from_status_id' })
-  fromStatus: OrderStatus;
+  fromStatus!: OrderStatus;
 
   @Column({ nullable: true })
-  from_status_id: number;
+  from_status_id!: number;
 
   @ManyToOne(() => OrderStatus)
   @JoinColumn({ name: 'to_status_id' })
-  toStatus: OrderStatus;
+  toStatus!: OrderStatus;
 
   @Column()
-  to_status_id: number;
+  to_status_id!: number;
 
   // -------------------------
   // 👤 QUIÉN CAMBIÓ
   // -------------------------
   @ManyToOne(() => UserEmployeeCache)
   @JoinColumn({ name: 'changed_by_id' })
-  changedBy: UserEmployeeCache;
+  changedBy!: UserEmployeeCache;
 
   @Column()
-  changed_by_id: string;
+  changed_by_id!: string;
 
   // -------------------------
   // 🔐 MULTI-TENANT
   // -------------------------
   @Column({ type: 'uuid' })
-  company_id: string;
+  company_id!: string;
 
   @ManyToOne(() => CompanyReplica)
   @JoinColumn({ name: 'company_id' })
-  company: CompanyReplica;
+  company!: CompanyReplica;
 
   @Column({ type: 'uuid' })
-  branch_id: string;
+  branch_id!: string;
 
   @ManyToOne(() => BranchReplica)
   @JoinColumn({ name: 'branch_id' })
-  branch: BranchReplica;
+  branch!: BranchReplica;
 
   // -------------------------
   // 📝 EXTRA
   // -------------------------
   @Column({ type: 'text', nullable: true })
-  observation: string;
+  observation?: string;
 
   @CreateDateColumn()
-  changed_at: Date;
+  changed_at!: Date;
 }

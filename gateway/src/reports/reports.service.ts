@@ -46,5 +46,24 @@ export class ReportsService {
             ),
         );
     }
-
+    async getOrderDetail(user: any, orderId: number) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_order_detail' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    user,
+                    orderId,
+                },
+            ),
+        );
+    }
+    async getDashboard(user: any): Promise<any> {
+        return firstValueFrom(
+            this.client.send(
+                { cmd: 'get_dashboard' },
+                { internalToken: process.env.INTERNAL_SECRET, user },
+            ),
+        );
+    }
 }

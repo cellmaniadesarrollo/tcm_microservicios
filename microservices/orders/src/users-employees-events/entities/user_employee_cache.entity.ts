@@ -14,42 +14,42 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 @Entity('user_employee_cache')
 export class UserEmployeeCache {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   // Nombre de usuario
   @Column()
-  username: string;
+  username!: string;
 
   // Datos esenciales del empleado
   @Column()
-  first_name: string;
+  first_name!: string;
 
   @Column()
-  last_name: string;
+  last_name!: string;
 
   @Column({ type: 'varchar', nullable: true })
-  dni: string;
+  dni!: string;
 
 
   @Column()
-  email: string;
+  email!: string;
 
   @Column()
-  phone: string;
+  phone!: string;
   // 🔗 Usuario pertenece a UNA compañía
   @ManyToOne(() => CompanyReplica, company => company.users, {
     nullable: false,
     onDelete: 'RESTRICT',
   })
   @JoinColumn({ name: 'company_id' })
-  company: CompanyReplica;
+  company!: CompanyReplica;
   // Relación: un empleado tiene varios grupos
   @OneToMany(() => GroupCache, group => group.employee, { cascade: true })
-  groups: GroupCache[];
+  groups!: GroupCache[];
 
   @Column({ type: 'timestamp', nullable: true })
-  createdAt: Date;
+  createdAt!: Date;
 
   @Column({ type: 'timestamp', nullable: true })
-  updatedAt: Date;
+  updatedAt!: Date;
 }

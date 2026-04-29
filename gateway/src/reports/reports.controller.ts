@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Get, Query } from '@nestjs/common';
+import { Body, Controller, Post, Get, Query, ParseIntPipe, Param } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
@@ -25,10 +25,17 @@ export class ReportsController {
     console.log('dad', filterDto)
     return await this.reportsService.getOrdersList(user, filterDto);
   }
+  @Get('report-detail/:id')
+  async getOrderDetail(
+    @Param('id', ParseIntPipe) id: number,
+    @User() user: any,
+  ) {
+    console.log(user)
+    return this.reportsService.getOrderDetail(user, id);
+  }
 
   @Get('dashboard')
   async getDashboard(@User() user: any) {
-    return this.reportsService.getDashboardCustomer(user);
+    return this.reportsService.getDashboard(user);
   }
-
 }

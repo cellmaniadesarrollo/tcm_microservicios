@@ -600,6 +600,14 @@ export class OrderWorkflowService {
     }
 
     const fromStatusId = order.current_status_id;
+    const fromStatusName = order.currentStatus?.name ?? '';
+
+    // Buscar el nombre del nuevo estado
+    const toStatus = await this.orderRepo.manager.findOne(OrderStatus, {
+      where: { id: toStatusId },
+    });
+
+    if (!toStatus) throw new NotFoundException('Estado destino no encontrado');
 
     order.current_status_id = toStatusId;
     order.currentStatus = { id: toStatusId } as any;
@@ -617,7 +625,9 @@ export class OrderWorkflowService {
 
     await this.orderStatusHistoryRepository.save(history);
 
-    // 🔔 Notificación
+    // Obtener usuario completo para el snapshot
+    const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
+
     await this.emitNotification(
       order.id,
       user.companyId,
@@ -625,9 +635,22 @@ export class OrderWorkflowService {
       'status_changed',
       'Se actualizó el estado de la orden',
     );
+
     await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
-      currentStatus: { id: toStatusId },
+      currentStatus: {
+        id: toStatusId,
+        name: toStatus.name,
+      },
+      statusHistoryEntry: {
+        id: history.id,
+        fromStatus: fromStatusId ? { id: fromStatusId, name: fromStatusName } : null,
+        toStatus: { id: toStatusId, name: toStatus.name },
+        changedBy: mapUser(userEntity),
+        observation: observation ?? null,
+        changed_at: history.changed_at,
+      },
     });
+
     return {
       success: true,
       message: 'Estado de la orden actualizado correctamente',
@@ -795,8 +818,8 @@ export class OrderWorkflowService {
     dto: CloseOrderDto,
     user: { userId: string; companyId: string; branchId: string },
   ): Promise<OrderDelivery> {
-    // 1. Ejecutar la transacción y guardar el resultado
-    const delivery = await this.orderRepo.manager.transaction(async (manager) => {
+
+    const result = await this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
         relations: ['currentStatus', 'type'],
@@ -822,6 +845,7 @@ export class OrderWorkflowService {
         );
       }
 
+      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO_FINALIZADO';
       const isOutgoing = order.order_type_id === 3;
       const deliveryRepo = manager.getRepository(OrderDelivery);
       const deliveredAt = new Date();
@@ -843,8 +867,6 @@ export class OrderWorkflowService {
 
       const insertResult = await deliveryRepo.insert(deliveryData);
       const deliveryId = insertResult.identifiers[0].id as number;
-
-      console.log('Saved Delivery via insert:', { id: deliveryId, order_id: dto.orderId, amount: dto.amount });
 
       const paymentTypeCode = isOutgoing ? 'PAGO_A_CLIENTE' : 'PAGO_FINAL';
       const paymentType = await manager.findOne(PaymentType, {
@@ -875,22 +897,24 @@ export class OrderWorkflowService {
 
       await manager.save(finalPayment);
 
-      const orderRepo = manager.getRepository(Order);
-      await orderRepo.update(
+      await manager.getRepository(Order).update(
         { id: order.id, company_id: user.companyId },
         { current_status_id: 8, updatedAt: new Date() },
       );
 
-      await manager.save(OrderStatusHistory, {
+      const observationText = `Orden cerrada y entregada. Monto final: ${dto.amount} (${isOutgoing ? 'pago al cliente' : 'cobro al cliente'})`;
+
+      const historyResult = await manager.save(OrderStatusHistory, {
         order_id: order.id,
+        from_status_id: 7,
         to_status_id: 8,
         changed_by_id: user.userId,
-        observation: `Orden cerrada y entregada. Monto final: ${dto.amount} (${isOutgoing ? 'pago al cliente' : 'cobro al cliente'})`,
+        observation: observationText,
         company_id: user.companyId,
         branch_id: user.branchId,
       });
 
-      return deliveryRepo.create({
+      const delivery = deliveryRepo.create({
         id: deliveryId,
         order_id: dto.orderId,
         delivered_at: deliveredAt,
@@ -907,9 +931,13 @@ export class OrderWorkflowService {
         createdAt: deliveredAt,
         updatedAt: deliveredAt,
       });
+
+      return { delivery, fromStatusName, observationText, historyId: historyResult.id };
     });
 
-    // 🔔 Notificación — FUERA de la transacción, solo si todo fue exitoso
+    // ── Fuera de la transacción ────────────────────────────────────────────────
+    const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
+
     await this.emitNotification(
       dto.orderId,
       user.companyId,
@@ -917,10 +945,20 @@ export class OrderWorkflowService {
       'order_closed',
       'La orden fue cerrada y entregada al cliente',
     );
+
     await this.broadcastService.publishOrderUpdated(dto.orderId, 'closed', {
       currentStatus: { id: 8, name: 'CERRADO' },
+      statusHistoryEntry: {
+        id: result.historyId,
+        fromStatus: { id: 7, name: result.fromStatusName },
+        toStatus: { id: 8, name: 'CERRADO' },
+        changedBy: mapUser(userEntity),
+        observation: result.observationText,
+        changed_at: new Date(),
+      },
     });
-    return delivery;
+
+    return result.delivery;
   }
 
 
@@ -1414,6 +1452,7 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('device.imeis', 'imeis')
       .leftJoinAndSelect('device.accounts', 'accounts')
       .leftJoinAndSelect('device.model', 'model')
+      .leftJoinAndSelect('model.brand', 'brand')        // ← faltaba
       .leftJoinAndSelect('device.type', 'deviceType')
       .leftJoinAndSelect('order.type', 'type')
       .leftJoinAndSelect('order.priority', 'priority')
@@ -1437,57 +1476,59 @@ export class OrderWorkflowService {
 
     if (!order) return null;
 
-    // Ordenamiento de procedimientos dentro de cada finding
-    order.findings?.forEach((finding) => {
-      finding.procedures?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    order.findings?.forEach((f) => {
+      f.procedures?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     });
 
-    // ─── ATTACHMENTS ────────────────────────────────────────────────────────────
+    // ── Attachments ────────────────────────────────────────────────────────────
     const findingIds = order.findings?.map((f) => f.id) ?? [];
     const procedureIds = order.findings?.flatMap((f) => f.procedures?.map((p) => p.id) ?? []) ?? [];
 
     const whereConditions: any[] = [
       { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
     ];
-
-    if (findingIds.length) {
-      whereConditions.push({
-        entity_type: AttachmentEntityType.FINDING,
-        entity_id: In(findingIds),
-        is_active: true,
-      });
-    }
-
-    if (procedureIds.length) {
-      whereConditions.push({
-        entity_type: AttachmentEntityType.PROCEDURE,
-        entity_id: In(procedureIds),
-        is_active: true,
-      });
-    }
+    if (findingIds.length)
+      whereConditions.push({ entity_type: AttachmentEntityType.FINDING, entity_id: In(findingIds), is_active: true });
+    if (procedureIds.length)
+      whereConditions.push({ entity_type: AttachmentEntityType.PROCEDURE, entity_id: In(procedureIds), is_active: true });
 
     const allAttachments = await this.attachmentRepository.find({
       where: whereConditions,
       order: { createdAt: 'ASC' },
     });
 
-    const attachmentsMap = new Map<string, Attachment[]>();
+    const attMap = new Map<string, Attachment[]>();
     allAttachments.forEach((att) => {
       const key = `${att.entity_type}_${att.entity_id}`;
-      if (!attachmentsMap.has(key)) attachmentsMap.set(key, []);
-      attachmentsMap.get(key)!.push(att);
+      if (!attMap.has(key)) attMap.set(key, []);
+      attMap.get(key)!.push(att);
     });
 
-    (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) ?? [];
-
-    order.findings?.forEach((finding) => {
-      finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) ?? [];
-      finding.procedures?.forEach((proc) => {
-        proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) ?? [];
+    (order as any).attachments = attMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) ?? [];
+    order.findings?.forEach((f) => {
+      f.attachments = attMap.get(`${AttachmentEntityType.FINDING}_${f.id}`) ?? [];
+      f.procedures?.forEach((p) => {
+        p.attachments = attMap.get(`${AttachmentEntityType.PROCEDURE}_${p.id}`) ?? [];
       });
     });
 
     order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+
+    // ── Status History ─────────────────────────────────────────────────────────
+    const statusHistory = await this.orderStatusHistoryRepository.find({
+      where: { order_id: order.id },
+      relations: ['fromStatus', 'toStatus', 'changedBy'],
+      order: { changed_at: 'ASC' },
+    });
+
+    (order as any).statusHistory = statusHistory.map((h) => ({
+      id: h.id,
+      fromStatus: h.fromStatus ? { id: h.fromStatus.id, name: h.fromStatus.name } : null,
+      toStatus: { id: h.toStatus.id, name: h.toStatus.name },
+      changedBy: mapUser(h.changedBy),
+      observation: h.observation ?? null,
+      changed_at: h.changed_at,
+    }));
 
     await this.enrichAttachmentsWithSignedUrls(order);
 
@@ -1497,16 +1538,15 @@ export class OrderWorkflowService {
   private async handleBroadcast(orderId: number, action: 'created' | 'updated') {
     try {
       const fullOrder = await this.getFullOrderForBroadcast(orderId);
+      if (!fullOrder) return;
+
+      const shaped = this.mapOrderToReplicaShape(fullOrder); // ← shape limpio
 
       if (action === 'created') {
-        await this.broadcastService.publishOrderCreated(fullOrder);
+        await this.broadcastService.publishOrderCreated(shaped);
       }
-
     } catch (error) {
-      console.error(
-        `[Kafka Error] No se pudo emitir el evento 'order_${action}' para el ID: ${orderId}.`,
-        error
-      );
+      console.error(`[Kafka Error] No se pudo emitir el evento 'order_${action}' para ID: ${orderId}.`, error);
     }
   }
 
@@ -1554,16 +1594,15 @@ export class OrderWorkflowService {
     }
 
     const orders = await qb.getMany();
-    // console.log(orders)
     if (!orders.length) return [];
 
-    // ── Attachments agrupados por entidad ──────────────────────────────────────
     const orderIds = orders.map((o) => o.id);
     const findingIds = orders.flatMap((o) => o.findings?.map((f) => f.id) ?? []);
     const procedureIds = orders.flatMap((o) =>
       o.findings?.flatMap((f) => f.procedures?.map((p) => p.id) ?? []) ?? [],
     );
 
+    // ── Attachments ────────────────────────────────────────────────────────────
     const whereConditions: any[] = [
       { entity_type: AttachmentEntityType.ORDER, entity_id: In(orderIds), is_active: true },
     ];
@@ -1577,7 +1616,6 @@ export class OrderWorkflowService {
       order: { createdAt: 'ASC' },
     });
 
-    // Map<"TYPE_id", Attachment[]>
     const attMap = new Map<string, any[]>();
     allAttachments.forEach((att) => {
       const key = `${att.entity_type}_${att.entity_id}`;
@@ -1585,7 +1623,27 @@ export class OrderWorkflowService {
       attMap.get(key)!.push(att);
     });
 
-    // ── Shape final fiel al schema MongoDB ────────────────────────────────────
+    // ── Status History agrupado por order_id ───────────────────────────────────
+    const allStatusHistory = await this.orderStatusHistoryRepository.find({
+      where: { order_id: In(orderIds) },
+      relations: ['fromStatus', 'toStatus', 'changedBy'],
+      order: { changed_at: 'ASC' },
+    });
+
+    const statusHistoryMap = new Map<number, any[]>();
+    allStatusHistory.forEach((h) => {
+      if (!statusHistoryMap.has(h.order_id)) statusHistoryMap.set(h.order_id, []);
+      statusHistoryMap.get(h.order_id)!.push({
+        id: h.id,
+        fromStatus: h.fromStatus ? { id: h.fromStatus.id, name: h.fromStatus.name } : null,
+        toStatus: { id: h.toStatus.id, name: h.toStatus.name },
+        changedBy: mapUser(h.changedBy),
+        observation: h.observation ?? null,
+        changed_at: h.changed_at,
+      });
+    });
+
+    // ── Shape final ────────────────────────────────────────────────────────────
     return orders.map((order) => ({
       id: order.id,
       order_number: order.order_number,
@@ -1635,7 +1693,6 @@ export class OrderWorkflowService {
         })),
       } : undefined,
 
-      // Escalares opcionales
       ...(order.previous_order_id !== undefined && { previous_order_id: order.previous_order_id }),
       ...(order.patron !== undefined && { patron: order.patron }),
       ...(order.password !== undefined && { password: order.password }),
@@ -1703,11 +1760,139 @@ export class OrderWorkflowService {
 
       attachments: attMap.get(`ORDER_${order.id}`) ?? [],
 
+      // ✅ Nuevo
+      statusHistory: statusHistoryMap.get(order.id) ?? [],
+
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
     }));
   }
 
+
+
+  private mapOrderToReplicaShape(order: any) {
+    return {
+      id: order.id,
+      order_number: order.order_number,
+
+      currentStatus: { id: order.currentStatus?.id, name: order.currentStatus?.name },
+      company: { id: order.company?.id, name: order.company?.name, status: order.company?.status },
+      branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
+      type: { id: order.type?.id, name: order.type?.name },
+      priority: { id: order.priority?.id, name: order.priority?.name },
+
+      customer: {
+        id: order.customer?.id,
+        idNumber: order.customer?.idNumber,
+        idTypeName: order.customer?.idTypeName,
+        firstName: order.customer?.firstName,
+        lastName: order.customer?.lastName,
+        contacts: (order.customer?.contacts ?? []).map((c: any) => ({
+          id: c.id,
+          typeName: c.typeName,
+          value: c.value,
+          isPrimary: c.isPrimary,
+        })),
+      },
+
+      createdBy: mapUser(order.createdBy),
+      technicians: (order.technicians ?? []).map(mapUser),
+
+      device: order.device ? {
+        device_id: order.device.device_id,
+        serial_number: order.device.serial_number,
+        color: order.device.color,
+        storage: order.device.storage,
+        type: order.device.type ? { id: order.device.type.id, name: order.device.type.name } : undefined,
+        model: order.device.model ? {
+          models_id: order.device.model.models_id,
+          models_name: order.device.model.models_name,
+          models_img_url: order.device.model.models_img_url,
+          brand_id: order.device.model.brand?.brands_id,
+          brand_name: order.device.model.brand?.brands_name,
+        } : undefined,
+        imeis: (order.device.imeis ?? []).map((i: any) => ({ imei_id: i.imei_id, imei_number: i.imei_number })),
+        accounts: (order.device.accounts ?? []).map((a: any) => ({
+          account_id: a.account_id,
+          username: a.username,
+          password: a.password,
+          account_type: a.account_type,
+        })),
+      } : undefined,
+
+      ...(order.previous_order_id !== undefined && { previous_order_id: order.previous_order_id }),
+      ...(order.patron !== undefined && { patron: order.patron }),
+      ...(order.password !== undefined && { password: order.password }),
+      ...(order.estimated_price !== undefined && { estimated_price: order.estimated_price }),
+
+      revisadoAntes: order.revisadoAntes,
+      detalleIngreso: order.detalleIngreso,
+      entry_date: order.entry_date,
+
+      notes: (order.notes ?? []).map((n: any) => ({
+        id: n.id,
+        note: n.note,
+        is_public: n.is_public,
+        isDeleted: n.isDeleted,
+        createdBy: mapUser(n.createdBy),
+        createdAt: n.createdAt,
+        updatedAt: n.updatedAt,
+      })),
+
+      payments: (order.payments ?? []).map((p: any) => ({
+        id: p.id,
+        amount: p.amount,
+        flow_type: p.flow_type,
+        payment_type_id: p.paymentType?.id,
+        payment_type_code: p.paymentType?.code,
+        payment_type_name: p.paymentType?.name,
+        payment_method_id: p.paymentMethod?.id,
+        payment_method_name: p.paymentMethod?.name,
+        paid_at: p.paid_at,
+        receivedBy: p.receivedBy ? mapUser(p.receivedBy) : undefined,
+        reference: p.reference,
+        observation: p.observation,
+        company_id: p.company_id,
+        branch_id: p.branch_id,
+        createdAt: p.createdAt,
+      })),
+
+      findings: (order.findings ?? []).map((f: any) => ({
+        id: f.id,
+        description: f.description,
+        is_active: f.is_active,
+        is_resolved: f.is_resolved,
+        reportedBy: mapUser(f.reportedBy),
+        attachments: f.attachments ?? [],
+        procedures: (f.procedures ?? []).map((p: any) => ({
+          id: p.id,
+          description: p.description,
+          is_active: p.is_active,
+          is_public: p.is_public,
+          time_spent_minutes: p.time_spent_minutes,
+          procedure_cost: p.procedure_cost,
+          warranty_days: p.warranty_days,
+          client_approved: p.client_approved,
+          was_solved: p.was_solved,
+          requires_followup: p.requires_followup,
+          followup_notes: p.followup_notes,
+          performedBy: mapUser(p.performedBy),
+          attachments: p.attachments ?? [],
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt,
+        })),
+        createdAt: f.createdAt,
+        updatedAt: f.updatedAt,
+      })),
+
+      attachments: order.attachments ?? [],
+
+      statusHistory: order.statusHistory ?? [],   // ✅ nuevo
+
+      createdAt: order.createdAt,
+      updatedAt: order.updatedAt,
+    };
+  }
 
 }
 
