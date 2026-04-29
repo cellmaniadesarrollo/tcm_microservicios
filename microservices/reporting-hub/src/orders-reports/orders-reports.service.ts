@@ -256,8 +256,8 @@ export class OrdersReportsService {
 
     async getDashboard(companyId: string, userId: string, groups: string[]): Promise<any> {
 
-        const isAdmin = groups.some(g => ['COMPANY_ADMIN', 'OWNER', 'IFE'].includes(g));
-        const isTechnician = groups.includes('TECHNICIAN');
+        const isAdmin = groups.some(g => ['COMPANY_ADMIN', 'ADMINS', 'IFE'].includes(g));
+        const isTechnician = groups.some(g => ['TECHNICIAN', 'CSRSPER'].includes(g));
         const isCashier = groups.includes('CASHIERS');
 
         const [technician, cashier, admin] = await Promise.all([
