@@ -56,5 +56,14 @@ export class OrdersReportsController {
 
     return true
   }
-
+  @MessagePattern({ cmd: 'get_dashboard' })
+  async getDashboard(data: {
+    user: { userId: string; companyId: string; groups: string[] }
+  }) {
+    return this.ordersReportsService.getDashboard(
+      data.user.companyId,
+      data.user.userId,
+      data.user.groups,
+    );
+  }
 }
