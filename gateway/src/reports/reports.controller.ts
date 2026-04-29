@@ -30,11 +30,12 @@ export class ReportsController {
     @Param('id', ParseIntPipe) id: number,
     @User() user: any,
   ) {
+    console.log(user)
     return this.reportsService.getOrderDetail(user, id);
   }
+
   @Get('dashboard')
   async getDashboard(@User() user: any) {
-    return this.reportsService.getDashboardCustomer(user);
+    return this.reportsService.getDashboard(user);
   }
-
 }

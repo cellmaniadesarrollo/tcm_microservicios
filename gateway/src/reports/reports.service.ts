@@ -58,4 +58,12 @@ export class ReportsService {
             ),
         );
     }
+    async getDashboard(user: any): Promise<any> {
+        return firstValueFrom(
+            this.client.send(
+                { cmd: 'get_dashboard' },
+                { internalToken: process.env.INTERNAL_SECRET, user },
+            ),
+        );
+    }
 }
