@@ -1,0 +1,34 @@
+name: tcm-notifications
+
+services:
+  notifications:
+    build:
+      context: ../../microservices/notification-dispatcher
+      dockerfile: Dockerfile.dev
+    container_name: ms-notifications
+    restart: always
+    volumes:
+      - ../../microservices/notification-dispatcher:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    env_file: [../.env]
+    ports:
+      - "3001:3001" # Puerto diferente al de reportes para evitar colisiones
+    environment:
+      - DB_NAME=${MONGODB_DB_NOTIFICATIONS}
+      - MONGODB_URI=${MONGODB_URI}
+      - RABBIT_URL
+      - KAFKA_BOOTSTRAP_SERVERS
+    networks: 
+      - backend
+    healthcheck:
+      # Ajustado al puerto 3001 que definimos para el dispatcher
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3001,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
+networks:
+  backend:
+    external: true

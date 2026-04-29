@@ -10,7 +10,7 @@ services:
     volumes:
       - ../../microservices/reporting-hub:/app
       - /app/node_modules
-    command: ["npm", "run", "start:dev"]
+    command: ["npm", "run", "start"]
     env_file: [../.env]
     environment:
       - DB_NAME=${MONGODB_DB_REPORTS}
