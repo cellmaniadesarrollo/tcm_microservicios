@@ -1594,6 +1594,7 @@ export class OrderWorkflowService {
     }
 
     const orders = await qb.getMany();
+
     if (!orders.length) return [];
 
     const orderIds = orders.map((o) => o.id);
@@ -1643,11 +1644,20 @@ export class OrderWorkflowService {
       });
     });
 
+
+    // Esto imprimirá una tabla clara en tu terminal con ambos campos
+    console.table(orders.map(o => ({
+      db_id: o.id,
+      public_id: o.public_id
+    })));
+
+
+
     // ── Shape final ────────────────────────────────────────────────────────────
     return orders.map((order) => ({
       id: order.id,
       order_number: order.order_number,
-
+      public_id: order.public_id,
       currentStatus: { id: order.currentStatus?.id, name: order.currentStatus?.name },
       company: { id: order.company?.id, name: order.company?.name, status: order.company?.status },
       branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
@@ -1774,7 +1784,7 @@ export class OrderWorkflowService {
     return {
       id: order.id,
       order_number: order.order_number,
-
+      public_id: order.public_id,
       currentStatus: { id: order.currentStatus?.id, name: order.currentStatus?.name },
       company: { id: order.company?.id, name: order.company?.name, status: order.company?.status },
       branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
