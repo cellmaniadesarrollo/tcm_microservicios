@@ -53,7 +53,7 @@ export class OrdersRelayController implements OnModuleInit {
                 },
             ),
         );
-        console.log(response)
+        // console.log(response)
         await this.ordersRelayService.syncOrdersBulk(response);
     }
 
