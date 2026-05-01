@@ -30,7 +30,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     ) { }
 
     async onModuleInit() {
-        //  await this.connect();
+        await this.connect();
     }
 
     async onModuleDestroy() {
