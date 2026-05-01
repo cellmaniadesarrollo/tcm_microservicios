@@ -31,7 +31,7 @@ export class OrdersEventsListener {
 
     private async handleOrderCreated(eventType: string, data: any) {
         console.log(`🧾 [${eventType}] Orden creada: ${data?.id}`);
-        console.log(data)
+        //console.log(data)
         // Aquí defines tu lógica (ej: persistir, cachear, relay, etc.)
         await this.ordersRelayService.syncOrder(data);
     }

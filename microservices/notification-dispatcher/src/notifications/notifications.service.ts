@@ -9,7 +9,7 @@ import { OrderReplica } from '../orders-relay/entities/order-replica.entity';
 import { CustomerContactCache } from '../customers-events/entities/customer-contact-cache.entity';
 
 // ── Usar nombres en lugar de IDs ──────────────────────────────────────────────
-const STATUS_TRABAJO_FINALIZADO = 'TRABAJO_FINALIZADO';
+const STATUS_TRABAJO_FINALIZADO = 'TRABAJO FINALIZADO';
 const STATUS_ENTREGADA = 'ENTREGADA';
 const MAX_DAYS_FROM_START = 90;
 
