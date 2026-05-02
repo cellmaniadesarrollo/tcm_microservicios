@@ -20,66 +20,66 @@ import { Attachment } from './attachment.entity';
 export class FindingProcedure {
 
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   // 🔗 Hallazgo
   @ManyToOne(() => OrderFinding, f => f.procedures, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'finding_id' })
-  finding: OrderFinding;
+  finding!: OrderFinding;
 
   @Column()
-  finding_id: number;
+  finding_id!: number;
 
   @Column({ type: 'text' })
-  description: string;
+  description!: string;
   // ♻ Soft delete
   @Column({ default: true })
-  is_active: boolean;
+  is_active!: boolean;
   // 👁 Visible para cliente
   @Column({ default: true })
-  is_public: boolean;
+  is_public!: boolean;
 
   // ⏱ Tiempo invertido
   @Column({ type: 'int', nullable: true })
-  time_spent_minutes: number;
+  time_spent_minutes!: number;
 
   // 💵 Costo
   @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
-  procedure_cost: number;
+  procedure_cost!: number;
 
   // 🛡 Garantía
   @Column({ type: 'int', nullable: true })
-  warranty_days: number;
+  warranty_days!: number;
 
   // ✔ Cliente aprobó
   @Column({ default: false })
-  client_approved: boolean;
+  client_approved!: boolean;
 
   // ✅ ¿Se solucionó?
   @Column({ default: false })
-  was_solved: boolean;
+  was_solved!: boolean;
 
   // 🔁 Seguimiento
   @Column({ default: false })
-  requires_followup: boolean;
+  requires_followup!: boolean;
 
   @Column({ type: 'text', nullable: true })
-  followup_notes: string;
+  followup_notes?: string;
 
   // 👨‍🔧 Técnico ejecutor
   @ManyToOne(() => UserEmployeeCache, { eager: true })
   @JoinColumn({ name: 'performed_by_id' })
-  performedBy: UserEmployeeCache;
+  performedBy!: UserEmployeeCache;
 
   @OneToMany(() => Attachment, att => att.procedure)
   attachments?: Attachment[];
 
   @Column()
-  performed_by_id: string;
+  performed_by_id!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

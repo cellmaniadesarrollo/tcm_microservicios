@@ -19,6 +19,20 @@ const baileysLogger = pino({ level: 'silent' });
 /** Segundos de inactividad tras el último envío antes de cerrar el socket */
 const POST_SEND_DISCONNECT_MS = 30_000; // 30 s
 
+// ─── ✏️ AJUSTA AQUÍ EL RANGO DEL DELAY ENTRE MENSAJES ────────────────────────
+//
+//  SEND_DELAY_MIN_MS : tiempo mínimo de espera entre mensajes
+//  SEND_DELAY_MAX_MS : tiempo máximo de espera entre mensajes
+//
+//  Ejemplos de configuración:
+//    Conservador (recomendado): MIN = 4_000  MAX = 9_000   → entre 4 y 9 segundos
+//    Moderado                 : MIN = 2_500  MAX = 6_000   → entre 2.5 y 6 segundos
+//    Agresivo (más riesgo)    : MIN = 1_500  MAX = 4_000   → entre 1.5 y 4 segundos
+//
+const SEND_DELAY_MIN_MS = 4_000;
+const SEND_DELAY_MAX_MS = 9_000;
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Injectable()
 export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     private readonly logger = new Logger(WhatsappService.name);
@@ -35,6 +49,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     /** Cierra el socket N ms después del último envío */
     private disconnectTimer: NodeJS.Timeout | null = null;
 
+    /** Cola secuencial: cada envío espera al anterior */
+    private sendQueue: Promise<void> = Promise.resolve();
+
+    /** Cuándo se hizo el último envío real */
+    private lastSentAt: number = 0;
+
     constructor(
         @InjectRepository(WhatsappSession)
         private readonly sessionRepo: Repository<WhatsappSession>,
@@ -45,7 +65,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
     async onModuleInit() {
-        // No conectar al arrancar — solo cuando haya algo que enviar
         this.logger.log('WhatsappService listo. Socket bajo demanda 💤');
     }
 
@@ -85,10 +104,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
             },
             logger: baileysLogger,
-            // ── Anti-ban: mínima huella posible ──
-            markOnlineOnConnect: false,  // no aparece "en línea"
-            syncFullHistory: false,      // no descarga historial
-            fireInitQueries: false,      // menos queries al conectar
+            markOnlineOnConnect: false,
+            syncFullHistory: false,
+            fireInitQueries: false,
         });
 
         this.socket.ev.on('creds.update', async () => {
@@ -115,7 +133,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                     phoneNumber: phone,
                 });
 
-                // Desbloquea todos los sendText/sendImage que estuvieran esperando
                 this.connectionResolve?.();
                 this.connectionResolve = null;
             }
@@ -143,7 +160,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                     this.logger.warn('Reinicia el servidor para vincular una nueva cuenta.');
 
                 } else if (!this.sleeping) {
-                    // Caída accidental durante un envío → reconectar
                     this.logger.warn(`Conexión cerrada (código ${statusCode}). Reconectando en 3 s...`);
                     setTimeout(() => this.connect(), 3_000);
 
@@ -152,18 +168,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 }
             }
         });
-
-        // ← Sin messages.upsert intencionalmente:
-        //   no procesamos mensajes entrantes → menos huella de bot
     }
 
     // ─── Sleep / Wake ─────────────────────────────────────────────────────────
 
-    /**
-     * Si el socket está dormido, lo levanta y espera a que esté 'open'.
-     * Si ya hay una conexión en curso, espera esa misma promesa (no duplica).
-     * Si ya está conectado, retorna de inmediato.
-     */
     private async wake(): Promise<void> {
         if (this.socket) return;
 
@@ -175,7 +183,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         await this.connectionPromise;
     }
 
-    /** Cierre intencional del socket */
     private sleep(): void {
         if (!this.socket) return;
         this.logger.log('Sin actividad. Cerrando socket 💤');
@@ -186,10 +193,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     // ─── Timer post-envío ─────────────────────────────────────────────────────
 
-    /**
-     * Cada envío reinicia la cuenta regresiva.
-     * Si pasan POST_SEND_DISCONNECT_MS sin otro envío → sleep.
-     */
     private scheduleDisconnect(): void {
         this.clearDisconnectTimer();
         this.disconnectTimer = setTimeout(() => this.sleep(), POST_SEND_DISCONNECT_MS);
@@ -202,23 +205,61 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // ─── API pública ──────────────────────────────────────────────────────────
+    // ─── Cola con delay ───────────────────────────────────────────────────────
 
-    async sendText(to: string, text: string) {
-        await this.wake();
-        const result = await this.socket!.sendMessage(this.toJid(to), { text });
-        this.scheduleDisconnect();
+    private randomDelay(): Promise<void> {
+        const ms =
+            Math.floor(Math.random() * (SEND_DELAY_MAX_MS - SEND_DELAY_MIN_MS + 1)) +
+            SEND_DELAY_MIN_MS;
+        this.logger.debug(`Esperando ${ms}ms antes del próximo envío...`);
+        return new Promise((r) => setTimeout(r, ms));
+    }
+
+    /**
+     * Encola el envío: espera a que termine el anterior y aplica
+     * un delay aleatorio si el último envío fue reciente.
+     */
+    private enqueue<T>(task: () => Promise<T>): Promise<T> {
+        const result = this.sendQueue.then(async () => {
+            const elapsed = Date.now() - this.lastSentAt;
+            if (this.lastSentAt > 0 && elapsed < SEND_DELAY_MAX_MS) {
+                await this.randomDelay();
+            }
+            const value = await task();
+            this.lastSentAt = Date.now();
+            return value;
+        });
+
+        // La cola avanza aunque el task falle — no se traba
+        this.sendQueue = result.then(
+            () => { },
+            () => { },
+        );
+
         return result;
     }
 
-    async sendImage(to: string, imageBuffer: Buffer, caption?: string) {
-        await this.wake();
-        const result = await this.socket!.sendMessage(this.toJid(to), {
-            image: imageBuffer,
-            caption,
+    // ─── API pública ──────────────────────────────────────────────────────────
+
+    async sendText(to: string, text: string) {
+        return this.enqueue(async () => {
+            await this.wake();
+            const result = await this.socket!.sendMessage(this.toJid(to), { text });
+            this.scheduleDisconnect();
+            return result;
         });
-        this.scheduleDisconnect();
-        return result;
+    }
+
+    async sendImage(to: string, imageBuffer: Buffer, caption?: string) {
+        return this.enqueue(async () => {
+            await this.wake();
+            const result = await this.socket!.sendMessage(this.toJid(to), {
+                image: imageBuffer,
+                caption,
+            });
+            this.scheduleDisconnect();
+            return result;
+        });
     }
 
     async sendDocument(
@@ -228,15 +269,17 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         mimetype: string,
         caption?: string,
     ) {
-        await this.wake();
-        const result = await this.socket!.sendMessage(this.toJid(to), {
-            document: fileBuffer,
-            fileName,
-            mimetype,
-            caption,
+        return this.enqueue(async () => {
+            await this.wake();
+            const result = await this.socket!.sendMessage(this.toJid(to), {
+                document: fileBuffer,
+                fileName,
+                mimetype,
+                caption,
+            });
+            this.scheduleDisconnect();
+            return result;
         });
-        this.scheduleDisconnect();
-        return result;
     }
 
     isConnected(): boolean {
@@ -245,14 +288,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
-    /**
-     * Normaliza un número al formato E.164 sin '+' para WhatsApp JID.
-     *
-     * Ejemplos:
-     *   "0983249741"    → "593983249741"
-     *   "+593983249741" → "593983249741"
-     *   "593983249741"  → "593983249741"
-     */
     private normalizePhone(phone: string): string {
         let digits = phone.replace(/\D/g, '');
         if (digits.startsWith('0')) {
