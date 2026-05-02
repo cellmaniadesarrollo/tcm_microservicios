@@ -1151,6 +1151,7 @@ export class OrderWorkflowService {
             was_solved: proc.was_solved,
             warranty_days: proc.warranty_days,
             client_approved: proc.client_approved,
+            procedure_cost: proc.procedure_cost ?? null,
             attachments: (proc.attachments ?? []).map((a) => ({
               file_name: a.file_name,
               file_url: a.file_url,
