@@ -33,7 +33,7 @@ const ORDER_MESSAGES: Record<string, (order: OrderReplica) => string> = {
         `Puedes revisar el estado de tu equipo en línea aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}`,
 
-    TRABAJO_FINALIZADO: (o) =>
+    'TRABAJO FINALIZADO': (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
         `¡Listo ${o.customer?.firstName ?? 'estimado/a'}! Tu *${o.deviceBrand ?? ''} ${o.deviceModel ?? ''}* está reparado y listo para retiro 🎉\n\n` +
         `Revisa los detalles de tu orden aquí:\n` +
