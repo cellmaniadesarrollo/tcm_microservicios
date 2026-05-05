@@ -30,81 +30,74 @@ import { Attachment } from '../../order-findings/entities/attachment.entity';
 import { OrderNote } from './order-note.entity';
 
 @Entity('orders')
-@Index(['company_id', 'order_number'], { unique: true }) // 🔐 único por empresa
+@Index(['company_id', 'order_number'], { unique: true })
 @Index(['public_id'], { unique: true })
 export class Order {
+
   @OneToMany(() => OrderNote, (note) => note.order, {
     cascade: true,
   })
-  notes: OrderNote[];
+  notes!: OrderNote[];
+
   @OneToOne(() => OrderDelivery, (delivery) => delivery.order, { nullable: true })
   delivery?: OrderDelivery;
+
   @OneToMany(() => OrderFinding, finding => finding.order)
-  findings: OrderFinding[];
+  findings!: OrderFinding[];
 
   @PrimaryGeneratedColumn()
-  id: number; // 🔒 interno
+  id!: number;
 
   @Column({ type: 'uuid', unique: true, nullable: true })
-  public_id: string; // 🌍 público
-  // 🔢 Número secuencial por empresa
+  public_id?: string;
+
   @Column()
-  order_number: number;
-  // ------------------------------------
-  // 📌 ESTADO ACTUAL DE LA ORDEN
-  // ------------------------------------
+  order_number!: number;
 
   @ManyToOne(() => OrderStatus, { eager: true })
   @JoinColumn({ name: 'current_status_id' })
-  currentStatus: OrderStatus;
+  currentStatus!: OrderStatus;
 
   @Column()
-  current_status_id: number;
-  // 📅 Fecha de ingreso
+  current_status_id!: number;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-  entry_date: Date;
-  // ------------------------------------
-  // 🔐 MULTI-TENANT (OBLIGATORIO)
-  // ------------------------------------
+  entry_date!: Date;
 
   @Column({ type: 'uuid' })
-  company_id: string;
+  company_id!: string;
 
   @ManyToOne(() => CompanyReplica, { eager: true })
   @JoinColumn({ name: 'company_id' })
-  company: CompanyReplica;
+  company!: CompanyReplica;
 
   @Column({ type: 'uuid' })
-  branch_id: string;
+  branch_id!: string;
 
   @ManyToOne(() => BranchReplica, { eager: true })
   @JoinColumn({ name: 'branch_id' })
-  branch: BranchReplica;
-
-  // ------------------------------------
-  // 🔗 RELACIONES EXISTENTES
-  // ------------------------------------
+  branch!: BranchReplica;
 
   @ManyToOne(() => OrderType, { eager: true })
   @JoinColumn({ name: 'order_type_id' })
-  type: OrderType;
+  type!: OrderType;
 
   @Column()
-  order_type_id: number;
+  order_type_id!: number;
 
   @ManyToOne(() => OrderPriority, { eager: true })
   @JoinColumn({ name: 'order_priority_id' })
-  priority: OrderPriority;
+  priority!: OrderPriority;
 
   @Column()
-  order_priority_id: number;
+  order_priority_id!: number;
 
   @ManyToOne(() => CustomerCache, { eager: true })
   @JoinColumn({ name: 'customer_id' })
-  customer: CustomerCache;
+  customer!: CustomerCache;
 
   @Column()
-  customer_id: number;
+  customer_id!: number;
 
   @ManyToMany(() => UserEmployeeCache, { eager: true })
   @JoinTable({
@@ -112,40 +105,41 @@ export class Order {
     joinColumn: { name: 'order_id' },
     inverseJoinColumn: { name: 'technician_id' },
   })
-  technicians: UserEmployeeCache[];
+  technicians!: UserEmployeeCache[];
 
   @ManyToOne(() => UserEmployeeCache, { eager: true })
   @JoinColumn({ name: 'created_by_id' })
-  createdBy: UserEmployeeCache;
+  createdBy!: UserEmployeeCache;
 
   @Column()
-  created_by_id: string;
+  created_by_id!: string;
 
   @ManyToOne(() => Device, { nullable: true, eager: true })
   @JoinColumn({ name: 'device_id' })
-  device: Device;
+  device?: Device;
 
   @Column({ nullable: true })
-  device_id: number;
+  device_id?: number;
 
   @ManyToOne(() => Order, { nullable: true })
   @JoinColumn({ name: 'previous_order_id' })
-  previousOrder: Order;
+  previousOrder?: Order;
 
   @Column({ nullable: true })
-  previous_order_id: number;
+  previous_order_id?: number;
 
   @Column({ nullable: true })
-  patron: string;
+  patron?: string;
 
   @Column({ nullable: true })
-  password: string;
+  password?: string;
 
   @Column({ default: false })
-  revisadoAntes: boolean;
+  revisadoAntes!: boolean;
 
   @Column({ type: 'text' })
-  detalleIngreso: string;
+  detalleIngreso!: string;
+
   @Column({
     type: 'decimal',
     precision: 10,
@@ -153,14 +147,15 @@ export class Order {
     nullable: true,
   })
   estimated_price?: number;
+
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   attachments?: Attachment[];
 
   @OneToMany(() => OrderPayment, (payment) => payment.order, { cascade: true })
-  payments: OrderPayment[];
+  payments!: OrderPayment[];
 }
