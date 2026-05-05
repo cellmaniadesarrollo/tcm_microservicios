@@ -32,21 +32,31 @@ const NO_REPLY = `\n⚠️ *Este número es solo de notificaciones, por favor no
 const ORDER_MESSAGES: Record<string, (order: OrderReplica) => string> = {
     INGRESADO: (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, tu orden *#${o.orderNumber ?? o.publicId}* ha sido ingresada ✅\n\n` +
-        `Puedes revisar el estado de tu equipo en línea aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu orden *#${o.orderNumber ?? o.publicId}* ha sido ingresada correctamente ✅\n\n` +
+        `🔗 Revisa el diagnóstico y precio de tu equipo aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `Si después de revisar tienes alguna duda, contáctanos al 📞 *098 377 5790*.\n\n` +
+        `¡Gracias por preferirnos!` +
         NO_REPLY,
 
     'TRABAJO FINALIZADO': (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, hemos concluido el trabajo en tu *${o.deviceBrand ?? ''} ${o.deviceModel ?? ''}* y ya está disponible para que pases a retirarlo 🔧\n\n` +
-        `Para conocer el resultado del servicio y los detalles de tu orden, comunícate con nosotros al 📞 *098 377 5790* o revisa tu orden aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Hemos concluido el trabajo en tu *${o.deviceBrand ?? ''} ${o.deviceModel ?? ''}* y ya está listo para retiro 🔧\n\n` +
+        `🔗 Revisa el diagnóstico, resultado del servicio y precio aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `Si después de revisar tienes alguna duda, por favor contáctanos al 📞 *098 377 5790*.\n\n` +
+        `Te esperamos pronto para que lo retires.` +
         NO_REPLY,
 
     ENTREGADA: (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, tu orden *#${o.orderNumber ?? o.publicId}* fue entregada. ¡Gracias por preferirnos! 🙌` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu orden *#${o.orderNumber ?? o.publicId}* ha sido entregada exitosamente 🙌\n\n` +
+        `🔗 Revisa los detalles y precio final de tu orden aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `¡Gracias por preferir Team Cellmania!` +
         NO_REPLY,
 };
 
@@ -70,86 +80,96 @@ const REMINDER_MESSAGES: Array<(order: OrderReplica) => string> = [
     // Paso 0 — Día 1
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, te recordamos que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ya está listo para retiro en nuestro local 🛠️✅\n\n` +
-        `Puedes revisar los detalles de tu orden aquí:\n` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ya está listo para retiro.\n\n` +
+        `🔗 Revisa el diagnóstico, precio y detalles de tu orden aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Para cualquier consulta llámanos al 📞 *098 377 5790*` +
+        `Si después de revisar tienes alguna duda, contáctanos al 📞 *098 377 5790*.\n\n` +
+        `¡Te esperamos pronto! 🛠️` +
         NO_REPLY,
 
     // Paso 1 — Día 4
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* sigue esperándote en nuestro local 😊\n\n` +
-        `Si tienes algún inconveniente para pasar a retirarlo, con gusto te ayudamos a coordinar.\n\n` +
-        `Revisa tu orden aquí:\n` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* continúa listo para retiro en nuestro local.\n\n` +
+        `🔗 Revisa el diagnóstico y precio aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `📞 *098 377 5790*` +
+        `Si tienes alguna duda después de revisarlo, estamos para ayudarte al 📞 *098 377 5790*.\n\n` +
+        `Esperamos verte pronto 😊` +
         NO_REPLY,
 
     // Paso 2 — Día 7
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, han pasado ya algunos días y tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* aún está listo para que lo retires 📦\n\n` +
-        `Te pedimos que pases por nuestro local a la brevedad posible para recogerlo.\n\n` +
-        `Revisa tu orden aquí:\n` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Han pasado varios días y tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ya está reparado y listo para retiro.\n\n` +
+        `🔗 Revisa el diagnóstico y precio de tu orden aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `📞 *098 377 5790*` +
+        `Cualquier duda que tengas después de revisarlo, por favor contáctanos al 📞 *098 377 5790*.\n\n` +
+        `Te pedimos pasar a retirarlo a la brevedad.` +
         NO_REPLY,
 
     // Paso 3 — Día 15
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, han transcurrido 15 días desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro ⏳\n\n` +
-        `Te recordamos que los dispositivos que permanecen más de 30 días en nuestro local pasan a custodia en bodega. Te pedimos que pases a retirarlo pronto.\n\n` +
-        `Revisa tu orden aquí:\n` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Han transcurrido 15 días desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro.\n\n` +
+        `🔗 Revisa el diagnóstico y precio aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `📞 *098 377 5790*` +
+        `Si después de revisar tienes alguna duda, comunícate con nosotros al 📞 *098 377 5790*.\n\n` +
+        `Recuerda que a partir de los 30 días el equipo pasa a bodega.` +
         NO_REPLY,
 
     // Paso 4 — Día 30
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva 30 días esperando en nuestro local ⚠️\n\n` +
-        `Por favor acércate a retirarlo. Si no es posible, comunícate con nosotros para coordinar una solución.\n\n` +
-        `Revisa tu orden aquí:\n` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva **30 días** listo para retiro ⚠️\n\n` +
+        `🔗 Revisa el diagnóstico y precio actualizado aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `📞 *098 377 5790*` +
+        `Si tienes dudas después de revisarlo, contáctanos al 📞 *098 377 5790* para coordinar.` +
         NO_REPLY,
 
     // Paso 5 — Día 45
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'}, aviso importante: tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva 45 días listo para retiro y aún no ha sido recogido 🔔\n\n` +
-        `Te pedimos que te comuniques con nosotros *a la brevedad posible* para coordinar el retiro de tu equipo. Pasado cierto tiempo, el dispositivo será trasladado a bodega.\n\n` +
-        `📞 *098 377 5790*` +
+        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Aviso importante: tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva **45 días** listo para retiro 🔔\n\n` +
+        `🔗 Revisa diagnóstico y precio aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `Si después de revisar tienes alguna duda, por favor contáctanos *inmediatamente* al 📞 *098 377 5790* para coordinar el retiro.` +
         NO_REPLY,
 
-    // Paso 6 — Día 60 ⚠️ Traslado a bodega
+    // Paso 6 — Día 60 (Traslado a bodega)
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `🔔 Hola ${o.customer?.firstName ?? 'estimado/a'}, dado que han transcurrido 60 días desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro, tu dispositivo ha sido *trasladado a nuestra bodega* para liberar espacio en el local 📦\n\n` +
-        `Tu equipo sigue seguro y disponible, pero por favor comunícate con nosotros *antes de acercarte* para coordinar la entrega.\n\n` +
-        `📞 *098 377 5790*\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}` +
+        `🔔 Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ha sido trasladado a bodega tras **60 días** sin retiro 📦\n\n` +
+        `🔗 Revisa el diagnóstico y precio aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `Si tienes dudas o deseas coordinar la entrega, contáctanos al 📞 *098 377 5790* antes de acercarte.` +
         NO_REPLY,
 
-    // Paso 7 — Día 75 ⚠️ Aviso de repuestos
+    // Paso 7 — Día 75 (Recuperación de repuestos)
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `⚠️ Hola ${o.customer?.firstName ?? 'estimado/a'}, te informamos que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva 75 días sin ser retirado.\n\n` +
-        `De no proceder al retiro en los próximos días, nos veremos en la necesidad de *recuperar los insumos y repuestos utilizados en el servicio* para cubrir los costos incurridos, conforme a nuestras políticas internas.\n\n` +
-        `Por favor contáctanos urgentemente si deseas recuperar tu dispositivo:\n` +
-        `📞 *098 377 5790*` +
+        `⚠️ Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva **75 días** sin ser retirado.\n\n` +
+        `🔗 Revisa el diagnóstico y precio aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `Si después de revisar tienes dudas o quieres recuperar tu equipo, contáctanos **urgentemente** al 📞 *098 377 5790*, ya que podríamos proceder a recuperar repuestos.` +
         NO_REPLY,
 
-    // Paso 8 — Día 90 🔴 Mensaje final
+    // Paso 8 — Día 90 (Mensaje final)
     (o) =>
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `🔴 Hola ${o.customer?.firstName ?? 'estimado/a'}, han transcurrido *90 días (3 meses)* desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro.\n\n` +
-        `De acuerdo con las *condiciones de servicio que aceptaste al dejar el equipo* — donde se indica claramente que el plazo máximo de retiro es de 3 meses — el período de custodia ha concluido.\n\n` +
-        `Nuestra responsabilidad sobre el dispositivo ha finalizado. Si aún deseas recuperarlo y el equipo sigue disponible, por favor contáctanos *de inmediato* para coordinar. No garantizamos la disponibilidad del dispositivo ni de sus repuestos pasado este plazo.\n\n` +
-        `📞 *098 377 5790*\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}` +
+        `🔴 Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
+        `Han transcurrido **90 días (3 meses)** desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro.\n\n` +
+        `🔗 Revisa el diagnóstico y precio aquí:\n` +
+        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
+        `De acuerdo con las condiciones de servicio, el plazo de custodia ha finalizado. Si aún deseas recuperarlo, contáctanos *de inmediato* al 📞 *098 377 5790*.\n\n` +
+        `No garantizamos disponibilidad pasada esta fecha.` +
         NO_REPLY,
 ];
 
