@@ -1,64 +1,62 @@
-import {
-  IsInt,
-  IsOptional,
-  IsString,
-  IsArray,
-  ValidateNested,
-  MaxLength,
-} from 'class-validator';
+import { IsArray, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
 
-class UpdateDeviceAccountDto {
-  @IsString()
+class UpdateDeviceImeiGatewayDto {
   @IsOptional()
-  @MaxLength(200)
-  username?: string;
+  @IsNumber()
+  imei_id?: number;
 
   @IsString()
+  imei_number!: string;        // ✅ !
+}
+
+class UpdateDeviceAccountGatewayDto {
   @IsOptional()
-  @MaxLength(200)
+  @IsNumber()
+  account_id?: number;
+
+  @IsString()
+  username!: string;           // ✅ !
+
+  @IsOptional()
+  @IsString()
   password?: string;
 
   @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  account_type?: string;
+  account_type!: string;       // ✅ !
 }
 
-export class UpdateDeviceDto {
-  @IsInt()
-  @IsOptional()
-  models_id?: number;
+export class UpdateDeviceGatewayDto {
+  @IsNumber()
+  deviceId!: number;           // ✅ !
 
-  @IsInt()
-  @IsOptional()
-  device_type_id?: number;
+  @IsNumber()
+  models_id!: number;          // ✅ !
 
+  @IsNumber()
+  device_type_id!: number;     // ✅ !
+
+  @IsOptional()
   @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  serial_number?: string;
-
-  @IsString()
-  @IsOptional()
-  @MaxLength(50)
   color?: string;
 
-  @IsString()
   @IsOptional()
-  @MaxLength(50)
+  @IsString()
   storage?: string;
 
-  // ---- IMEIs ----
-  @IsArray()
-  @IsString({ each: true })
   @IsOptional()
-  imeis?: string[];
+  @IsString()
+  observations?: string;       // ✅ NUEVO
 
-  // ---- Accounts ----
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => UpdateDeviceAccountDto)
+  @Type(() => UpdateDeviceImeiGatewayDto)
+  imeis?: UpdateDeviceImeiGatewayDto[];
+
   @IsOptional()
-  accounts?: UpdateDeviceAccountDto[];
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateDeviceAccountGatewayDto)
+  accounts?: UpdateDeviceAccountGatewayDto[];
 }

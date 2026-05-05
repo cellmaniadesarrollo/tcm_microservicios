@@ -258,6 +258,7 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.technicians', 'technicians')
       .leftJoinAndSelect('o.device', 'device')
       .leftJoinAndSelect('device.imeis', 'imei')            // ← IMEIs
+      .leftJoinAndSelect('o.createdBy', 'createdBy')
 
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
@@ -335,6 +336,7 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.technicians', 'technicians')
       .leftJoinAndSelect('o.device', 'device')
       .leftJoinAndSelect('device.imeis', 'imei')            // ← IMEIs del dispositivo
+
 
       .where('o.company_id = :companyId', { companyId: user.companyId })
       .andWhere('technicians.id = :technicianId', { technicianId: user.userId });

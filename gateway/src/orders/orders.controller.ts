@@ -43,6 +43,7 @@ import { GetOrderPublicDataGatewayDto } from './dto/get-order-public-data-gatewa
 import { GetTechniciansDto } from './dto/get-technicians.dto';
 import { CreateOrderNoteGatewayDto } from './dto/create-order-note-gateway.dto';
 import { UpdateOrderNoteGatewayDto } from './dto/update-order-note-gateway.dto';
+import { processFileForUpload } from '../../common/helpers/process-file.helper';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -60,20 +61,39 @@ export class OrdersController {
     for await (const part of request.parts()) {
       if (isMultipartFile(part)) {
         const buffers: Buffer[] = [];
-        for await (const chunk of part.file) buffers.push(chunk as Buffer);
+        for await (const chunk of part.file) {
+          buffers.push(chunk as Buffer);
+        }
         const buffer = Buffer.concat(buffers);
-        files.push({ buffer, originalname: part.filename, mimetype: part.mimetype, size: buffer.length });
+
+        files.push({
+          buffer,
+          originalname: part.filename,
+          mimetype: part.mimetype,
+          size: buffer.length,
+        });
       } else {
         formData[part.fieldname] = part.value as string;
       }
     }
 
-    // Reconstruir el DTO desde formData (los campos vienen como strings)
+    // === PROCESAR ARCHIVOS (convertir imágenes a WebP) ===
+    const processedFiles = await Promise.all(
+      files.map(file => processFileForUpload(file))
+    );
+
+    // Validación de tamaño después de procesar
+    for (const file of processedFiles) {
+      if (file.size > 80 * 1024 * 1024) {
+        throw new BadRequestException(`El archivo ${file.originalname} es demasiado grande`);
+      }
+    }
+
     const dto: CreateOrderGatewayDto = {
       order_type_id: Number(formData.order_type_id),
       order_priority_id: Number(formData.order_priority_id),
       customer_id: Number(formData.customer_id),
-      technician_ids: JSON.parse(formData.technician_ids), // el front envía JSON.stringify([...])
+      technician_ids: JSON.parse(formData.technician_ids || '[]'),
       detalleIngreso: formData.detalleIngreso,
       revisadoAntes: formData.revisadoAntes === 'true',
       device_id: formData.device_id ? Number(formData.device_id) : undefined,
@@ -83,7 +103,7 @@ export class OrdersController {
       estimated_price: formData.estimated_price ? Number(formData.estimated_price) : undefined,
     };
 
-    const formattedFiles = files.map(f => ({
+    const formattedFiles = processedFiles.map(f => ({
       buffer: f.buffer.toString('base64'),
       originalname: f.originalname,
       mimetype: f.mimetype,
@@ -96,7 +116,7 @@ export class OrdersController {
         {
           internalToken: process.env.INTERNAL_SECRET,
           dto,
-          files: formattedFiles, // ← nuevo
+          files: formattedFiles,
           user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
       ),
@@ -483,10 +503,7 @@ export class OrdersController {
 
 
   @Post('attachments')
-  async uploadAttachments(
-    @Req() request: FastifyRequest,
-    @User() user: any,
-  ) {
+  async uploadAttachments(@Req() request: FastifyRequest, @User() user: any) {
     const files: { buffer: Buffer; originalname: string; mimetype: string; size: number }[] = [];
     const formData: Record<string, string> = {};
 
@@ -509,32 +526,36 @@ export class OrdersController {
       }
     }
 
+    if (files.length === 0) {
+      throw new BadRequestException('Debes subir al menos un archivo');
+    }
+
+    // === PROCESAR ARCHIVOS (convertir imágenes a WebP) ===
+    const processedFiles = await Promise.all(
+      files.map(file => processFileForUpload(file))
+    );
+
     const dto: UploadAttachmentGatewayDto = {
       entityId: Number(formData.entityId),
       entityType: formData.entityType as any,
       customFileName: formData.customFileName,
     };
 
-    if (files.length === 0) {
-      throw new BadRequestException('Debes subir al menos un archivo');
-    }
-
-    const formattedFiles = files.map(file => ({
-      buffer: file.buffer.toString('base64'),
-      originalname: file.originalname,
-      mimetype: file.mimetype,
-      size: file.size,
+    const formattedFiles = processedFiles.map(f => ({
+      buffer: f.buffer.toString('base64'),
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
     }));
 
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'upload_attachments' },
         {
-          internalToken: process.env.INTERNAL_SECRET, files: formattedFiles, dto, user: {
-            userId: user.sub,
-            companyId: user.companyId,
-            branchId: user.branchId,
-          },
+          internalToken: process.env.INTERNAL_SECRET,
+          files: formattedFiles,
+          dto,
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
       ),
     );
