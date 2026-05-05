@@ -302,7 +302,7 @@ export class OrderWorkflowService {
     qb.skip(skip).take(limit);
 
     const [data, total] = await qb.getManyAndCount();
-    console.log(data)
+
     return {
       data,
       total,
