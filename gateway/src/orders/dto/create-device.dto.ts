@@ -3,19 +3,19 @@ import { Type } from 'class-transformer';
 
 class IMEIItem {
   @IsString()
-  imei_number: string;
+  imei_number!: string;
 }
 
 class AccountItem {
   @IsString()
-  username: string;
+  username!: string;
 
   @IsOptional()
   @IsString()
   password?: string;
 
   @IsString()
-  account_type: string;
+  account_type!: string;
 }
 
 export class CreateDeviceDto {
@@ -31,19 +31,25 @@ export class CreateDeviceDto {
   @IsString()
   storage?: string;
 
-  @IsNumber()
-  models_id: number;
+  @IsOptional()
+  @IsString()
+  observations?: string;       // ✅ NUEVO
 
   @IsNumber()
-  device_type_id: number;
+  models_id!: number;
 
+  @IsNumber()
+  device_type_id!: number;
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => IMEIItem)
-  imeis: IMEIItem[];
+  imeis?: IMEIItem[];
 
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => AccountItem)
-  accounts: AccountItem[];
+  accounts?: AccountItem[];
 }
