@@ -1,4 +1,4 @@
-//microservices\orders\src\devices\entities\device.entity.ts
+// microservices\orders\src\devices\entities\device.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -19,46 +19,50 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 @Unique(['company_id', 'serial_number'])
 export class Device {
   @PrimaryGeneratedColumn()
-  device_id: number;
+  device_id!: number; // Se usa ! porque TypeORM lo genera automáticamente
 
   // 🔐 Empresa dueña del device
   @Column({ type: 'uuid' })
-  company_id: string;
+  company_id!: string;
 
   @ManyToOne(() => CompanyReplica)
   @JoinColumn({ name: 'company_id' })
-  company: CompanyReplica;
+  company!: CompanyReplica;
 
   @Column({ nullable: true, length: 100 })
-  serial_number: string;
+  serial_number?: string; // Se usa ? porque en el decorador marcaste nullable: true
 
   @Column({ nullable: true, length: 50 })
-  color: string;
+  color?: string;
 
   @Column({ nullable: true, length: 50 })
-  storage: string;
+  storage?: string;
+
+  // NUEVO CAMPO: Observaciones
+  @Column({ type: 'text', nullable: true })
+  observations?: string;
 
   // ---- MODELO ----
   @Column()
-  models_id: number;
+  models_id!: number;
 
   @ManyToOne(() => Model)
   @JoinColumn({ name: 'models_id' })
-  model: Model;
+  model!: Model;
 
   // ---- TIPO ----
   @Column()
-  device_type_id: number;
+  device_type_id!: number;
 
   @ManyToOne(() => DeviceType, (type) => type.devices)
   @JoinColumn({ name: 'device_type_id' })
-  type: DeviceType;
+  type!: DeviceType;
 
   // ---- IMEIS ----
   @OneToMany(() => DeviceIMEI, (imei) => imei.device, { cascade: true })
-  imeis: DeviceIMEI[];
+  imeis!: DeviceIMEI[];
 
   // ---- CUENTAS ----
   @OneToMany(() => DeviceAccount, (acc) => acc.device, { cascade: true })
-  accounts: DeviceAccount[];
+  accounts!: DeviceAccount[];
 }

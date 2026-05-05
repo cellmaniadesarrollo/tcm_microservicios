@@ -120,6 +120,7 @@ export class DevicesService {
         serial_number: serialNumber,
         color: data.color,
         storage: data.storage,
+        observations: data.observations ?? null,
         models_id: data.models_id,
         device_type_id: data.device_type_id,
       });
@@ -278,11 +279,14 @@ export class DevicesService {
     if (dto.storage !== undefined) {
       device.storage = dto.storage;
     }
+    if (dto.observations !== undefined) {  // ✅ NUEVO
+      device.observations = dto.observations;
+    }
     // 2️⃣ IMEIs → sincronización
-    device.imeis = this.syncImeis(device, dto.imeis, user.companyId);
+    device.imeis = this.syncImeis(device, dto.imeis ?? [], user.companyId);
 
     // 3️⃣ Accounts → sincronización
-    device.accounts = this.syncAccounts(device, dto.accounts);
+    device.accounts = this.syncAccounts(device, dto.accounts ?? []);
 
     await this.deviceRepo.save(device);
 

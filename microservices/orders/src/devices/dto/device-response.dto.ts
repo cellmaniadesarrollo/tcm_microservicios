@@ -1,20 +1,33 @@
+import { IsNumber, IsOptional, IsString } from 'class-validator';
+
 export class DeviceResponseDto {
-  device_id: number;
+  @IsNumber()
+  device_id!: number;
 
-  // 🔑 necesarios para edición
-  models_id: number;
-  device_type_id: number;
+  @IsNumber()
+  models_id!: number;
 
-  serial_number: string;
-  color: string;
-  storage: string;
+  @IsNumber()
+  device_type_id!: number;
 
-  imeis: {
+  @IsOptional()
+  @IsString()
+  serial_number?: string;
+
+  @IsOptional()
+  @IsString()
+  color?: string;
+
+  @IsOptional()
+  @IsString()
+  storage?: string;
+
+  imeis?: {
     imei_id: number;
     imei_number: string;
   }[];
 
-  accounts: {
+  accounts?: {
     account_id: number;
     username: string;
     account_type: string;
