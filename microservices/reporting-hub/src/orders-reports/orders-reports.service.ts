@@ -111,7 +111,6 @@ export class OrdersReportsService {
                     technicians: 1,
                     entry_date: 1,
                     estimated_price: 1,
-                    // necesarios para calcular los 4 campos derivados
                     statusHistory: 1,
                     findings: 1,
                     payments: 1,
@@ -125,26 +124,31 @@ export class OrdersReportsService {
         const now = new Date();
         const data = raw.map((order): OrderListItemDto => {
 
-            // ── 1. Fecha completado ───────────────────────────────────
-            // Última vez que la orden llegó al estado ENTREGADA (id = 8)
+            // ── 1. Fecha trabajo finalizado (id = 7) ──────────────────
+            const finalizedAt = order.statusHistory
+                ?.filter(h => h.toStatus?.id === 7)
+                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+            [0]?.changed_at ?? null;
+
+            // ── 2. Fecha entregada (id = 8) ───────────────────────────
             const completedAt = order.statusHistory
                 ?.filter(h => h.toStatus?.id === 8)
                 .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
             [0]?.changed_at ?? null;
 
-            // ── 2. Costos de procedimientos ───────────────────────────
+            // ── 3. Costos de procedimientos ───────────────────────────
             const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
                 sumF + (finding.procedures?.reduce((sumP, proc) =>
                     sumP + (proc.is_active ? (proc.procedure_cost ?? 0) : 0),
                     0) ?? 0),
                 0) ?? 0;
 
-            // ── 3. Total pagado (solo INGRESO) ────────────────────────
+            // ── 4. Total pagado (solo INGRESO) ────────────────────────
             const totalPaid = order.payments?.reduce((sum, p) =>
                 sum + (p.flow_type === 'INGRESO' ? (p.amount ?? 0) : 0),
                 0) ?? 0;
 
-            // ── 4. Resumen de hallazgos ───────────────────────────────
+            // ── 5. Resumen de hallazgos ───────────────────────────────
             const activeFindings = order.findings?.filter(f => f.is_active) ?? [];
             const findingsSummary = {
                 total: activeFindings.length,
@@ -152,14 +156,11 @@ export class OrdersReportsService {
                 pending: activeFindings.filter(f => !f.is_resolved).length,
             };
 
-            // ── 5. Garantía activa ────────────────────────────────────
-            // Al menos un procedimiento activo con warranty_days > 0
-            // cuya fecha de vencimiento (completedAt + warranty_days) aún no pasó.
-            // Si la orden no fue entregada aún, se considera garantía "pendiente de activar" → true
+            // ── 6. Garantía activa ────────────────────────────────────
             const hasActiveWarranty = order.findings?.some(finding =>
                 finding.procedures?.some(proc => {
                     if (!proc.is_active || !proc.warranty_days || proc.warranty_days <= 0) return false;
-                    if (!completedAt) return true; // entregada aún no → garantía existe pero no ha iniciado
+                    if (!completedAt) return true;
                     const expiresAt = new Date(completedAt);
                     expiresAt.setDate(expiresAt.getDate() + proc.warranty_days);
                     return expiresAt > now;
@@ -184,6 +185,7 @@ export class OrdersReportsService {
                 device,
                 technicians: order.technicians?.map(t => ({ id: t.id, first_name: t.first_name, last_name: t.last_name })) ?? [],
                 entry_date: order.entry_date,
+                finalized_at: finalizedAt,   // ← nuevo
                 completed_at: completedAt,
                 estimated_price: order.estimated_price ?? null,
                 total_procedures_cost: totalProceduresCost,
@@ -201,7 +203,7 @@ export class OrdersReportsService {
 
         const filter: Record<string, any> = { 'company.id': companyId };
 
-        // Arrays de IDs → $in  (el frontend manda strings; cast a Number para catalogs)
+        // ── Arrays de IDs → $in ──────────────────────────────────────────────────
         if (dto.status?.length)
             filter['currentStatus.id'] = { $in: dto.status.map(Number) };
 
@@ -209,34 +211,81 @@ export class OrdersReportsService {
             filter['type.id'] = { $in: dto.orderType.map(Number) };
 
         if (dto.branch?.length)
-            filter['branch.id'] = { $in: dto.branch };          // UUID → string
+            filter['branch.id'] = { $in: dto.branch };
 
         if (dto.technician?.length)
-            filter['technicians.id'] = { $in: dto.technician }; // UUID → string
+            filter['technicians.id'] = { $in: dto.technician };
 
         if (dto.receptionist?.length)
-            filter['createdBy.id'] = { $in: dto.receptionist }; // UUID → string
+            filter['createdBy.id'] = { $in: dto.receptionist };
 
-        // ── Período ──────────────────────────────────────────────────────────────
-        if (dto.periodMode === 'preset' && dto.presetPeriod) {
-            // "2026-04" → primer y último instante del mes
-            const [year, month] = dto.presetPeriod.split('-').map(Number);
-            filter['entry_date'] = {
-                $gte: new Date(year, month - 1, 1),
-                $lt: new Date(year, month, 1),   // primer día del mes siguiente
+        // ── Período de ingreso (entry_date) ──────────────────────────────────────
+        const ingresoRange = this.resolveDateRange(
+            dto.periodMode, dto.presetPeriod, dto.dateFrom, dto.dateTo
+        );
+        if (ingresoRange) filter['entry_date'] = ingresoRange;
+
+        // ── Período de finalización (statusHistory → toStatus.id = 7) ────────────
+        const endRange = this.resolveDateRange(
+            dto.endPeriodMode, dto.endPresetPeriod, dto.endDateFrom, dto.endDateTo
+        );
+        if (endRange) {
+            filter['statusHistory'] = {
+                $elemMatch: { 'toStatus.id': 7, changed_at: endRange },
             };
-        } else if (dto.periodMode === 'custom') {
-            const dateFilter: Record<string, Date> = {};
-            if (dto.dateFrom) dateFilter.$gte = new Date(dto.dateFrom);
-            if (dto.dateTo) {
-                const to = new Date(dto.dateTo);
-                to.setHours(23, 59, 59, 999);     // incluir todo el día final
-                dateFilter.$lte = to;
+        }
+
+        // ── Período de entrega (statusHistory → toStatus.id = 8) ─────────────────
+        const deliveryRange = this.resolveDateRange(
+            dto.deliveryPeriodMode, dto.deliveryPresetPeriod, dto.deliveryDateFrom, dto.deliveryDateTo
+        );
+        if (deliveryRange) {
+            if (filter['statusHistory']) {
+                // Ambos filtros activos → $all con dos $elemMatch sobre el mismo campo
+                filter['statusHistory'] = {
+                    $all: [
+                        { $elemMatch: filter['statusHistory'].$elemMatch },
+                        { $elemMatch: { 'toStatus.id': 8, changed_at: deliveryRange } },
+                    ],
+                };
+            } else {
+                filter['statusHistory'] = {
+                    $elemMatch: { 'toStatus.id': 8, changed_at: deliveryRange },
+                };
             }
-            if (Object.keys(dateFilter).length) filter['entry_date'] = dateFilter;
         }
 
         return filter;
+    }
+
+    // ── Helper compartido: mode + preset/custom → objeto $gte/$lt ────────────────
+    private resolveDateRange(
+        mode?: 'preset' | 'custom',
+        preset?: string,
+        from?: string,
+        to?: string,
+    ): Record<string, Date> | null {
+
+        if (mode === 'preset' && preset) {
+            const [year, month] = preset.split('-').map(Number);
+            return {
+                $gte: new Date(year, month - 1, 1),
+                $lt: new Date(year, month, 1),     // primer día del mes siguiente
+            };
+        }
+
+        if (mode === 'custom' && (from || to)) {
+            const range: Record<string, Date> = {};
+            if (from) range.$gte = new Date(from);
+            if (to) {
+                const end = new Date(to);
+                end.setHours(23, 59, 59, 999);
+                range.$lte = end;
+            }
+            return range;
+        }
+
+        return null;
     }
     async getOrderDetail(companyId: string, orderId: number) {
         const order = await this.orderReplicaModel
