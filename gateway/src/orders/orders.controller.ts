@@ -43,7 +43,7 @@ import { GetOrderPublicDataGatewayDto } from './dto/get-order-public-data-gatewa
 import { GetTechniciansDto } from './dto/get-technicians.dto';
 import { CreateOrderNoteGatewayDto } from './dto/create-order-note-gateway.dto';
 import { UpdateOrderNoteGatewayDto } from './dto/update-order-note-gateway.dto';
-import { processFileForUpload } from '../../common/helpers/process-file.helper';
+import { processFileForUpload } from '../common/helpers/process-file.helper';
 @Controller('orders')
 @Auth()
 @Features('orders')
