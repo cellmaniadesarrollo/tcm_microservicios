@@ -4,10 +4,10 @@ import { FastifyReply } from 'fastify';
 import { join } from 'path';
 @Controller()
 export class AppController {
-    constructor(private readonly appService: AppService) { }
+  constructor(private readonly appService: AppService) { }
 
-    @Get()
-getHtml(@Res() res: FastifyReply) {
+  @Get()
+  getHtml(@Res() res: FastifyReply) {
     const html = `
       <!DOCTYPE html>
       <html lang="es">
@@ -35,6 +35,6 @@ getHtml(@Res() res: FastifyReply) {
       </html>
     `;
     res.type('text/html').send(html);
-    }
+  }
 
 }
