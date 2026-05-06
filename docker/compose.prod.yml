@@ -97,252 +97,268 @@ services:
           ms.order.updated
         "
 
-        echo "⏳ Creando topics en Kafka..."
+        echo "⏳ Sincronizando tópicos en Kafka..."
+        CREATED=0
+        SKIPPED=0
 
         for TOPIC in $$TOPICS; do
-          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
-            --create --if-not-exists \
-            --topic $$TOPIC \
-            --partitions 1 --replication-factor 1
+          TRIMMED=$(echo $$TOPIC | tr -d '[:space:]')
+          [ -z "$$TRIMMED" ] && continue
+
+          EXISTS=$(/opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:9092 \
+            --list 2>/dev/null | grep -x "$$TRIMMED" || true)
+
+          if [ -z "$$EXISTS" ]; then
+            /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+              --create \
+              --topic $$TRIMMED \
+              --partitions 1 --replication-factor 1
+            echo "  ✅ Creado: $$TRIMMED"
+            CREATED=$$((CREATED + 1))
+          else
+            echo "  ⏭️  Ya existe: $$TRIMMED"
+            SKIPPED=$$((SKIPPED + 1))
+          fi
         done
 
-        echo "🎉 Todos los topics listos"
+        echo "🎉 Listo — Creados: $$CREATED | Ya existían: $$SKIPPED"
 
-  redis:
-    image: redis:7-alpine
-    container_name: redis-realtime
-    restart: always
-    # NO exponer puertos al exterior (seguridad)
-    volumes:
-      - redis_data:/data
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+    redis:
+      image: redis:7-alpine
+      container_name: redis-realtime
+      restart: always
+      # NO exponer puertos al exterior (seguridad)
+      volumes:
+        - redis_data:/data
+      networks:
+        - backend
+      healthcheck:
+        test: ["CMD", "redis-cli", "ping"]
+        interval: 30s
+        timeout: 10s
+        retries: 5
+        start_period: 30s
 
-  # ─────────────────────────────────────────
-  # MICROSERVICIOS
-  # ─────────────────────────────────────────
+    # ─────────────────────────────────────────
+    # MICROSERVICIOS
+    # ─────────────────────────────────────────
 
-  gateway:
-    build:
-      context: ../gateway
-      dockerfile: Dockerfile
-    container_name: ms-gateway
-    restart: always
-    ports:
-      - "3000:3000"
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - JWT_SECRET=${JWT_SECRET}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - LEGACY_JWT_SECRET
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy 
+    gateway:
+      build:
+        context: ../gateway
+        dockerfile: Dockerfile
+      container_name: ms-gateway
+      restart: always
+      ports:
+        - "3000:3000"
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - JWT_SECRET=${JWT_SECRET}
+        - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - LEGACY_JWT_SECRET
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy 
 
-  users:
-    build:
-      context: ../microservices/users
-      dockerfile: Dockerfile
-    container_name: ms-users
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${USERS_DB_HOST}
-      - DB_PORT=${USERS_DB_PORT}
-      - DB_USER=${USERS_DB_USER}
-      - DB_PASSWORD=${USERS_DB_PASSWORD}
-      - DB_NAME=${USERS_DB_NAME}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
+    users:
+      build:
+        context: ../microservices/users
+        dockerfile: Dockerfile
+      container_name: ms-users
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_HOST=${USERS_DB_HOST}
+        - DB_PORT=${USERS_DB_PORT}
+        - DB_USER=${USERS_DB_USER}
+        - DB_PASSWORD=${USERS_DB_PASSWORD}
+        - DB_NAME=${USERS_DB_NAME}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
 
-  orders:
-    build:
-      context: ../microservices/orders
-      dockerfile: Dockerfile
-    container_name: ms-orders
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${ORDERS_DB_HOST}
-      - DB_PORT=${ORDERS_DB_PORT}
-      - DB_USER=${ORDERS_DB_USER}
-      - DB_PASSWORD=${ORDERS_DB_PASSWORD}
-      - DB_NAME=${ORDERS_DB_NAME}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
-      - MYSQL_DB_USER=${MYSQL_DB_USER}
-      - MYSQL_DB_PORT=${MYSQL_DB_PORT}
-      - MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD}
-      - MYSQL_DB_NAME=${MYSQL_DB_NAME}
-      - AWS_REGION=${AWS_REGION}
-      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
-      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-    networks:
-      - backend
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      init-kafka:
-        condition: service_completed_successfully
+    orders:
+      build:
+        context: ../microservices/orders
+        dockerfile: Dockerfile
+      container_name: ms-orders
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_HOST=${ORDERS_DB_HOST}
+        - DB_PORT=${ORDERS_DB_PORT}
+        - DB_USER=${ORDERS_DB_USER}
+        - DB_PASSWORD=${ORDERS_DB_PASSWORD}
+        - DB_NAME=${ORDERS_DB_NAME}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - MYSQL_DB_HOST1=${MYSQL_DB_HOST1}
+        - MYSQL_DB_USER=${MYSQL_DB_USER}
+        - MYSQL_DB_PORT=${MYSQL_DB_PORT}
+        - MYSQL_DB_PASSWORD=${MYSQL_DB_PASSWORD}
+        - MYSQL_DB_NAME=${MYSQL_DB_NAME}
+        - AWS_REGION=${AWS_REGION}
+        - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+        - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+        - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+        - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      networks:
+        - backend
+      extra_hosts:
+        - "host.docker.internal:host-gateway"
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
+        init-kafka:
+          condition: service_completed_successfully
 
-  clients:
-    build:
-      context: ../microservices/clients
-      dockerfile: Dockerfile
-    container_name: ms-clients
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${CLIENTS_DB_HOST}
-      - DB_PORT=${CLIENTS_DB_PORT}
-      - DB_USER=${CLIENTS_DB_USER}
-      - DB_PASSWORD=${CLIENTS_DB_PASSWORD}
-      - DB_NAME=${CLIENTS_DB_NAME}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      init-kafka:
-        condition: service_completed_successfully
+    clients:
+      build:
+        context: ../microservices/clients
+        dockerfile: Dockerfile
+      container_name: ms-clients
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_HOST=${CLIENTS_DB_HOST}
+        - DB_PORT=${CLIENTS_DB_PORT}
+        - DB_USER=${CLIENTS_DB_USER}
+        - DB_PASSWORD=${CLIENTS_DB_PASSWORD}
+        - DB_NAME=${CLIENTS_DB_NAME}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
+        init-kafka:
+          condition: service_completed_successfully
 
-  companies:
-    build:
-      context: ../microservices/companies
-      dockerfile: Dockerfile
-    container_name: ms-companies
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${COMPANIES_DB_HOST}
-      - DB_PORT=${COMPANIES_DB_PORT}
-      - DB_USER=${COMPANIES_DB_USER}
-      - DB_PASSWORD=${COMPANIES_DB_PASSWORD}
-      - DB_NAME=${COMPANIES_DB_NAME}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
+    companies:
+      build:
+        context: ../microservices/companies
+        dockerfile: Dockerfile
+      container_name: ms-companies
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_HOST=${COMPANIES_DB_HOST}
+        - DB_PORT=${COMPANIES_DB_PORT}
+        - DB_USER=${COMPANIES_DB_USER}
+        - DB_PASSWORD=${COMPANIES_DB_PASSWORD}
+        - DB_NAME=${COMPANIES_DB_NAME}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
 
-  subscriptions:
-    build:
-      context: ../microservices/subscriptions
-      dockerfile: Dockerfile
-    container_name: ms-subscriptions
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${SUBSCRIPTIONS_DB_HOST}
-      - DB_PORT=${SUBSCRIPTIONS_DB_PORT}
-      - DB_USER=${SUBSCRIPTIONS_DB_USER}
-      - DB_PASSWORD=${SUBSCRIPTIONS_DB_PASSWORD}
-      - DB_NAME=${SUBSCRIPTIONS_DB_NAME}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
+    subscriptions:
+      build:
+        context: ../microservices/subscriptions
+        dockerfile: Dockerfile
+      container_name: ms-subscriptions
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_HOST=${SUBSCRIPTIONS_DB_HOST}
+        - DB_PORT=${SUBSCRIPTIONS_DB_PORT}
+        - DB_USER=${SUBSCRIPTIONS_DB_USER}
+        - DB_PASSWORD=${SUBSCRIPTIONS_DB_PASSWORD}
+        - DB_NAME=${SUBSCRIPTIONS_DB_NAME}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
 
-  reports:
-    build:
-      context: ../microservices/reporting-hub
-      dockerfile: Dockerfile
-    container_name: ms-reports
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_NAME=${MONGODB_DB_REPORTS}
-      - MONGODB_URI=${MONGODB_URI}
-    networks:
-      - backend 
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 60s
-  notification-dispatcher:
-    build:
-      context: ../microservices/notification-dispatcher
-      dockerfile: Dockerfile
-    container_name: ms-notification-dispatcher
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${DISPATCHER_DB_HOST}
-      - DB_PORT=${DISPATCHER_DB_PORT}
-      - DB_USER=${DISPATCHER_DB_USER}
-      - DB_PASSWORD=${DISPATCHER_DB_PASSWORD}
-      - DB_NAME=${DISPATCHER_DB_NAME}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      init-kafka:
-        condition: service_completed_successfully
-    healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3001,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
-      interval: 10s
-      timeout: 5s
-      retries: 15
-      start_period: 60s
-  realtime:
-    build:
-      context: ../realtime
-      dockerfile: Dockerfile
-    container_name: ms-realtime
-    restart: always
-    environment:
-      - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - JWT_SECRET=${JWT_SECRET}
-      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
-      - REDIS_URL=redis://redis:6379
-    ports:
-      - "3002:3002"
-    networks:
-      - backend
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+    reports:
+      build:
+        context: ../microservices/reporting-hub
+        dockerfile: Dockerfile
+      container_name: ms-reports
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_NAME=${MONGODB_DB_REPORTS}
+        - MONGODB_URI=${MONGODB_URI}
+      networks:
+        - backend 
+      healthcheck:
+        test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+        interval: 10s
+        timeout: 5s
+        retries: 15
+        start_period: 60s
+    notification-dispatcher:
+      build:
+        context: ../microservices/notification-dispatcher
+        dockerfile: Dockerfile
+      container_name: ms-notification-dispatcher
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - DB_HOST=${DISPATCHER_DB_HOST}
+        - DB_PORT=${DISPATCHER_DB_PORT}
+        - DB_USER=${DISPATCHER_DB_USER}
+        - DB_PASSWORD=${DISPATCHER_DB_PASSWORD}
+        - DB_NAME=${DISPATCHER_DB_NAME}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
+        init-kafka:
+          condition: service_completed_successfully
+      healthcheck:
+        test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3001,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+        interval: 10s
+        timeout: 5s
+        retries: 15
+        start_period: 60s
+    realtime:
+      build:
+        context: ../realtime
+        dockerfile: Dockerfile
+      container_name: ms-realtime
+      restart: always
+      environment:
+        - NODE_ENV=production
+        - INTERNAL_SECRET=${INTERNAL_SECRET}
+        - JWT_SECRET=${JWT_SECRET}
+        - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+        - REDIS_URL=redis://redis:6379
+      ports:
+        - "3002:3002"
+      networks:
+        - backend
+      depends_on:
+        rabbitmq:
+          condition: service_healthy
+        redis:
+          condition: service_healthy
 
 
 networks:
