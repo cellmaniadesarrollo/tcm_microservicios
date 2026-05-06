@@ -452,15 +452,103 @@ export class OrdersReportsService {
     }
 
     // ── ADMIN / OWNER / IFE ───────────────────────────────────────────────────────
+    // ── Utilidad: límite de "día" con corte a las 03:00 Guayaquil ────────────────
+    private _dayBoundaries(): { todayStart: Date; todayEnd: Date } {
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5
+        const nowUTC = new Date();
+        const nowLocal = new Date(nowUTC.getTime() + GYE_OFFSET_MS * -1); // local Guayaquil
+
+        // Si son antes de las 03:00 locales el "día" empezó ayer a las 03:00
+        const cutHour = 3;
+        const base = new Date(nowLocal);
+        if (nowLocal.getHours() < cutHour) {
+            base.setDate(base.getDate() - 1);
+        }
+        base.setHours(cutHour, 0, 0, 0);
+
+        // Devolver en UTC
+        const todayStart = new Date(base.getTime() + GYE_OFFSET_MS * -1);
+        const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
+        return { todayStart, todayEnd };
+    }
+
+    // ── Estadísticas de un período: órdenes ingresadas + cobros registrados ───────
+    private async _periodStats(companyId: string, from: Date, to: Date) {
+        const [orders, payments] = await Promise.all([
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: from, $lt: to } } },
+                {
+                    $group: {
+                        _id: null,
+                        received: { $sum: 1 },
+                        finished: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } },
+                        delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
+                    },
+                },
+            ]),
+            // Cobros cuya fecha de pago cae dentro del período
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $unwind: '$payments' },
+                {
+                    $match: {
+                        'payments.flow_type': 'INGRESO',
+                        'payments.paid_at': { $gte: from, $lt: to },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        collected: { $sum: '$payments.amount' },
+                        paymentsCount: { $sum: 1 },
+                    },
+                },
+            ]),
+        ]);
+
+        return {
+            received: orders[0]?.received ?? 0,
+            finished: orders[0]?.finished ?? 0,
+            delivered: orders[0]?.delivered ?? 0,
+            collected: payments[0]?.collected ?? 0,
+            paymentsCount: payments[0]?.paymentsCount ?? 0,
+        };
+    }
+
+    // ── Dashboard principal ───────────────────────────────────────────────────────
     private async getAdminDashboard(companyId: string): Promise<any> {
 
-        // Últimas 4 semanas para la tendencia
-        const since = new Date();
-        since.setDate(since.getDate() - 28);
+        const { todayStart, todayEnd } = this._dayBoundaries();
 
-        const [byStatus, financeData, byBranch, byTechnician, weeklyTrend] = await Promise.all([
+        // Semana: 7 días hacia atrás desde el inicio de hoy
+        const weekStart = new Date(todayStart);
+        weekStart.setDate(weekStart.getDate() - 6);
 
-            // Por estado
+        // Mes: día 1 del mes actual a las 03:00 GYE
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
+        const localNow = new Date(Date.now() - GYE_OFFSET_MS);
+        const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
+        const monthStart = new Date(monthStartLocal.getTime() + GYE_OFFSET_MS);
+
+        // Tendencia 4 semanas
+        const since4w = new Date(todayStart);
+        since4w.setDate(since4w.getDate() - 27);
+
+        const [
+            byStatus,
+            financeData,
+            byBranch,
+            byTechnician,
+            weeklyTrend,
+            [statsDay, statsWeek, statsMonth],
+            hourlyToday,
+            byDeviceBrand,
+            byOrderType,
+            paymentMethods,
+            resolutionTime,
+        ] = await Promise.all([
+
+            // ── Por estado (global) ───────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 {
@@ -473,7 +561,7 @@ export class OrdersReportsService {
                 { $sort: { id: 1 } },
             ]),
 
-            // Finanzas: costo de procedimientos + pagos
+            // ── Finanzas globales ─────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 { $unwind: { path: '$findings', preserveNullAndEmptyArrays: true } },
@@ -494,30 +582,21 @@ export class OrdersReportsService {
                 },
             ]),
 
-            // Por sucursal
+            // ── Por sucursal ──────────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 {
                     $group: {
                         _id: { id: '$branch.id', name: '$branch.name' },
                         total: { $sum: 1 },
-                        delivered: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] }
-                        },
-                        // suma de pagos INGRESO embebidos
+                        delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
                         revenue: {
                             $sum: {
                                 $reduce: {
-                                    input: '$payments',
-                                    initialValue: 0,
-                                    in: {
-                                        $add: [
-                                            '$$value',
-                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }
-                                        ]
-                                    }
-                                }
-                            }
+                                    input: '$payments', initialValue: 0,
+                                    in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] },
+                                },
+                            },
                         },
                     },
                 },
@@ -525,7 +604,7 @@ export class OrdersReportsService {
                 { $sort: { total: -1 } },
             ]),
 
-            // Por técnico top 10
+            // ── Top 10 técnicos ───────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'technicians.0': { $exists: true } } },
                 { $unwind: '$technicians' },
@@ -534,9 +613,7 @@ export class OrdersReportsService {
                         _id: '$technicians.id',
                         name: { $first: { $concat: ['$technicians.first_name', ' ', '$technicians.last_name'] } },
                         total: { $sum: 1 },
-                        resolved: {
-                            $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] }
-                        },
+                        resolved: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } },
                     },
                 },
                 { $project: { _id: 0, techId: '$_id', name: 1, total: 1, resolved: 1 } },
@@ -544,46 +621,147 @@ export class OrdersReportsService {
                 { $limit: 10 },
             ]),
 
-            // Tendencia últimas 4 semanas
+            // ── Tendencia 4 semanas ───────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, entry_date: { $gte: since } } },
+                { $match: { 'company.id': companyId, entry_date: { $gte: since4w } } },
                 {
                     $group: {
-                        _id: {
-                            $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' }
-                        },
+                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' } },
                         ingresadas: { $sum: 1 },
-                        entregadas: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] }
-                        },
+                        entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
                         revenue: {
                             $sum: {
                                 $reduce: {
-                                    input: '$payments',
-                                    initialValue: 0,
-                                    in: {
-                                        $add: [
-                                            '$$value',
-                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }
-                                        ]
-                                    }
-                                }
-                            }
+                                    input: '$payments', initialValue: 0,
+                                    in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] },
+                                },
+                            },
                         },
                     },
                 },
                 { $project: { _id: 0, date: '$_id', ingresadas: 1, entregadas: 1, revenue: 1 } },
                 { $sort: { date: 1 } },
             ]),
+
+            // ── Estadísticas por período: hoy / semana / mes ──────────────────────
+            Promise.all([
+                this._periodStats(companyId, todayStart, todayEnd),
+                this._periodStats(companyId, weekStart, todayEnd),
+                this._periodStats(companyId, monthStart, new Date()),
+            ]),
+
+            // ── Distribución horaria de HOY (para heatmap/bar) ────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: todayStart, $lt: todayEnd } } },
+                {
+                    $group: {
+                        _id: { $hour: { date: '$entry_date', timezone: 'America/Guayaquil' } },
+                        count: { $sum: 1 },
+                        revenue: {
+                            $sum: {
+                                $reduce: {
+                                    input: '$payments', initialValue: 0,
+                                    in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] },
+                                },
+                            },
+                        },
+                    },
+                },
+                { $project: { _id: 0, hour: '$_id', count: 1, revenue: 1 } },
+                { $sort: { hour: 1 } },
+            ]),
+
+            // ── Top 8 marcas de dispositivo ───────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'device.model.brand_name': { $exists: true, $ne: null } } },
+                {
+                    $group: {
+                        _id: { id: '$device.model.brand_id', name: '$device.model.brand_name' },
+                        total: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, brandId: '$_id.id', brandName: '$_id.name', total: 1 } },
+                { $sort: { total: -1 } },
+                { $limit: 8 },
+            ]),
+
+            // ── Por tipo de orden ─────────────────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                {
+                    $group: {
+                        _id: { id: '$type.id', name: '$type.name' },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, typeId: '$_id.id', typeName: '$_id.name', count: 1 } },
+                { $sort: { count: -1 } },
+            ]),
+
+            // ── Métodos de pago (INGRESO) ─────────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $unwind: '$payments' },
+                { $match: { 'payments.flow_type': 'INGRESO' } },
+                {
+                    $group: {
+                        _id: { id: '$payments.payment_method_id', name: '$payments.payment_method_name' },
+                        total: { $sum: '$payments.amount' },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, methodId: '$_id.id', methodName: '$_id.name', total: 1, count: 1 } },
+                { $sort: { total: -1 } },
+            ]),
+
+            // ── Tiempo promedio de resolución (días) ──────────────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'currentStatus.id': { $in: [7, 8] } } },
+                { $unwind: '$statusHistory' },
+                { $match: { 'statusHistory.toStatus.id': { $in: [7, 8] } } },
+                {
+                    $group: {
+                        _id: '$_id',
+                        entry_date: { $first: '$entry_date' },
+                        resolved_at: { $max: '$statusHistory.changed_at' },
+                    },
+                },
+                {
+                    $project: {
+                        diffDays: {
+                            $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        avgDays: { $avg: '$diffDays' },
+                        minDays: { $min: '$diffDays' },
+                        maxDays: { $max: '$diffDays' },
+                    },
+                },
+                { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
+            ]),
         ]);
 
+        // ── Cálculos derivados ────────────────────────────────────────────────────
         const totalAll = byStatus.reduce((s: number, r: any) => s + r.count, 0);
         const totalDelivered = byStatus.find((r: any) => r.id === 8)?.count ?? 0;
         const totalFinished = byStatus.find((r: any) => r.id === 7)?.count ?? 0;
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
+        const avgTicket = totalDelivered > 0 ? +(totalPaid / totalDelivered).toFixed(2) : 0;
 
         return {
+            // ── Períodos con corte 03:00 ─────────────────────────────────────────
+            periods: {
+                today: statsDay,
+                week: statsWeek,
+                month: statsMonth,
+            },
+
+            // ── Totales globales ─────────────────────────────────────────────────
             totals: {
                 all: totalAll,
                 active: totalAll - totalDelivered,
@@ -591,14 +769,28 @@ export class OrdersReportsService {
                 finished: totalFinished,
             },
             byStatus,
+
+            // ── Finanzas globales ─────────────────────────────────────────────────
             finance: {
                 totalProceduresCost: totalCost,
                 totalPaid,
                 totalPending: totalCost - totalPaid,
+                avgTicket,
             },
+
+            // ── Distribuciones ────────────────────────────────────────────────────
             byBranch,
             byTechnician,
+            byOrderType,
+            byDeviceBrand,
+            paymentMethods,
+
+            // ── Serie temporal ────────────────────────────────────────────────────
             weeklyTrend,
+            hourlyToday,
+
+            // ── KPI de operaciones ────────────────────────────────────────────────
+            resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
         };
     }
 }

@@ -19,9 +19,10 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
-          # Aumentamos el tiempo de espera por seguridad (30 minutos)
+          # Tiempo de espera extendido para el primer despliegue o builds pesados
           command_timeout: 30m
           script: |
+            # 1. Navegar al proyecto y actualizar código
             cd /home/ubuntu/proyects/tcm_microservicios || exit 1
             git fetch origin main
             git reset --hard origin/main
