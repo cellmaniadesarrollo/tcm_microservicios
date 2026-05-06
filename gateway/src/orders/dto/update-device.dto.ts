@@ -44,6 +44,8 @@ export class UpdateDeviceGatewayDto {
   @IsString()
   storage?: string;
 
+
+
   @IsOptional()
   @IsString()
   observations?: string;       // ✅ NUEVO
