@@ -454,20 +454,21 @@ export class OrdersReportsService {
     // ── ADMIN / OWNER / IFE ───────────────────────────────────────────────────────
     // ── Utilidad: límite de "día" con corte a las 03:00 Guayaquil ────────────────
     private _dayBoundaries(): { todayStart: Date; todayEnd: Date } {
-        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5
-        const nowUTC = new Date();
-        const nowLocal = new Date(nowUTC.getTime() + GYE_OFFSET_MS * -1); // local Guayaquil
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5 → -18 000 000 ms
 
-        // Si son antes de las 03:00 locales el "día" empezó ayer a las 03:00
+        const nowUTC = new Date();
+        // ✅ local = UTC + offset  (offset es negativo → resta 5 h)
+        const nowLocal = new Date(nowUTC.getTime() + GYE_OFFSET_MS);
+
         const cutHour = 3;
         const base = new Date(nowLocal);
         if (nowLocal.getHours() < cutHour) {
             base.setDate(base.getDate() - 1);
         }
-        base.setHours(cutHour, 0, 0, 0);
+        base.setHours(cutHour, 0, 0, 0); // base está en hora local GYE
 
-        // Devolver en UTC
-        const todayStart = new Date(base.getTime() + GYE_OFFSET_MS * -1);
+        // ✅ UTC = local - offset  (offset negativo → suma 5 h)
+        const todayStart = new Date(base.getTime() - GYE_OFFSET_MS);
         const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
         return { todayStart, todayEnd };
     }
@@ -526,9 +527,12 @@ export class OrdersReportsService {
 
         // Mes: día 1 del mes actual a las 03:00 GYE
         const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
-        const localNow = new Date(Date.now() - GYE_OFFSET_MS);
+
+        // DESPUÉS (correcto)
+        const localNow = new Date(Date.now() + GYE_OFFSET_MS);           // resta 5 h ✅
+
         const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
-        const monthStart = new Date(monthStartLocal.getTime() + GYE_OFFSET_MS);
+        const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS); // suma 5 h ✅
 
         // Tendencia 4 semanas
         const since4w = new Date(todayStart);

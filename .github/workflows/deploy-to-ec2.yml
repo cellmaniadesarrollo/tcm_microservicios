@@ -19,44 +19,80 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
-          # Tiempo de espera extendido para el primer despliegue o builds pesados
           command_timeout: 30m
           script: |
-            # 1. Navegar al proyecto y actualizar código
+            set -e
             cd /home/ubuntu/proyects/tcm_microservicios || exit 1
+
+            # 1. Actualizar código y detectar qué cambió
             git fetch origin main
+            CHANGED=$(git diff --name-only HEAD origin/main)
+            echo "Archivos cambiados:"
+            echo "$CHANGED"
             git reset --hard origin/main
-            
-            # 1. Limpieza total antes de empezar
-            docker system prune -af --volumes
 
             cd docker
 
-            # 2. Levantar primero la infraestructura (Redis, RabbitMQ, Kafka)
-            # Esto asegura que los microservicios encuentren los brokers listos
-            echo "Levantando infraestructura..."
-            docker compose -f compose.prod.yml up -d redis-realtime rabbitmq kafka
-            
-            # 3. Buildear y levantar microservicio por microservicio
-            # Definimos la lista de tus servicios (ajusta los nombres si varían en tu compose)
-            SERVICES=("gateway" "users" "companies" "clients" "orders" "subscriptions" "reports" "realtime" "notification-dispatcher")
-
-            for SERVICE in "${SERVICES[@]}"; do
-              echo "--------------------------------------------"
-              echo "Desplegando: $SERVICE"
-              echo "--------------------------------------------"
-              
-              # Build individual sin caché
-              docker compose -f compose.prod.yml build --no-cache --pull $SERVICE
-              
-              # Levantar individual con recreación forzada
-              docker compose -f compose.prod.yml up -d --force-recreate $SERVICE
-              
-              # Opcional: Pausa de 5 segundos para no saturar la CPU
-              sleep 5
+            # 2. Infraestructura crítica — solo si no está corriendo
+            # Sin --pull para no re-descargar imágenes base innecesariamente
+            for SVC in redis-realtime rabbitmq kafka; do
+              if ! docker compose -f compose.prod.yml ps --status running | grep -q "$SVC"; then
+                echo "⚠️  $SVC no está corriendo, levantando..."
+                docker compose -f compose.prod.yml up -d $SVC
+              else
+                echo "✅ $SVC ya está corriendo, sin cambios"
+              fi
             done
 
-            # 4. Limpieza final de imágenes intermedias
+            # 3. Sincronizar tópicos Kafka — solo si hay cambios en init-kafka
+            # Siempre lo corremos pero con --if-not-exists es idempotente y rápido
+            echo "Sincronizando tópicos Kafka..."
+            docker compose -f compose.prod.yml up -d init-kafka
+            # Esperamos máximo 30s a que termine (en vez de bloquear indefinidamente)
+            timeout 30 docker compose -f compose.prod.yml wait init-kafka || true
+
+            # 4. Build SIN --pull (usa caché de capas Docker del host)
+            # Solo reconstruye las capas que cambiaron (COPY . . invalida caché solo si cambió el código)
+            echo "Construyendo imágenes..."
+            docker compose -f compose.prod.yml build
+
+            # 5. Detectar qué servicios realmente cambiaron para recrear solo esos
+            # Si solo cambió 'users/', no tiene sentido recrear 'gateway'
+            SERVICES_TO_recreate=""
+            declare -A SERVICE_PATHS=(
+              ["gateway"]="gateway/"
+              ["users"]="users/"
+              ["companies"]="companies/"
+              ["clients"]="clients/"
+              ["orders"]="orders/"
+              ["subscriptions"]="subscriptions/"
+              ["reports"]="reports/"
+              ["realtime"]="realtime/"
+              ["notification-dispatcher"]="notification-dispatcher/"
+            )
+
+            for SERVICE in "${!SERVICE_PATHS[@]}"; do
+              PATH_PATTERN="${SERVICE_PATHS[$SERVICE]}"
+              if echo "$CHANGED" | grep -q "$PATH_PATTERN"; then
+                echo "🔄 $SERVICE tiene cambios, se recreará"
+                SERVICES_TO_recreate="$SERVICES_TO_recreate $SERVICE"
+              else
+                echo "⏭️  $SERVICE sin cambios, skip recreate"
+              fi
+            done
+
+            # Si no detectamos ningún servicio específico (ej: cambio en docker/ o root),
+            # recreamos todos como fallback
+            if [ -z "$SERVICES_TO_recreate" ]; then
+              echo "⚠️  No se detectaron servicios específicos, recreando todos..."
+              SERVICES_TO_recreate="gateway users companies clients orders subscriptions reports realtime notification-dispatcher"
+            fi
+
+            # 6. Recrear solo los servicios que cambiaron
+            echo "Actualizando: $SERVICES_TO_recreate"
+            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans $SERVICES_TO_recreate
+
+            # 7. Limpieza
             docker image prune -f
-            
-            echo "🚀 Despliegue secuencial completado con éxito."
+
+            echo "🚀 Despliegue completado."
