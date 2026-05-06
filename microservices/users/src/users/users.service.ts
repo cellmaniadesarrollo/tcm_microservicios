@@ -193,8 +193,10 @@ export class UsersService {
     latitude: number,
     longitude: number,
   ): Promise<{ id: string; name: string } | null> {
-    const RADIUS_METERS = 2000;//2000 = 2km 
-    const branch = await this.branchReplicaRepository
+    const RADIUS_METERS = 2000;
+
+    // 1️⃣ Intenta encontrar una sucursal cercana al usuario
+    const nearby = await this.branchReplicaRepository
       .createQueryBuilder('branch')
       .innerJoin('branch.company', 'company')
       .where('company.id = :companyId', { companyId })
@@ -218,12 +220,22 @@ export class UsersService {
       .setParameters({ longitude, latitude })
       .getOne();
 
-    if (!branch) return null;
+    if (nearby) {
+      return { id: nearby.id, name: nearby.name };
+    }
 
-    return {
-      id: branch.id,
-      name: branch.name,
-    };
+    // 2️⃣ Fallback: asignar la sucursal principal (la primera en orden alfanumérico por nombre)
+    const principal = await this.branchReplicaRepository
+      .createQueryBuilder('branch')
+      .innerJoin('branch.company', 'company')
+      .where('company.id = :companyId', { companyId })
+      .andWhere('branch.status = true')
+      .orderBy('branch.name', 'ASC')   // 001 < 002 < 003 ...
+      .getOne();
+
+    if (!principal) return null;
+
+    return { id: principal.id, name: principal.name };
   }
 
   async findFullDataByCreatedAfter(date: Date | null): Promise<any[]> {

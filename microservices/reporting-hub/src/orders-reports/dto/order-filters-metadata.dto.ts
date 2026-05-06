@@ -6,9 +6,9 @@ import { Transform } from 'class-transformer';
 
 export class GetOrdersFilterDto {
 
-    /** IDs de OrderType (ej: ["1","2"]) */
+    /** IDs de OrderType */
     @IsOptional()
-    @Transform(({ value }) => (Array.isArray(value) ? value : [value])) // <--- TRUCO AQUÍ
+    @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
     @IsArray()
     @ArrayUnique()
     @IsString({ each: true })
@@ -46,6 +46,8 @@ export class GetOrdersFilterDto {
     @IsString({ each: true })
     receptionist?: string[];
 
+    // ── Período de ingreso ───────────────────────────────────
+
     @IsOptional()
     @IsIn(['preset', 'custom'])
     periodMode?: 'preset' | 'custom';
@@ -61,4 +63,40 @@ export class GetOrdersFilterDto {
     @IsOptional()
     @IsDateString()
     dateTo?: string;
+
+    // ── Período de finalización ──────────────────────────────
+
+    @IsOptional()
+    @IsIn(['preset', 'custom'])
+    endPeriodMode?: 'preset' | 'custom';
+
+    @IsOptional()
+    @IsString()
+    endPresetPeriod?: string;
+
+    @IsOptional()
+    @IsDateString()
+    endDateFrom?: string;
+
+    @IsOptional()
+    @IsDateString()
+    endDateTo?: string;
+
+    // ── Período de entrega ───────────────────────────────────
+
+    @IsOptional()
+    @IsIn(['preset', 'custom'])
+    deliveryPeriodMode?: 'preset' | 'custom';
+
+    @IsOptional()
+    @IsString()
+    deliveryPresetPeriod?: string;
+
+    @IsOptional()
+    @IsDateString()
+    deliveryDateFrom?: string;
+
+    @IsOptional()
+    @IsDateString()
+    deliveryDateTo?: string;
 }

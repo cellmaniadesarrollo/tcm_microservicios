@@ -14,20 +14,21 @@ export interface OrderListItemDto {
 
     // Fechas
     entry_date: Date;
+    finalized_at: Date | null;   // cuando llegó a TRABAJO FINALIZADO (status id=7)
     completed_at: Date | null;   // cuando llegó a ENTREGADA (status id=8)
 
     // Precios
-    estimated_price: number | null;  // estimación inicial
-    total_procedures_cost: number;         // suma procedure_cost de findings
-    total_paid: number;         // suma payments INGRESO
+    estimated_price: number | null;
+    total_procedures_cost: number;
+    total_paid: number;
 
-    // Hallazgos (resumen ligero para la tabla)
+    // Hallazgos
     findings_summary: {
         total: number;
         resolved: number;
         pending: number;
     };
 
-    // Garantía — solo flag; el detalle va en el modal
+    // Garantía
     has_active_warranty: boolean;
 }

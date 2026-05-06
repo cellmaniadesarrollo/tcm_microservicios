@@ -37,8 +37,9 @@ async function bootstrap() {
   // Multipart (subida de archivos)
   await app.register(multipart, {
     limits: {
-      fileSize: 10 * 1024 * 1024, // 10 MiB
+      fileSize: 100 * 1024 * 1024,   // 100 MB
       files: 10,
+      headerPairs: 2000,
     },
   });
 
