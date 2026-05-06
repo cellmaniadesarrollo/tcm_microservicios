@@ -26,27 +26,36 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             
-            # ELIMINADO: docker system prune (Ya tienes tu cron de domingo)
+            # 1. Limpieza total antes de empezar
+            docker system prune -af --volumes
 
             cd docker
 
-            # 1. Asegurar que la infraestructura esté arriba
-            echo "Revisando infraestructura (Redis, RabbitMQ, Kafka)..."
+            # 2. Levantar primero la infraestructura (Redis, RabbitMQ, Kafka)
+            # Esto asegura que los microservicios encuentren los brokers listos
+            echo "Levantando infraestructura..."
             docker compose -f compose.prod.yml up -d redis-realtime rabbitmq kafka
             
-            # 2. Buildear todos los servicios usando caché
-            # Al quitar --no-cache, Docker solo reconstruirá desde el paso 'COPY . .' 
-            # de tu nuevo Dockerfile si detecta cambios en el código.
-            echo "Construyendo imágenes con caché..."
-            docker compose -f compose.prod.yml build --pull
+            # 3. Buildear y levantar microservicio por microservicio
+            # Definimos la lista de tus servicios (ajusta los nombres si varían en tu compose)
+            SERVICES=("gateway" "users" "companies" "clients" "orders" "subscriptions" "reports" "realtime" "notification-dispatcher")
 
-            # 3. Levantar/Actualizar los servicios
-            # --force-recreate asegura que se use la nueva imagen construida.
-            # --remove-orphans limpia contenedores que ya no existan en tu compose.
-            echo "Desplegando microservicios..."
-            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans
-            
-            # 4. Limpieza ligera de imágenes "dangling" (huérfanas del build actual)
+            for SERVICE in "${SERVICES[@]}"; do
+              echo "--------------------------------------------"
+              echo "Desplegando: $SERVICE"
+              echo "--------------------------------------------"
+              
+              # Build individual sin caché
+              docker compose -f compose.prod.yml build --no-cache --pull $SERVICE
+              
+              # Levantar individual con recreación forzada
+              docker compose -f compose.prod.yml up -d --force-recreate $SERVICE
+              
+              # Opcional: Pausa de 5 segundos para no saturar la CPU
+              sleep 5
+            done
+
+            # 4. Limpieza final de imágenes intermedias
             docker image prune -f
             
-            echo "🚀 Despliegue optimizado completado con éxito."
+            echo "🚀 Despliegue secuencial completado con éxito."
