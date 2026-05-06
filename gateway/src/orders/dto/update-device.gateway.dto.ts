@@ -49,7 +49,9 @@ export class UpdateDeviceGatewayDto {
   @IsOptional()
   @IsString()
   storage?: string;
-
+  @IsOptional() // 👈 Agregado para permitir la edición de observaciones
+  @IsString()
+  observations?: string;
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => UpdateDeviceImeiGatewayDto)
