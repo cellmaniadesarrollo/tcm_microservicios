@@ -1,41 +1,55 @@
-import sharp from 'sharp';
 import { BadRequestException } from '@nestjs/common';
 
-export async function processFileForUpload(file: {
+export interface ProcessedFile {
     buffer: Buffer;
     originalname: string;
     mimetype: string;
     size: number;
-}) {
-    let finalBuffer = file.buffer;
-    let finalMimeType = file.mimetype;
-    let finalOriginalName = file.originalname;
+}
 
-    // Solo convertimos imágenes
-    if (file.mimetype.startsWith('image/')) {
-        try {
-            const image = sharp(file.buffer);
-
-            const output = await image
-                .resize({ width: 1920, withoutEnlargement: true }) // Máximo 1920px ancho
-                .webp({ quality: 82 }) // Calidad buena y peso reducido
-                .toBuffer();
-
-            finalBuffer = output;
-            finalMimeType = 'image/webp';
-
-            // Cambiar extensión del nombre
-            finalOriginalName = file.originalname.replace(/\.\w+$/i, '.webp');
-        } catch (error) {
-            console.error('Error convirtiendo imagen a WebP:', error);
-            throw new BadRequestException(`Error al procesar la imagen: ${file.originalname}`);
-        }
+export async function processFileForUpload(
+    file: {
+        buffer: Buffer;
+        originalname: string;
+        mimetype: string;
+        size: number;
+    }
+): Promise<ProcessedFile> {
+    // Si no es imagen, retornar original
+    if (!file.mimetype.startsWith('image/')) {
+        return { ...file };
     }
 
-    return {
-        buffer: finalBuffer,
-        originalname: finalOriginalName,
-        mimetype: finalMimeType,
-        size: finalBuffer.length,
-    };
+    try {
+        // Importación dinámica compatible con CJS y ESM
+        const sharpModule = await import('sharp');
+        // Sharp a veces exporta la función directamente o en .default
+        const sharp = sharpModule.default || sharpModule;
+
+        const processedImage = await sharp(file.buffer)
+            .rotate() // <--- Crucial para fotos de iPhone (mantiene la orientación correcta)
+            .resize({
+                width: 1920,
+                withoutEnlargement: true,
+                fit: 'inside',
+            })
+            .webp({
+                quality: 80, // 80 es el sweet spot entre calidad y peso
+                effort: 4,
+            })
+            .toBuffer();
+
+        return {
+            buffer: processedImage,
+            originalname: file.originalname.replace(/\.[^/.]+$/, ".webp"),
+            mimetype: 'image/webp',
+            size: processedImage.length,
+        };
+
+    } catch (error: any) {
+        console.error(`❌ Error en Sharp con ${file.originalname}:`, error.message);
+        // Si falla la conversión, podrías decidir si subir la original o lanzar error
+        // Aquí lanzamos error como lo tenías:
+        throw new BadRequestException(`No se pudo procesar la imagen: ${file.originalname}`);
+    }
 }

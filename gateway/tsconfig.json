@@ -21,7 +21,7 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
 
-    // Silencia la advertencia de deprecación de baseUrl (hasta TS 7.0)
-    "ignoreDeprecations": "6.0"
+    // Silencia la advertencia de baseUrl (compatible con TS 5.x y 6.x)
+    "ignoreDeprecations": "5.0"
   }
 }
