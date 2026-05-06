@@ -19,34 +19,41 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
-          # Aumentamos el tiempo de espera por seguridad (30 minutos)
+          # Tiempo de espera extendido para el primer despliegue o builds pesados
           command_timeout: 30m
           script: |
+            # 1. Navegar al proyecto y actualizar código
             cd /home/ubuntu/proyects/tcm_microservicios || exit 1
             git fetch origin main
             git reset --hard origin/main
             
-            # ELIMINADO: docker system prune (Ya tienes tu cron de domingo)
-
             cd docker
 
-            # 1. Asegurar que la infraestructura esté arriba
-            echo "Revisando infraestructura (Redis, RabbitMQ, Kafka)..."
+            # 2. Levantar Infraestructura Crítica
+            # Sin --force-recreate para que Rabbit y Kafka no se reinicien si ya están bien
+            echo "Verificando infraestructura (Redis, RabbitMQ, Kafka)..."
             docker compose -f compose.prod.yml up -d redis-realtime rabbitmq kafka
-            
-            # 2. Buildear todos los servicios usando caché
-            # Al quitar --no-cache, Docker solo reconstruirá desde el paso 'COPY . .' 
-            # de tu nuevo Dockerfile si detecta cambios en el código.
-            echo "Construyendo imágenes con caché..."
+
+            # 3. Sincronizar Tópicos de Kafka
+            # Solo corre el contenedor temporal para crear tópicos nuevos si los hay
+            echo "Asegurando que los tópicos existan..."
+            docker compose -f compose.prod.yml up init-kafka
+
+            # 4. Construcción de Imágenes (Uso de Caché inteligente)
+            # Gracias a tus nuevos Dockerfiles, esto será ultra rápido en los siguientes pushes
+            echo "Construyendo imágenes de microservicios..."
             docker compose -f compose.prod.yml build --pull
 
-            # 3. Levantar/Actualizar los servicios
-            # --force-recreate asegura que se use la nueva imagen construida.
-            # --remove-orphans limpia contenedores que ya no existan en tu compose.
-            echo "Desplegando microservicios..."
-            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans
+            # 5. Despliegue de Microservicios (Código NestJS)
+            # Definimos la lista de servicios que SÍ queremos recrear para aplicar cambios de código
+            # Nota: No incluimos 'kafka' ni 'rabbitmq' aquí para evitar cortes de conexión
+            SERVICES="gateway users companies clients orders subscriptions reports realtime notification-dispatcher"
             
-            # 4. Limpieza ligera de imágenes "dangling" (huérfanas del build actual)
+            echo "Actualizando contenedores de aplicaciones..."
+            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans $SERVICES
+
+            # 6. Limpieza de imágenes en desuso
+            # Borra solo las imágenes "dangling" generadas por el build actual
             docker image prune -f
             
-            echo "🚀 Despliegue optimizado completado con éxito."
+            echo "🚀 Despliegue completado con éxito."
