@@ -119,21 +119,20 @@ services:
         done
         echo "🎉 Listo — Creados: $$CREATED | Ya existían: $$SKIPPED"
 
-    redis:
-      image: redis:7-alpine
-      container_name: redis-realtime
-      restart: always
-      # NO exponer puertos al exterior (seguridad)
-      volumes:
-        - redis_data:/data
-      networks:
-        - backend
-      healthcheck:
-        test: ["CMD", "redis-cli", "ping"]
-        interval: 30s
-        timeout: 10s
-        retries: 5
-        start_period: 30s
+  redis:
+    image: redis:7-alpine
+    container_name: redis-realtime
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
 
     # ─────────────────────────────────────────
     # MICROSERVICIOS
