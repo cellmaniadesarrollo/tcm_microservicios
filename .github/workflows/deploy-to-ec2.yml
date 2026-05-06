@@ -27,33 +27,36 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             
+            # 1. Limpieza total antes de empezar
+            docker system prune -af --volumes
+
             cd docker
 
-            # 2. Levantar Infraestructura Crítica
-            # Sin --force-recreate para que Rabbit y Kafka no se reinicien si ya están bien
-            echo "Verificando infraestructura (Redis, RabbitMQ, Kafka)..."
+            # 2. Levantar primero la infraestructura (Redis, RabbitMQ, Kafka)
+            # Esto asegura que los microservicios encuentren los brokers listos
+            echo "Levantando infraestructura..."
             docker compose -f compose.prod.yml up -d redis-realtime rabbitmq kafka
-
-            # 3. Sincronizar Tópicos de Kafka
-            # Solo corre el contenedor temporal para crear tópicos nuevos si los hay
-            echo "Asegurando que los tópicos existan..."
-            docker compose -f compose.prod.yml up init-kafka
-
-            # 4. Construcción de Imágenes (Uso de Caché inteligente)
-            # Gracias a tus nuevos Dockerfiles, esto será ultra rápido en los siguientes pushes
-            echo "Construyendo imágenes de microservicios..."
-            docker compose -f compose.prod.yml build --pull
-
-            # 5. Despliegue de Microservicios (Código NestJS)
-            # Definimos la lista de servicios que SÍ queremos recrear para aplicar cambios de código
-            # Nota: No incluimos 'kafka' ni 'rabbitmq' aquí para evitar cortes de conexión
-            SERVICES="gateway users companies clients orders subscriptions reports realtime notification-dispatcher"
             
-            echo "Actualizando contenedores de aplicaciones..."
-            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans $SERVICES
+            # 3. Buildear y levantar microservicio por microservicio
+            # Definimos la lista de tus servicios (ajusta los nombres si varían en tu compose)
+            SERVICES=("gateway" "users" "companies" "clients" "orders" "subscriptions" "reports" "realtime" "notification-dispatcher")
 
-            # 6. Limpieza de imágenes en desuso
-            # Borra solo las imágenes "dangling" generadas por el build actual
+            for SERVICE in "${SERVICES[@]}"; do
+              echo "--------------------------------------------"
+              echo "Desplegando: $SERVICE"
+              echo "--------------------------------------------"
+              
+              # Build individual sin caché
+              docker compose -f compose.prod.yml build --no-cache --pull $SERVICE
+              
+              # Levantar individual con recreación forzada
+              docker compose -f compose.prod.yml up -d --force-recreate $SERVICE
+              
+              # Opcional: Pausa de 5 segundos para no saturar la CPU
+              sleep 5
+            done
+
+            # 4. Limpieza final de imágenes intermedias
             docker image prune -f
             
-            echo "🚀 Despliegue completado con éxito."
+            echo "🚀 Despliegue secuencial completado con éxito."
