@@ -96,19 +96,15 @@ services:
           ms.order.created
           ms.order.updated
         "
-
         echo "⏳ Sincronizando tópicos en Kafka..."
         CREATED=0
         SKIPPED=0
-
         for TOPIC in $$TOPICS; do
           TRIMMED=$(echo $$TOPIC | tr -d '[:space:]')
           [ -z "$$TRIMMED" ] && continue
-
           EXISTS=$(/opt/kafka/bin/kafka-topics.sh \
             --bootstrap-server kafka:9092 \
             --list 2>/dev/null | grep -x "$$TRIMMED" || true)
-
           if [ -z "$$EXISTS" ]; then
             /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
               --create \
@@ -121,7 +117,6 @@ services:
             SKIPPED=$$((SKIPPED + 1))
           fi
         done
-
         echo "🎉 Listo — Creados: $$CREATED | Ya existían: $$SKIPPED"
 
     redis:
