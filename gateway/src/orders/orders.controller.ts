@@ -10,6 +10,8 @@ import {
   Post,
   UseInterceptors, Req,
   ParseIntPipe,
+  HttpException,
+  HttpStatus,
 } from '@nestjs/common';
 
 import { UploadedFiles } from '@nestjs/common';
@@ -332,20 +334,34 @@ export class OrdersController {
     @Body() dto: ChangeOrderStatusGatewayDto,
     @User() user: any,
   ) {
-    return firstValueFrom(
-      this.CustomerService.send(
-        { cmd: 'change_order_status' },
-        {
-          internalToken: process.env.INTERNAL_SECRET,
-          dto,
-          user: {
-            userId: user.sub,
-            companyId: user.companyId,
-            branchId: user.branchId,
+    try {
+      console.log('Enviando datos al MS de Órdenes:', dto); // Log de control
+
+      return await firstValueFrom(
+        this.CustomerService.send(
+          { cmd: 'change_order_status' },
+          {
+            internalToken: process.env.INTERNAL_SECRET,
+            dto,
+            user: {
+              userId: user.sub,
+              companyId: user.companyId,
+              branchId: user.branchId,
+            },
           },
-        },
-      ),
-    );
+        ),
+      );
+    } catch (error: any) {
+      // AQUÍ capturamos el culpable
+      console.error('Error capturado en el Gateway:', error);
+
+      // Si el error viene del microservicio, Nest lo suele envolver. 
+      // Lanzamos una RpcException o una HttpException para que el cliente vea algo útil.
+      throw new HttpException(
+        error.message || 'Error interno en la comunicación con el microservicio',
+        error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
   @Post('add-finding')
   async createOrderFinding(
