@@ -119,7 +119,7 @@ export class BillingService {
 
             if (error instanceof QueryFailedError && (error.driverError as any)?.code === '23505')
                 throw new RpcException(
-                    new ForbiddenException('Ya existe un dato de facturación con este documento en la empresa'),
+                    new ForbiddenException('Ya existe un dato de facturación con este documento en la empresas'),
                 );
 
             if (error instanceof RpcException) throw error;
