@@ -1,11 +1,5 @@
 # docker/compose.prod.yml
 # Versión de producción en EC2 con RabbitMQ LOCAL (no expuesto)
-# - RabbitMQ corre en la misma máquina (red backend privada)
-# - Puertos 5672/15672 NO expuestos al exterior (solo interno)
-# - Sin volúmenes de código (no hot-reload)
-# - Comandos en modo producción
-# - Variables DB_ específicas por microservicio
-# - init-kafka crea los topics antes de levantar los microservicios
 
 services:
   # ─────────────────────────────────────────
@@ -15,7 +9,6 @@ services:
   rabbitmq:
     image: rabbitmq:3-management
     container_name: rabbitmq
-    # NO exponer puertos al exterior (seguridad)
     networks:
       - backend
     healthcheck:
@@ -32,28 +25,23 @@ services:
     restart: always
     ports:
       - "9092:9092"
-      - "9094:9094"   # ← este es el que falt
+      - "9094:9094"
     environment:
-      # KRaft obligatorio
       - KAFKA_NODE_ID=${KAFKA_NODE_ID:-1}
       - KAFKA_PROCESS_ROLES=${KAFKA_PROCESS_ROLES:-broker,controller}
       - KAFKA_CONTROLLER_QUORUM_VOTERS=${KAFKA_CONTROLLER_QUORUM_VOTERS:-1@kafka:9093}
       - KAFKA_CONTROLLER_LISTENER_NAMES=${KAFKA_CONTROLLER_LISTENER_NAMES:-CONTROLLER}
-
-      # Listeners y Advertised (Configuración crítica para comunicación interna)
       - KAFKA_LISTENERS=${KAFKA_LISTENERS:-PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093}
       - KAFKA_ADVERTISED_LISTENERS=${KAFKA_ADVERTISED_LISTENERS:-PLAINTEXT://kafka:9092}
       - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=${KAFKA_LISTENER_SECURITY_PROTOCOL_MAP:-CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT}
       - KAFKA_INTER_BROKER_LISTENER_NAME=${KAFKA_INTER_BROKER_LISTENER_NAME:-PLAINTEXT}
-
-      # Configuraciones de producción
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR:-1}
       - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR:-1}
       - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR:-1}
       - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=${KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS:-0}
       - KAFKA_LOG_RETENTION_HOURS=${KAFKA_LOG_RETENTION_HOURS:-168}
       - KAFKA_NUM_PARTITIONS=${KAFKA_NUM_PARTITIONS:-1}
-      - CLUSTER_ID=${CLUSTER_ID} # Este sí debe venir del .env obligatoriamente
+      - CLUSTER_ID=${CLUSTER_ID}
     volumes:
       - kafka_data:/var/lib/kafka/data
     networks:
@@ -66,10 +54,8 @@ services:
       start_period: 60s
 
   # ─────────────────────────────────────────
-  # JOB: Crear topics en Kafka
-  # Corre una sola vez y termina (exit 0).
-  # Para agregar un topic nuevo, solo añade
-  # una línea a la lista TOPICS.
+  # JOB: Crear topics en Kafka (corre una vez y termina)
+  # Para agregar un topic nuevo, solo añade una línea a TOPICS.
   # ─────────────────────────────────────────
 
   init-kafka:
@@ -97,22 +83,37 @@ services:
           ms.order.updated
         "
 
-        echo "⏳ Creando topics en Kafka..."
+        echo "⏳ Sincronizando tópicos en Kafka..."
+        CREATED=0
+        SKIPPED=0
 
         for TOPIC in $$TOPICS; do
-          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
-            --create --if-not-exists \
-            --topic $$TOPIC \
-            --partitions 1 --replication-factor 1
+          TRIMMED=$(echo $$TOPIC | tr -d '[:space:]')
+          [ -z "$$TRIMMED" ] && continue
+
+          EXISTS=$(/opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server kafka:9092 \
+            --list 2>/dev/null | grep -x "$$TRIMMED" || true)
+
+          if [ -z "$$EXISTS" ]; then
+            /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+              --create \
+              --topic $$TRIMMED \
+              --partitions 1 --replication-factor 1
+            echo "  ✅ Creado: $$TRIMMED"
+            CREATED=$$((CREATED + 1))
+          else
+            echo "  ⏭️  Ya existe: $$TRIMMED"
+            SKIPPED=$$((SKIPPED + 1))
+          fi
         done
 
-        echo "🎉 Todos los topics listos"
+        echo "🎉 Listo — Creados: $$CREATED | Ya existían: $$SKIPPED"
 
   redis:
     image: redis:7-alpine
     container_name: redis-realtime
     restart: always
-    # NO exponer puertos al exterior (seguridad)
     volumes:
       - redis_data:/data
     networks:
@@ -147,7 +148,7 @@ services:
       - backend
     depends_on:
       rabbitmq:
-        condition: service_healthy 
+        condition: service_healthy
 
   users:
     build:
@@ -286,13 +287,14 @@ services:
       - DB_NAME=${MONGODB_DB_REPORTS}
       - MONGODB_URI=${MONGODB_URI}
     networks:
-      - backend 
+      - backend
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 15
       start_period: 60s
+
   notification-dispatcher:
     build:
       context: ../microservices/notification-dispatcher
@@ -322,6 +324,7 @@ services:
       timeout: 5s
       retries: 15
       start_period: 60s
+
   realtime:
     build:
       context: ../realtime
@@ -343,7 +346,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-
 
 networks:
   backend:
