@@ -1,6 +1,6 @@
 import { Controller } from '@nestjs/common';
 import { OrderWorkflowService } from './order-workflow.service';
-import { MessagePattern, Payload } from '@nestjs/microservices';
+import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ListOrdersDto } from './dto/list-orders.dto';
 import { GetOrderFullDataDto } from './dto/get-order-full-data.dto';
@@ -75,19 +75,45 @@ export class OrderWorkflowController {
   }
 
   @MessagePattern({ cmd: 'change_order_status' })
-  async changeOrderStatus(data: {
-    dto: ChangeOrderStatusDto;
-    user: {
-      userId: string;
-      companyId: string;
-      branchId: string;
-    };
-  }) {
-    return this.orderWorkflowService.changeOrderStatus(
-      data.dto,
-      data.user,
-    );
+  async changeOrderStatus(@Payload() data: any) {
+    try {
+      // 1. Log inicial para ver si el mensaje llega al MS
+      console.log('📥 MS Órdenes - Payload recibido:', JSON.stringify(data, null, 2));
+
+      // 2. Validación manual rápida (por si el Pipe falla silenciosamente)
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      // 3. Ejecución de la lógica
+      const result = await this.orderWorkflowService.changeOrderStatus(
+        data.dto,
+        data.user,
+      );
+
+      console.log('✅ MS Órdenes - Resultado exitoso');
+      return result;
+
+    } catch (error: any) {
+      // AQUÍ es donde atraparemos al culpable
+      console.error('🔥 Error crítico en MS Órdenes:', error);
+
+      // Si el error tiene un stack trace, imprímelo
+      if (error.stack) {
+        console.error(error.stack);
+      }
+
+      // Devolvemos una RpcException para que el Gateway reciba el mensaje real
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null
+      });
+    }
   }
+
+
   @MessagePattern({ cmd: 'register_order_payment' })
   async registerPayment(
     @Payload() data: {
