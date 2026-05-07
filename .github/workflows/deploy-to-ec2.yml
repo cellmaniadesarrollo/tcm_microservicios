@@ -19,12 +19,14 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
-          command_timeout: 45m
+          command_timeout: 50m
           script: |
             set -e
             cd /home/ubuntu/proyects/tcm_microservicios || exit 1
 
-            # 1. Actualizar código y detectar qué cambió
+            echo "🚀 Iniciando despliegue inteligente..."
+
+            # 1. Actualizar código
             git fetch origin main
             CHANGED=$(git diff --name-only HEAD origin/main)
             echo "Archivos cambiados:"
@@ -33,22 +35,36 @@ jobs:
 
             cd docker
 
-            # 2. Infraestructura crítica — nombres de SERVICIO del compose (no de contenedor)
+            # 2. Infraestructura crítica
+            echo "🔧 Levantando infraestructura crítica..."
             for SVC in redis rabbitmq kafka; do
               if ! docker compose -f compose.prod.yml ps --status running | grep -q "$SVC"; then
-                echo "⚠️  $SVC no está corriendo, levantando..."
+                echo "⚠️ $SVC no está corriendo → levantando"
                 docker compose -f compose.prod.yml up -d $SVC
               else
                 echo "✅ $SVC ya está corriendo"
               fi
             done
 
-            # 3. Sincronizar tópicos Kafka (idempotente, rápido si ya existen)
-            echo "Sincronizando tópicos Kafka..."
+            # Sincronizar tópicos Kafka
+            echo "📡 Sincronizando tópicos Kafka..."
             docker compose -f compose.prod.yml up -d init-kafka
-            timeout 60 docker compose -f compose.prod.yml wait init-kafka || true
+            timeout 90 docker compose -f compose.prod.yml wait init-kafka || true
 
-            # 4. Detectar servicios que cambiaron
+            # 3. Orden prioritario de despliegue
+            declare -a DEPLOY_ORDER=(
+              "companies"
+              "users"
+              "clients"
+              "subscriptions"
+              "orders"
+              "reports"
+              "realtime"
+              "notification-dispatcher"
+              "gateway"
+            )
+
+            # 4. Detectar cambios
             SERVICES_TO_UPDATE=""
             declare -A SERVICE_PATHS=(
               ["gateway"]="gateway/"
@@ -62,46 +78,60 @@ jobs:
               ["notification-dispatcher"]="microservices/notification-dispatcher/"
             )
 
+            echo "🔍 Analizando cambios..."
             for SERVICE in "${!SERVICE_PATHS[@]}"; do
               PATH_PATTERN="${SERVICE_PATHS[$SERVICE]}"
               if echo "$CHANGED" | grep -q "$PATH_PATTERN"; then
                 echo "🔄 $SERVICE tiene cambios"
                 SERVICES_TO_UPDATE="$SERVICES_TO_UPDATE $SERVICE"
-              else
-                echo "⏭️  $SERVICE sin cambios, skip"
               fi
             done
 
-            # Fallback: si el cambio fue en docker/ o archivos raíz, actualizamos todo
-            if [ -z "$SERVICES_TO_UPDATE" ]; then
-              echo "⚠️  No se detectaron cambios específicos → actualizando todos"
-              SERVICES_TO_UPDATE="gateway users companies clients orders subscriptions reports realtime notification-dispatcher"
+            # Fallback
+            if echo "$CHANGED" | grep -qE '(\.github/workflows/|docker/|compose\.prod\.yml|Dockerfile)'; then
+              echo "⚠️ Cambio en infraestructura → actualizando todos los servicios"
+              SERVICES_TO_UPDATE="companies users clients orders subscriptions reports realtime notification-dispatcher gateway"
             fi
 
-            # 5. Build + Deploy uno por uno para no saturar RAM
-            echo "🚀 Desplegando servicios: $SERVICES_TO_UPDATE"
-            for SERVICE in $SERVICES_TO_UPDATE; do
+            if [ -z "$(echo $SERVICES_TO_UPDATE | xargs)" ]; then
+              echo "✅ No hay cambios en microservicios. Despliegue finalizado."
+              exit 0
+            fi
+
+            # 5. Ordenar según prioridad
+            echo "📋 Servicios a actualizar:$SERVICES_TO_UPDATE"
+            SERVICES_TO_UPDATE_SORTED=""
+            for SVC in "${DEPLOY_ORDER[@]}"; do
+              if echo "$SERVICES_TO_UPDATE" | grep -qw "$SVC"; then
+                SERVICES_TO_UPDATE_SORTED="$SERVICES_TO_UPDATE_SORTED $SVC"
+              fi
+            done
+
+            echo "🔄 Orden de despliegue: $SERVICES_TO_UPDATE_SORTED"
+
+            # 6. Despliegue uno por uno
+            for SERVICE in $SERVICES_TO_UPDATE_SORTED; do
               echo "========================================"
               echo "🔨 Construyendo: $SERVICE"
               echo "========================================"
+
               docker compose -f compose.prod.yml build "$SERVICE"
 
               echo "🚢 Levantando: $SERVICE"
               docker compose -f compose.prod.yml up -d --force-recreate "$SERVICE"
               echo "✅ $SERVICE desplegado"
 
-              # Pausa solo después de servicios que conectan a BD (más pesados al iniciar)
+              # Pausas según criticidad
               case "$SERVICE" in
-                users|orders|clients|companies|subscriptions|notification-dispatcher)
-                  echo "⏸  Pausa para que $SERVICE estabilice..."
-                  sleep 5
-                  ;;
+                users|companies|clients|subscriptions|orders)
+                  sleep 10 ;;
+                notification-dispatcher|reports)
+                  sleep 7 ;;
+                realtime|gateway)
+                  sleep 12 ;;
               esac
-
-              echo ""
             done
 
-            # 6. Limpieza de imágenes huérfanas
+            # 7. Limpieza
             docker image prune -f
-
-            echo "🎉 Despliegue completado."
+            echo "🎉 Despliegue completado exitosamente."
