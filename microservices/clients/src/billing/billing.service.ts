@@ -358,6 +358,9 @@ export class BillingService {
 
                 customer = await this.customerRepo.save(newCustomer);
                 somethingWasCreated = true;
+
+                await this.publishMinimalCustomerCreated(customer.id);
+
                 logger.log(`Cliente mínimo creado id: ${customer.id}`);
             }
 
@@ -588,4 +591,33 @@ export class BillingService {
             isCompanyClient: raw.person_type === 'juridica',
         };
     }
+
+
+
+    private async publishMinimalCustomerCreated(customerId: number): Promise<void> {
+        const logger = new Logger('LegacyBilling');
+
+        const customerWithRelations = await this.customerRepo.findOne({
+            where: { id: customerId },
+            relations: {
+                idType: true,
+                gender: true,
+                contacts: { contactType: true },
+                addresses: { city: true },
+            },
+        });
+
+        if (!customerWithRelations) {
+            logger.warn(`No se encontró el cliente ${customerId} para publicar evento`);
+            return;
+        }
+
+        try {
+            await this.broadcast.publishClientCreated(customerWithRelations);
+            logger.log(`📤 Evento CLIENT_CREATED emitido para cliente mínimo id: ${customerId}`);
+        } catch (eventError) {
+            console.error('Error publicando evento CLIENT_CREATED (legacy):', eventError);
+        }
+    }
 }
+
