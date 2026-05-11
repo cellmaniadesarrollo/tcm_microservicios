@@ -347,8 +347,6 @@ services:
     depends_on:
       rabbitmq:
         condition: service_healthy
-      notifications-mongodb:
-        condition: service_healthy
       init-kafka:
         condition: service_completed_successfully
     healthcheck:
@@ -357,27 +355,6 @@ services:
       timeout: 5s
       retries: 15
       start_period: 60s
-
-  notifications-mongodb:
-    image: mongo:6
-    container_name: ms-notifications-mongodb
-    restart: always
-    volumes:
-      - notifications_mongodb_data:/data/db
-      - notifications_mongodb_config:/data/configdb
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=${MONGO_NOTIFICATIONS_USER}
-      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_NOTIFICATIONS_PASSWORD}
-      - MONGO_INITDB_DATABASE=${DB_NAME_NOTIFICATIONS}
-    command: ["mongod", "--bind_ip_all"]
-    networks:
-      - backend
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
 
   realtime:
     build:
