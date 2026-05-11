@@ -62,6 +62,7 @@ jobs:
               "realtime"
               "notification-dispatcher"
               "gateway"
+              "notifications"
             )
 
             # 4. Detectar cambios
