@@ -649,7 +649,6 @@ async createOrder(
       where: {
         id: orderId,
         company_id: user.companyId,
-        branch_id: user.branchId,
       },
       relations: ['currentStatus'],
     });
