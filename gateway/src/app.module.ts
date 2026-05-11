@@ -24,7 +24,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     AuthModule,
     SubscriptionsModule,
     LegacyModule,
-    ReportsModule, 
+    ReportsModule,
+    NotificationsModule
      
   ],
   controllers: [AppController],

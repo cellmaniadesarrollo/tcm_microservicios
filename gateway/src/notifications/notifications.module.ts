@@ -1,4 +1,3 @@
-// gateway/src/notifications/notifications.module.ts
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { NotificationsController } from './notifications.controller';
@@ -11,8 +10,8 @@ import { NotificationsService } from './notifications.service';
         name: 'NOTIFICATIONS_CLIENT',
         transport: Transport.TCP,
         options: {
-          host: 'localhost',     // o 'notifications' si usas docker
-          port: 3010,            // ← También 3010
+          host: 'ms-notifications',  // ← Cambiar a nombre del contenedor
+          port: 3003,                // ← Cambiar de 3002 a 3010
         },
       },
     ]),

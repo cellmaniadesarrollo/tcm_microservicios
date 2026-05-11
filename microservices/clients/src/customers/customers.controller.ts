@@ -12,8 +12,8 @@ export class CustomersController {
     }
     @MessagePattern({ cmd: 'save_one_customer' })
     saveOne(data: any) {
-
-        return this.customerService.create(data);
+        console.log(data)
+        return this.customerService.create(data); 
     }
     @MessagePattern({ cmd: 'update_one_customer' })
     async updateOne(data: any) {

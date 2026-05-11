@@ -325,6 +325,37 @@ services:
       retries: 15
       start_period: 60s
 
+  notifications:
+    build:
+      context: ../microservices/notifications
+      dockerfile: Dockerfile
+    container_name: ms-notifications
+    restart: always
+    ports:
+      - "3010:3010"
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - PORT=3010
+      - DB_NAME=${DB_NAME_NOTIFICATIONS}
+      - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3010,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
   realtime:
     build:
       context: ../realtime

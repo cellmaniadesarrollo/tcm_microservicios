@@ -76,6 +76,7 @@ jobs:
               ["reports"]="microservices/reporting-hub/"
               ["realtime"]="realtime/"
               ["notification-dispatcher"]="microservices/notification-dispatcher/"
+              ["notifications"]="notifications/"
             )
 
             echo "🔍 Analizando cambios..."
@@ -131,6 +132,16 @@ jobs:
                   sleep 12 ;;
               esac
             done
+            # Si no detectamos ningún servicio específico (ej: cambio en docker/ o root),
+            # recreamos todos como fallback
+            if [ -z "$SERVICES_TO_recreate" ]; then
+              echo "⚠️  No se detectaron servicios específicos, recreando todos..."
+              SERVICES_TO_recreate="gateway users companies clients orders subscriptions reports realtime notification-dispatcher notifications"
+            fi
+
+            # 6. Recrear solo los servicios que cambiaron
+            echo "Actualizando: $SERVICES_TO_recreate"
+            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans $SERVICES_TO_recreate
 
             # 7. Limpieza
             docker image prune -f
