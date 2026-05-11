@@ -1,6 +1,6 @@
 # docker/notifications/docker-compose.yml
 x-node-health: &node-health
-  test: ["CMD", "node", "-e", "require('http').get('http://localhost:${NOTIFICACIONES_PORT:-3002}', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+  test: ["CMD", "node", "-e", "require('http').get('http://localhost:3010/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]  # ← Cambiar a 3010
   interval: 30s
   timeout: 10s
   retries: 3
@@ -31,8 +31,7 @@ services:
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-guest}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - default
+    networks: [backend]
     healthcheck: *rabbit-health
 
   mongodb:
@@ -50,8 +49,7 @@ services:
       - MONGO_INITDB_DATABASE=${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}
     healthcheck: *mongo-health
     command: ["mongod", "--bind_ip_all"]
-    networks:
-      - default
+    networks: [backend]
 
   notifications:
     build:
@@ -60,7 +58,8 @@ services:
     container_name: ms-notifications
     restart: always
     ports:
-      - "${NOTIFICACIONES_PORT:-3010}:3010"
+      - "3010:3010"      # HTTP
+      - "3003:3003"      # TCP RPC (agregar este puerto)
     volumes:
       - ../../microservices/notifications:/app
       - /app/node_modules
@@ -69,14 +68,14 @@ services:
       - DB_NAME=${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}
       - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}?authSource=admin
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
-      - PORT=${NOTIFICACIONES_PORT:-3002}
+      - PORT=3010  # ← Cambiar a 3010
+      - KAFKA_BOOTSTRAP_SERVERS
+    networks: [backend]
     depends_on:
       mongodb:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    networks:
-      - default
     healthcheck: *node-health
 
   mongo-express:
@@ -94,12 +93,10 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
-    networks:
-      - default
+    networks: [backend]
 
 networks:
-  default:
-    name: backend
+  backend:
     external: true
 
 volumes:

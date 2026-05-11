@@ -325,6 +325,60 @@ services:
       retries: 15
       start_period: 60s
 
+  notifications:
+    build:
+      context: ../microservices/notifications
+      dockerfile: Dockerfile
+    container_name: ms-notifications
+    restart: always
+    ports:
+      - "3010:3010"
+      - "3003:3003"
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - PORT=3010
+      - DB_NAME=${DB_NAME_NOTIFICATIONS}
+      - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      notifications-mongodb:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3010,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
+  notifications-mongodb:
+    image: mongo:6
+    container_name: ms-notifications-mongodb
+    restart: always
+    volumes:
+      - notifications_mongodb_data:/data/db
+      - notifications_mongodb_config:/data/configdb
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_NOTIFICATIONS_USER}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_NOTIFICATIONS_PASSWORD}
+      - MONGO_INITDB_DATABASE=${DB_NAME_NOTIFICATIONS}
+    command: ["mongod", "--bind_ip_all"]
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
   realtime:
     build:
       context: ../realtime

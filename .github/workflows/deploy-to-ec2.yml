@@ -69,6 +69,7 @@ jobs:
               ["reports"]="reports/"
               ["realtime"]="realtime/"
               ["notification-dispatcher"]="notification-dispatcher/"
+              ["notifications"]="notifications/"
             )
 
             for SERVICE in "${!SERVICE_PATHS[@]}"; do
@@ -85,7 +86,7 @@ jobs:
             # recreamos todos como fallback
             if [ -z "$SERVICES_TO_recreate" ]; then
               echo "⚠️  No se detectaron servicios específicos, recreando todos..."
-              SERVICES_TO_recreate="gateway users companies clients orders subscriptions reports realtime notification-dispatcher"
+              SERVICES_TO_recreate="gateway users companies clients orders subscriptions reports realtime notification-dispatcher notifications"
             fi
 
             # 6. Recrear solo los servicios que cambiaron

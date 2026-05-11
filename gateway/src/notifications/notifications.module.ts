@@ -10,8 +10,8 @@ import { NotificationsService } from './notifications.service';
         name: 'NOTIFICATIONS_CLIENT',
         transport: Transport.TCP,
         options: {
-          host: '172.21.0.7',
-          port: 3002,
+          host: 'ms-notifications',  // ← Cambiar a nombre del contenedor
+          port: 3003,                // ← Cambiar de 3002 a 3010
         },
       },
     ]),

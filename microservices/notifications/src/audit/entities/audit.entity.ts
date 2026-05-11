@@ -8,7 +8,7 @@ export class Audit {
   @Prop({ type: String, default: () => crypto.randomUUID() })
   _id: string;
 
-  @Prop({ required: true, index: true })
+  @Prop({ required: false, index: true })
   userId: string;
 
   @Prop({ required: true })
