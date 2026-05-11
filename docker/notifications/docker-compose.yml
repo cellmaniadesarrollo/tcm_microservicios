@@ -1,6 +1,6 @@
 # docker/notifications/docker-compose.yml
 x-node-health: &node-health
-  test: ["CMD", "node", "-e", "require('http').get('http://localhost:${NOTIFICATIONS_PORT:-3010}', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+  test: ["CMD", "node", "-e", "require('http').get('http://localhost:3010/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]  # ← Cambiar a 3010
   interval: 30s
   timeout: 10s
   retries: 3
@@ -31,8 +31,7 @@ services:
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-guest}
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    networks:
-      - default
+    networks: [backend]
     healthcheck: *rabbit-health
 
   mongodb:
@@ -40,43 +39,43 @@ services:
     container_name: ms-notifications-mongodb
     restart: always
     ports:
-      - "27018:27017"
+      - "${MONGO_PORT:-27018}:27017"
     volumes:
       - mongodb_data:/data/db
       - mongodb_config:/data/configdb
     environment:
       - MONGO_INITDB_ROOT_USERNAME=${MONGO_USER:-admin}
       - MONGO_INITDB_ROOT_PASSWORD=${MONGO_PASSWORD:-password}
-      - MONGO_INITDB_DATABASE=${DB_NAME_NOTIFICATIONS:-notifications_db}
+      - MONGO_INITDB_DATABASE=${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}
     healthcheck: *mongo-health
     command: ["mongod", "--bind_ip_all"]
-    networks:
-      - default
+    networks: [backend]
 
-  notifications:   # ← SERVICIO NOTIFICATIONS
+  notifications:
     build:
       context: ../../microservices/notifications
       dockerfile: Dockerfile.dev
     container_name: ms-notifications
     restart: always
     ports:
-      - "${NOTIFICATIONS_PORT:-3010}:3010"
+      - "3010:3010"      # HTTP
+      - "3003:3003"      # TCP RPC (agregar este puerto)
     volumes:
       - ../../microservices/notifications:/app
       - /app/node_modules
     command: ["npm", "run", "start:dev"]
-    environment:   # ← SECCIÓN QUE PREGUNTAS (AQUÍ ESTÁ)
-      - DB_NAME=${DB_NAME_NOTIFICATIONS:-notifications_db}
-      - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/${DB_NAME_NOTIFICATIONS:-notifications_db}?authSource=admin
+    environment:
+      - DB_NAME=${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}
+      - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}?authSource=admin
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
-      - PORT=${NOTIFICATIONS_PORT:-3010}
+      - PORT=3010  # ← Cambiar a 3010
+      - KAFKA_BOOTSTRAP_SERVERS
+    networks: [backend]
     depends_on:
       mongodb:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
-    networks:
-      - default
     healthcheck: *node-health
 
   mongo-express:
@@ -94,15 +93,16 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
-    networks:
-      - default
+    networks: [backend]
 
 networks:
-  default:
-    name: tcm-backend
+  backend:
     external: true
 
 volumes:
   mongodb_data:
+    name: tcm-notifications-mongodb-data
   mongodb_config:
+    name: tcm-notifications-mongodb-config
   rabbitmq_data:
+    name: tcm-notifications-rabbitmq-data

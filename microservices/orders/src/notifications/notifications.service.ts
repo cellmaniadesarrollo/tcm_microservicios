@@ -1,4 +1,4 @@
-// src/notifications/notifications.service.ts
+// microservices/orders/src/notifications/notifications.service.ts
 
 import { Injectable, Inject } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
@@ -10,16 +10,10 @@ export class NotificationsService {
     constructor(
         @Inject('REALTIME_SERVICE')
         private readonly realtimeClient: ClientProxy,
+        // @Inject('NOTIFICATIONS_SAVE_CLIENT')
+        // private readonly notificationsSaveClient: ClientProxy,
     ) { }
 
-    /**
-     * Emite una actualización de orden de forma ESTÁNDAR y completa
-     * @param order - Información básica de la orden actualizada
-     * @param action - Tipo de acción realizada (status_changed, note_added, attachment_added, etc.)
-     * @param description - Descripción corta y amigable del cambio
-     * @param changedBy - Usuario que realizó el cambio
-     * @param extraData - Datos adicionales específicos del cambio (opcional)
-     */
     async emitOrderUpdated(
         order: {
             id: number | string;
@@ -27,7 +21,6 @@ export class NotificationsService {
             customerName: string;
             status: string;
             branch?: string;
-            // Puedes agregar más campos comunes si los necesitas
         },
         action: string,
         description: string,
@@ -38,41 +31,43 @@ export class NotificationsService {
             event: 'order.updated',
             order_id: order.id,
             company_id,
-            order: {                          // ← Objeto estandarizado de la orden
+            userId: changedBy,  // ← Agregar userId
+            userName: changedBy,  // ← Agregar userName (nombre real)
+            order: {
                 id: order.id,
                 orderNumber: order.orderNumber,
                 customerName: order.customerName,
                 status: order.status,
                 branch: order.branch,
             },
-            action,                           // "status_changed", "attachment_added", etc.
-            description,                      // Descripción corta y clara
+            action,
+            description,
             changed_by: changedBy,
             timestamp: new Date().toISOString(),
         };
 
         try {
-            await lastValueFrom(
-                this.realtimeClient.emit('order.updated', payload)
-            );
-            console.log(`✅ Evento order.updated emitido → Action: ${action} | Orden: ${order.orderNumber} (${order.id})`);
+            await lastValueFrom(this.realtimeClient.emit('order.updated', payload));
+            console.log(`✅ Evento order.updated enviado a WebSocket → Action: ${action}`);
+            
+            // await lastValueFrom(this.notificationsSaveClient.emit('order.updated', payload));
+            // console.log(`✅ Evento order.updated enviado a Notifications para guardar`);
+            
         } catch (error) {
-            console.error(`❌ Error al emitir order.updated (${action} - Orden ${order.id}):`, error);
+            console.error(`❌ Error al emitir order.updated:`, error);
         }
     }
 
-    // Mantén emitOrderCreated si lo necesitas
     async emitOrderCreated(orderCreate: any, order: {
         id: number | string;
         orderNumber: number | string;
         customerName: string;
         status: string;
         branch?: string;
-        // Puedes agregar más campos comunes si los necesitas
     },
-
         CreateBy: string,
-        company_id: string) {
+        company_id: string,
+        userName?: string) {  // ← Agregar parámetro userName
         try {
 
             const technicians = orderCreate.technicians?.map((tech: any) => ({
@@ -86,6 +81,9 @@ export class NotificationsService {
                 event: 'order.created',
                 order_id: order.id,
                 company_id: company_id,
+                userId: CreateBy,
+                userName: userName || CreateBy,  // ← Agregar nombre real del usuario
+                created_by: CreateBy,
                 order: {
                     id: order.id,
                     orderNumber: order.orderNumber,
@@ -95,19 +93,19 @@ export class NotificationsService {
                 },
                 action: "Orden Creada",
                 detalleIngreso: orderCreate.detalleIngreso,
-                created_by: CreateBy,
                 technicians,
+                device: orderCreate.device || null,
                 timestamp: new Date().toISOString(),
             };
 
-            await lastValueFrom(
-                this.realtimeClient.emit('order.created', payload)
-            );
-            console.log('✅ Evento order.created emitido');
+            await lastValueFrom(this.realtimeClient.emit('order.created', payload));
+            console.log('✅ Evento order.created enviado a WebSocket');
+            
+            // await lastValueFrom(this.notificationsSaveClient.emit('order.created', payload));
+            // console.log('✅ Evento order.created enviado a Notifications para guardar');
+            
         } catch (error) {
             console.error('❌ Error al emitir order.created:', error);
         }
     }
-}
-
-
+} 

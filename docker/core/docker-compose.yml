@@ -13,7 +13,15 @@ services:
     command: ["npm", "run", "start"]
     env_file: [../.env]
     environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
       - DB_NAME=${DB_NAME_COMPANIES}
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
     networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]

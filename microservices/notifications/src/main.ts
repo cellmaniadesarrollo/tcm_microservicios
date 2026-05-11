@@ -12,20 +12,20 @@ async function bootstrap() {
       new FastifyAdapter({ logger: true })
     );
 
-    // ── 2. Conectar microservicio TCP para comunicación directa con Gateway ──
+    // ── 2. Conectar microservicio TCP para RPC (Gateway) ──
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.TCP,
       options: {
         host: '0.0.0.0',
-        port: parseInt(process.env.TCP_PORT || '3010', 10),
+        port: 3003,  // ← Puerto TCP para RPC
       },
     });
 
-    // ── 3. Conectar microservicio RabbitMQ para eventos de órdenes ──
+    // ── 3. Conectar el microservicio de RabbitMQ ──
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.RMQ,
       options: {
-        urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
+        urls: [process.env.RABBITMQ_URL || 'amqp://rabbitmq:5672'],
         queue: 'notifications_queue',
         queueOptions: { durable: true },
         persistent: true,
@@ -33,16 +33,15 @@ async function bootstrap() {
       },
     });
 
-    // ── 4. Iniciar todos los microservicios ──
+    // ── 4. Iniciar microservicios ──
     await app.startAllMicroservices();
-    console.log('✅ Microservicios de notificaciones iniciados:');
-    console.log(`   - TCP: puerto ${process.env.TCP_PORT || 3010}`);
+    console.log('✅ Microservicio de notificaciones iniciado');
+    console.log('   - TCP RPC: puerto 3002');
     console.log('   - RabbitMQ: notifications_queue');
 
-    // ── 5. Iniciar servidor HTTP (opcional, para health checks) ──
-    const httpPort = parseInt(process.env.HTTP_PORT || '3066', 10);
-    await app.listen(httpPort, '0.0.0.0');
-    console.log(`✅ HTTP Health check listening on port ${httpPort}`);
+    // ── 5. Iniciar Fastify en el puerto 3010 (HTTP) ──
+    await app.listen(3010, '0.0.0.0');
+    console.log('✅ NestJS Fastify escuchando en 0.0.0.0:3010');
 
   } catch (err) {
     console.error('❌ Error en bootstrap:', err);
