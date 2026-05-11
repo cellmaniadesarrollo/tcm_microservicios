@@ -61,8 +61,8 @@ jobs:
               "reports"
               "realtime"
               "notification-dispatcher"
-              "gateway"
               "notifications"
+              "gateway"
             )
 
             # 4. Detectar cambios
@@ -77,7 +77,7 @@ jobs:
               ["reports"]="microservices/reporting-hub/"
               ["realtime"]="realtime/"
               ["notification-dispatcher"]="microservices/notification-dispatcher/"
-              ["notifications"]="notifications/"
+              ["notifications"]="microservices/notifications/"
             )
 
             echo "🔍 Analizando cambios..."
@@ -89,10 +89,11 @@ jobs:
               fi
             done
 
-            # Fallback
-            if echo "$CHANGED" | grep -qE '(\.github/workflows/|docker/|compose\.prod\.yml|Dockerfile)'; then
-              echo "⚠️ Cambio en infraestructura → actualizando todos los servicios"
-              SERVICES_TO_UPDATE="companies users clients orders subscriptions reports realtime notification-dispatcher gateway"
+            # ✅ Cambios solo en .github/workflows/ o docker/ NO redespliegam microservicios
+            # Solo se redespliega todo si cambia compose.prod.yml o un Dockerfile de microservicio
+            if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|microservices/.*/Dockerfile|gateway/Dockerfile|realtime/Dockerfile)'; then
+              echo "⚠️ Cambio en compose o Dockerfile → actualizando todos los servicios"
+              SERVICES_TO_UPDATE="companies users clients orders subscriptions reports realtime notification-dispatcher notifications gateway"
             fi
 
             if [ -z "$(echo $SERVICES_TO_UPDATE | xargs)" ]; then
@@ -101,7 +102,7 @@ jobs:
             fi
 
             # 5. Ordenar según prioridad
-            echo "📋 Servicios a actualizar:$SERVICES_TO_UPDATE"
+            echo "📋 Servicios a actualizar: $SERVICES_TO_UPDATE"
             SERVICES_TO_UPDATE_SORTED=""
             for SVC in "${DEPLOY_ORDER[@]}"; do
               if echo "$SERVICES_TO_UPDATE" | grep -qw "$SVC"; then
@@ -123,26 +124,16 @@ jobs:
               docker compose -f compose.prod.yml up -d --force-recreate "$SERVICE"
               echo "✅ $SERVICE desplegado"
 
-              # Pausas según criticidad
+              # Pausas para que el servicio levante antes del siguiente
               case "$SERVICE" in
                 users|companies|clients|subscriptions|orders)
                   sleep 10 ;;
-                notification-dispatcher|reports)
+                notification-dispatcher|reports|notifications)
                   sleep 7 ;;
                 realtime|gateway)
                   sleep 12 ;;
               esac
             done
-            # Si no detectamos ningún servicio específico (ej: cambio en docker/ o root),
-            # recreamos todos como fallback
-            if [ -z "$SERVICES_TO_recreate" ]; then
-              echo "⚠️  No se detectaron servicios específicos, recreando todos..."
-              SERVICES_TO_recreate="gateway users companies clients orders subscriptions reports realtime notification-dispatcher notifications"
-            fi
-
-            # 6. Recrear solo los servicios que cambiaron
-            echo "Actualizando: $SERVICES_TO_recreate"
-            docker compose -f compose.prod.yml up -d --force-recreate --remove-orphans $SERVICES_TO_recreate
 
             # 7. Limpieza
             docker image prune -f
