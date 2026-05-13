@@ -34,9 +34,9 @@ const ORDER_MESSAGES: Record<string, (order: OrderReplica) => string> = {
         `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
         `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
         `Tu orden *#${o.orderNumber ?? o.publicId}* ha sido ingresada correctamente ✅\n\n` +
-        `🔗 Revisa el diagnóstico y precio de tu equipo aquí:\n` +
+        `🔗 Revisa los detalles del avance de tu reparación aquí:\n` +
         `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si después de revisar tienes alguna duda, contáctanos al 📞 *098 377 5790*.\n\n` +
+        `Si tienes alguna duda, contáctanos al 📞 *098 377 5790*.\n\n` +
         `¡Gracias por preferirnos!` +
         NO_REPLY,
 

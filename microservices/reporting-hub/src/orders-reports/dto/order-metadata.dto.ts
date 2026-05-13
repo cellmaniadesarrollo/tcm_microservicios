@@ -1,34 +1,114 @@
-// ─── DTO de salida ────────────────────────────────────────────────────────────
-export interface OrderListItemDto {
-    id: number;
-    order_number: number;
-    revisadoAntes: boolean;
+import { Type } from 'class-transformer';
+import { IsArray, IsBoolean, IsDate, IsInt, IsOptional, IsString, Min } from 'class-validator';
 
-    // Entidades
-    currentStatus: { id: number; name: string };
-    type: { id: number; name: string };
-    branch: { id: string; name: string };
-    customer: { id: number; firstName: string; lastName: string };
-    device?: { model?: string; brand?: string; type?: string };
-    technicians: { id: string; first_name: string; last_name: string }[];
+export class GetOrdersFilterDto {
 
-    // Fechas
-    entry_date: Date;
-    finalized_at: Date | null;   // cuando llegó a TRABAJO FINALIZADO (status id=7)
-    completed_at: Date | null;   // cuando llegó a ENTREGADA (status id=8)
+    // ── Paginación ────────────────────────────────────────────────────────────
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    page?: number = 1;
 
-    // Precios
-    estimated_price: number | null;
-    total_procedures_cost: number;
-    total_paid: number;
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt()
+    @Min(1)
+    limit?: number = 20;
 
-    // Hallazgos
-    findings_summary: {
-        total: number;
-        resolved: number;
-        pending: number;
-    };
+    // ── Filtros por IDs ───────────────────────────────────────────────────────
+    @IsOptional()
+    @IsArray()
+    @Type(() => Number)
+    status?: number[];
 
-    // Garantía
-    has_active_warranty: boolean;
+    @IsOptional()
+    @IsArray()
+    @Type(() => Number)
+    orderType?: number[];
+
+    @IsOptional()
+    @IsArray()
+    branch?: string[];
+
+    @IsOptional()
+    @IsArray()
+    technician?: string[];
+
+    @IsOptional()
+    @IsArray()
+    receptionist?: string[];
+
+    // ── Período de ingreso — modo preset/rango manual (flujo original) ─────────
+    @IsOptional()
+    @IsString()
+    periodMode?: string;          // 'preset' | 'range'
+
+    @IsOptional()
+    @IsString()
+    presetPeriod?: string;        // 'today' | 'week' | 'month' | etc.
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    dateFrom?: Date;
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    dateTo?: Date;
+
+    // ── Período de ingreso — fechas directas (para drill-down del dashboard) ───
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    entryFrom?: Date;
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    entryTo?: Date;
+
+    // ── Período de finalización (status id=7) ─────────────────────────────────
+    @IsOptional()
+    @IsString()
+    endPeriodMode?: string;
+
+    @IsOptional()
+    @IsString()
+    endPresetPeriod?: string;
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    endDateFrom?: Date;
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    endDateTo?: Date;
+
+    // ── Período de entrega (status id=8) ──────────────────────────────────────
+    @IsOptional()
+    @IsString()
+    deliveryPeriodMode?: string;
+
+    @IsOptional()
+    @IsString()
+    deliveryPresetPeriod?: string;
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    deliveryDateFrom?: Date;
+
+    @IsOptional()
+    @Type(() => Date)
+    @IsDate()
+    deliveryDateTo?: Date;
+
+    // ── Flag exclusivo del drill-down ─────────────────────────────────────────
+    @IsOptional()
+    @IsBoolean()
+    onlyWithPayments?: boolean;
 }

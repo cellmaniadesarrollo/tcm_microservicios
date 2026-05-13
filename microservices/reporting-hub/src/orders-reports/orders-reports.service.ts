@@ -8,8 +8,11 @@ import { CompanyReplica, CompanyReplicaDocument } from '../companies/schemas/com
 import { UserEmployeeCache, UserEmployeeCacheDocument } from '../users-employees-events/schemas/user-employee-cache.schema';
 import { GetOrdersFilterDto } from './dto/order-filters-metadata.dto';
 import { OrderReplica, OrderReplicaDocument } from '../orders-relay/schemas/order-replica.schema';
-import { OrderListItemDto } from './dto/order-metadata.dto';
+
 import { RpcException } from '@nestjs/microservices';
+import { OrdersFilterInternalDto } from '../orders-relay/schemas/order-filters-internal.dto';
+// Enum de claves válidas — agrega aquí cuando haya nuevas tarjetas
+import { DRILL_CARD_KEYS, DrillCardKey } from './constants/drill-cards.constants';
 
 @Injectable()
 export class OrdersReportsService {
@@ -28,6 +31,196 @@ export class OrdersReportsService {
         @InjectModel(OrderReplica.name)
         private orderReplicaModel: Model<OrderReplicaDocument>,
     ) { }
+
+
+    async getDashboardDrill(
+        companyId: string,
+        card: string,
+        page: number,
+        limit: number,
+    ): Promise<{ data: any[]; total: number }> {
+
+        if (!DRILL_CARD_KEYS.includes(card as DrillCardKey)) {
+            throw new RpcException({ status: 400, message: `Unknown card key: "${card}"` });
+        }
+
+        const { todayStart, todayEnd } = this._dayBoundaries();
+
+        const weekStart = new Date(todayStart);
+        weekStart.setDate(weekStart.getDate() - 6);
+
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
+        const localNow = new Date(Date.now() + GYE_OFFSET_MS);
+        const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
+        const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
+        const now = new Date();
+
+        /**
+         * Cada estrategia = $match parcial (sin companyId).
+         * MongoDB puro → sin pasar por GetOrdersFilterDto ni buildMongoFilter.
+         * Agregar nuevas tarjetas aquí no toca nada más.
+         */
+        const strategies: Record<DrillCardKey, Record<string, any>> = {
+
+            // ── Hoy ──────────────────────────────────────────────────────────────────
+            today_received: {
+                entry_date: { $gte: todayStart, $lte: todayEnd },
+            },
+            today_finished: {
+                statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } },
+            },
+            today_delivered: {
+                statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } },
+            },
+            today_collected: {
+                payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } } },
+            },
+
+            // ── Semana ───────────────────────────────────────────────────────────────
+            week_received: {
+                entry_date: { $gte: weekStart, $lte: todayEnd },
+            },
+            week_finished: {
+                statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } },
+            },
+            week_delivered: {
+                statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } },
+            },
+            week_collected: {
+                payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } } },
+            },
+
+            // ── Mes ──────────────────────────────────────────────────────────────────
+            month_received: {
+                entry_date: { $gte: monthStart, $lte: now },
+            },
+            month_finished: {
+                statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } },
+            },
+            month_delivered: {
+                statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } },
+            },
+            month_collected: {
+                payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } } },
+            },
+
+            // ── Global (sin rango de fecha — solo estado actual) ──────────────────────
+            global_all: {},
+            global_pending: { 'currentStatus.id': { $in: [1] } },
+            global_in_progress: { 'currentStatus.id': { $in: [6] } },
+            global_waiting_parts: { 'currentStatus.id': { $in: [5] } },  // EN_BUSQUEDA_REPUESTO
+            global_waiting_approval: { 'currentStatus.id': { $in: [4] } },  // EN_ESPERA_APROBACION
+            global_finished: { 'currentStatus.id': { $in: [7] } },
+            global_delivered: { 'currentStatus.id': { $in: [8] } },
+        };
+
+        const matchStage: Record<string, any> = {
+            'company.id': companyId,
+            ...strategies[card as DrillCardKey],
+        };
+
+        return this._executeDrillPipeline(matchStage, page, limit);
+    }
+
+    // ─── Pipeline propia del drill — sin acoplarse a getOrdersList ────────────────
+    private async _executeDrillPipeline(
+        matchStage: Record<string, any>,
+        page: number,
+        limit: number,
+    ): Promise<{ data: any[]; total: number }> {
+
+        const skip = (page - 1) * limit;
+        const now = new Date();
+
+        const [result] = await this.orderReplicaModel.aggregate([
+            { $match: matchStage },
+            { $sort: { entry_date: -1 } },
+            {
+                $facet: {
+                    // count y data en una sola round-trip
+                    total: [{ $count: 'count' }],
+                    data: [
+                        { $skip: skip },
+                        { $limit: limit },
+                        {
+                            $project: {
+                                id: 1, order_number: 1, revisadoAntes: 1,
+                                currentStatus: 1, type: 1,
+                                branch: { id: '$branch.id', name: '$branch.name' },
+                                customer: { id: '$customer.id', firstName: '$customer.firstName', lastName: '$customer.lastName' },
+                                device: { model: '$device.model.models_name', brand: '$device.model.brand_name', type: '$device.type.name' },
+                                technicians: 1, entry_date: 1,
+                                estimated_price: 1, statusHistory: 1,
+                                findings: 1, payments: 1,
+                            },
+                        },
+                    ],
+                },
+            },
+        ]);
+
+        const total = result?.total?.[0]?.count ?? 0;
+        const raw = result?.data ?? [];
+
+        const data = raw.map((order): any => {
+
+            const finalizedAt = order.statusHistory
+                ?.filter(h => h.toStatus?.id === 7)
+                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+            [0]?.changed_at ?? null;
+
+            const completedAt = order.statusHistory
+                ?.filter(h => h.toStatus?.id === 8)
+                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+            [0]?.changed_at ?? null;
+
+            const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
+                sumF + (finding.procedures?.reduce((sumP, proc) =>
+                    sumP + (proc.is_active ? (proc.procedure_cost ?? 0) : 0), 0) ?? 0), 0) ?? 0;
+
+            const totalPaid = order.payments?.reduce((sum, p) =>
+                sum + (p.flow_type === 'INGRESO' ? (p.amount ?? 0) : 0), 0) ?? 0;
+
+            const activeFindings = order.findings?.filter(f => f.is_active) ?? [];
+            const findingsSummary = {
+                total: activeFindings.length,
+                resolved: activeFindings.filter(f => f.is_resolved).length,
+                pending: activeFindings.filter(f => !f.is_resolved).length,
+            };
+
+            const hasActiveWarranty = order.findings?.some(finding =>
+                finding.procedures?.some(proc => {
+                    if (!proc.is_active || !proc.warranty_days || proc.warranty_days <= 0) return false;
+                    if (!completedAt) return true;
+                    const expiresAt = new Date(completedAt);
+                    expiresAt.setDate(expiresAt.getDate() + proc.warranty_days);
+                    return expiresAt > now;
+                }),
+            ) ?? false;
+
+            return {
+                id: order.id,
+                order_number: order.order_number,
+                revisadoAntes: order.revisadoAntes,
+                currentStatus: order.currentStatus,
+                type: order.type,
+                branch: order.branch,
+                customer: order.customer,
+                device: order.device,
+                technicians: order.technicians?.map(t => ({ id: t.id, first_name: t.first_name, last_name: t.last_name })) ?? [],
+                entry_date: order.entry_date,
+                finalized_at: finalizedAt,
+                completed_at: completedAt,
+                estimated_price: order.estimated_price ?? null,
+                total_procedures_cost: totalProceduresCost,
+                total_paid: totalPaid,
+                findings_summary: findingsSummary,
+                has_active_warranty: hasActiveWarranty,
+            };
+        });
+
+        return { data, total };
+    }
 
     async getOrderFiltersMetadata(companyId: string) {
         const [statuses, types, company, employees] = await Promise.all([
@@ -91,7 +284,7 @@ export class OrdersReportsService {
     // ─── LA FUNCIÓN  ───────────────────────────────
     // ─── Servicio ─────────────────────────────────────────────────────────────────
     async getOrdersList(companyId: string, dto: GetOrdersFilterDto): Promise<{
-        data: OrderListItemDto[];
+        data: any[];
         total: number;
     }> {
         const filter = this.buildMongoFilter(companyId, dto);
@@ -122,7 +315,7 @@ export class OrdersReportsService {
         ]);
 
         const now = new Date();
-        const data = raw.map((order): OrderListItemDto => {
+        const data = raw.map((order): any => {
 
             // ── 1. Fecha trabajo finalizado (id = 7) ──────────────────
             const finalizedAt = order.statusHistory

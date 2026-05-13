@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Get, Query, ParseIntPipe, Param } from '@nestjs/common';
+import { Body, Controller, Post, Get, Query, ParseIntPipe, Param, DefaultValuePipe } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
@@ -37,5 +37,15 @@ export class ReportsController {
   @Get('dashboard')
   async getDashboard(@User() user: any) {
     return this.reportsService.getDashboard(user);
+  }
+
+  @Get('dashboard-drill')
+  async getDashboardDrill(
+    @Query('card') card: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @User() user: any,
+  ) {
+    return this.reportsService.getDashboardDrill(user, card, page, limit);
   }
 }
