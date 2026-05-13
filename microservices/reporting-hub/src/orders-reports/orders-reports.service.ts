@@ -717,22 +717,16 @@ export class OrdersReportsService {
 
         const { todayStart, todayEnd } = this._dayBoundaries();
 
-        // Semana: 7 días hacia atrás desde el inicio de hoy
         const weekStart = new Date(todayStart);
         weekStart.setDate(weekStart.getDate() - 6);
 
-        // Mes: día 1 del mes actual a las 03:00 GYE
         const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
-
-        // DESPUÉS (correcto)
-        const localNow = new Date(Date.now() + GYE_OFFSET_MS);           // resta 5 h ✅
-
+        const localNow = new Date(Date.now() + GYE_OFFSET_MS);
         const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
-        const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS); // suma 5 h ✅
-
-        // Tendencia 4 semanas
+        const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
         const since4w = new Date(todayStart);
         since4w.setDate(since4w.getDate() - 27);
+        const now = new Date();
 
         const [
             byStatus,
@@ -746,6 +740,7 @@ export class OrdersReportsService {
             byOrderType,
             paymentMethods,
             resolutionTime,
+            drillCounts,
         ] = await Promise.all([
 
             // ── Por estado (global) ───────────────────────────────────────────────
@@ -847,10 +842,10 @@ export class OrdersReportsService {
             Promise.all([
                 this._periodStats(companyId, todayStart, todayEnd),
                 this._periodStats(companyId, weekStart, todayEnd),
-                this._periodStats(companyId, monthStart, new Date()),
+                this._periodStats(companyId, monthStart, now),
             ]),
 
-            // ── Distribución horaria de HOY (para heatmap/bar) ────────────────────
+            // ── Distribución horaria de HOY ───────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, entry_date: { $gte: todayStart, $lt: todayEnd } } },
                 {
@@ -914,7 +909,7 @@ export class OrdersReportsService {
                 { $sort: { total: -1 } },
             ]),
 
-            // ── Tiempo promedio de resolución (días) ──────────────────────────────
+            // ── Tiempo promedio de resolución ─────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'currentStatus.id': { $in: [7, 8] } } },
                 { $unwind: '$statusHistory' },
@@ -928,9 +923,7 @@ export class OrdersReportsService {
                 },
                 {
                     $project: {
-                        diffDays: {
-                            $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000],
-                        },
+                        diffDays: { $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000] },
                     },
                 },
                 {
@@ -943,53 +936,196 @@ export class OrdersReportsService {
                 },
                 { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
             ]),
+
+            // ── Conteos de tarjetas drill (1 sola query con $facet) ───────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                {
+                    $facet: {
+
+                        // ── Hoy ──────────────────────────────────────────────────
+                        today_received: [
+                            { $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } },
+                            { $count: 'n' },
+                        ],
+                        today_finished: [
+                            {
+                                $match: {
+                                    'currentStatus.id': { $in: [7, 8] },
+                                    statusHistory: {
+                                        $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                        today_delivered: [
+                            {
+                                $match: {
+                                    statusHistory: {
+                                        $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                        today_collected: [
+                            {
+                                $match: {
+                                    payments: {
+                                        $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+
+                        // ── Semana ────────────────────────────────────────────────
+                        week_received: [
+                            { $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } },
+                            { $count: 'n' },
+                        ],
+                        week_finished: [
+                            {
+                                $match: {
+                                    'currentStatus.id': { $in: [7, 8] },
+                                    statusHistory: {
+                                        $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                        week_delivered: [
+                            {
+                                $match: {
+                                    statusHistory: {
+                                        $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                        week_collected: [
+                            {
+                                $match: {
+                                    payments: {
+                                        $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+
+                        // ── Mes ───────────────────────────────────────────────────
+                        month_received: [
+                            { $match: { entry_date: { $gte: monthStart, $lte: now } } },
+                            { $count: 'n' },
+                        ],
+                        month_finished: [
+                            {
+                                $match: {
+                                    'currentStatus.id': { $in: [7, 8] },
+                                    statusHistory: {
+                                        $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                        month_delivered: [
+                            {
+                                $match: {
+                                    statusHistory: {
+                                        $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                        month_collected: [
+                            {
+                                $match: {
+                                    payments: {
+                                        $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+                    },
+                },
+            ]),
         ]);
 
+        // ── Helper para leer el $facet ────────────────────────────────────────────
+        const c = (key: string): number => drillCounts[0]?.[key]?.[0]?.n ?? 0;
+
+        // ── Globales derivados de byStatus (sin query extra) ──────────────────────
+        const statusMap: Record<number, number> = Object.fromEntries(
+            byStatus.map((s: any) => [s.id, s.count])
+        );
+
+        const counts = {
+            today: {
+                received: c('today_received'),
+                finished: c('today_finished'),
+                delivered: c('today_delivered'),
+                collected: c('today_collected'),
+            },
+            week: {
+                received: c('week_received'),
+                finished: c('week_finished'),
+                delivered: c('week_delivered'),
+                collected: c('week_collected'),
+            },
+            month: {
+                received: c('month_received'),
+                finished: c('month_finished'),
+                delivered: c('month_delivered'),
+                collected: c('month_collected'),
+            },
+            global: {
+                all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
+                pending: statusMap[1] ?? 0,   // INGRESADO
+                in_progress: statusMap[6] ?? 0,   // EN_REPARACION
+                waiting_approval: statusMap[4] ?? 0,   // EN_ESPERA_APROBACION
+                waiting_parts: statusMap[5] ?? 0,   // EN_BUSQUEDA_REPUESTO
+                finished: statusMap[7] ?? 0,   // TRABAJO_FINALIZADO
+                delivered: statusMap[8] ?? 0,   // ENTREGADA
+            },
+        };
+
         // ── Cálculos derivados ────────────────────────────────────────────────────
-        const totalAll = byStatus.reduce((s: number, r: any) => s + r.count, 0);
-        const totalDelivered = byStatus.find((r: any) => r.id === 8)?.count ?? 0;
-        const totalFinished = byStatus.find((r: any) => r.id === 7)?.count ?? 0;
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
-        const avgTicket = totalDelivered > 0 ? +(totalPaid / totalDelivered).toFixed(2) : 0;
+        const avgTicket = counts.global.delivered > 0
+            ? +(totalPaid / counts.global.delivered).toFixed(2)
+            : 0;
 
         return {
-            // ── Períodos con corte 03:00 ─────────────────────────────────────────
-            periods: {
-                today: statsDay,
-                week: statsWeek,
-                month: statsMonth,
-            },
-
-            // ── Totales globales ─────────────────────────────────────────────────
+            periods: { today: statsDay, week: statsWeek, month: statsMonth },
+            counts,
             totals: {
-                all: totalAll,
-                active: totalAll - totalDelivered,
-                delivered: totalDelivered,
-                finished: totalFinished,
+                all: counts.global.all,
+                active: counts.global.all - counts.global.delivered,
+                delivered: counts.global.delivered,
+                finished: counts.global.finished,
             },
             byStatus,
-
-            // ── Finanzas globales ─────────────────────────────────────────────────
             finance: {
                 totalProceduresCost: totalCost,
                 totalPaid,
                 totalPending: totalCost - totalPaid,
                 avgTicket,
             },
-
-            // ── Distribuciones ────────────────────────────────────────────────────
             byBranch,
             byTechnician,
             byOrderType,
             byDeviceBrand,
             paymentMethods,
-
-            // ── Serie temporal ────────────────────────────────────────────────────
             weeklyTrend,
             hourlyToday,
-
-            // ── KPI de operaciones ────────────────────────────────────────────────
             resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
         };
     }
