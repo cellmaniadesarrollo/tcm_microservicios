@@ -1095,7 +1095,7 @@ export class OrdersReportsService {
                 delivered: statusMap[8] ?? 0,   // ENTREGADA
             },
         };
-
+        console.log(counts)
         // ── Cálculos derivados ────────────────────────────────────────────────────
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
