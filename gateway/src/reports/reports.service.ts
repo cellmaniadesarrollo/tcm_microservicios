@@ -66,4 +66,18 @@ export class ReportsService {
             ),
         );
     }
+    async getDashboardDrill(user: any, card: string, page: number, limit: number) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_dashboard_drill' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    user,
+                    card,
+                    page,
+                    limit,
+                },
+            ),
+        );
+    }
 }
