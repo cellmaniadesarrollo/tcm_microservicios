@@ -68,6 +68,7 @@ export class OrdersReportsService {
             },
             today_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } },
+                'currentStatus.id': { $in: [7, 8] },
             },
             today_delivered: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } },
@@ -82,6 +83,7 @@ export class OrdersReportsService {
             },
             week_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } },
+                'currentStatus.id': { $in: [7, 8] },
             },
             week_delivered: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } },
@@ -96,6 +98,7 @@ export class OrdersReportsService {
             },
             month_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } },
+                'currentStatus.id': { $in: [7, 8] },
             },
             month_delivered: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } },
@@ -110,7 +113,7 @@ export class OrdersReportsService {
             global_in_progress: { 'currentStatus.id': { $in: [6] } },
             global_waiting_parts: { 'currentStatus.id': { $in: [5] } },  // EN_BUSQUEDA_REPUESTO
             global_waiting_approval: { 'currentStatus.id': { $in: [4] } },  // EN_ESPERA_APROBACION
-            global_finished: { 'currentStatus.id': { $in: [7] } },
+            global_finished: { 'currentStatus.id': { $in: [7, 8] } },
             global_delivered: { 'currentStatus.id': { $in: [8] } },
         };
 
