@@ -1,6 +1,7 @@
 import {
     IsArray, IsOptional, IsString,
-    IsDateString, IsIn, ArrayUnique
+    IsDateString, IsIn, ArrayUnique,
+    IsBoolean
 } from 'class-validator';
 import { Transform } from 'class-transformer';
 
@@ -99,4 +100,8 @@ export class GetOrdersFilterDto {
     @IsOptional()
     @IsDateString()
     deliveryDateTo?: string;
+
+    @IsOptional()
+    @IsBoolean()
+    onlyWithPayments?: boolean;
 }
