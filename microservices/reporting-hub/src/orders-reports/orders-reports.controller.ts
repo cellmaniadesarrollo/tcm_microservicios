@@ -66,7 +66,22 @@ export class OrdersReportsController {
       data.user.sub,
       data.user.groups,
     );
-    console.log(datas)
+
     return datas
+  }
+
+  @MessagePattern({ cmd: 'get_dashboard_drill' })
+  async getDashboardDrill(data: {
+    user: { userId: string; companyId: string; branchId: string };
+    card: string;
+    page: number;
+    limit: number;
+  }) {
+    return this.ordersReportsService.getDashboardDrill(
+      data.user.companyId,
+      data.card,
+      data.page,
+      data.limit,
+    );
   }
 }
