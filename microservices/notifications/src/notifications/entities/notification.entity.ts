@@ -60,9 +60,16 @@ export class Notification {
   @Prop({ index: true })
   entityId: string;
 
-  // ✅ AGREGAR ESTA PROPIEDAD
   @Prop({ index: true })
   action: string;
+
+  // ✅ ID del usuario que CREÓ la orden (igual que changedBy del primer statusHistory)
+  @Prop({ type: String, index: true, default: null })
+  createdById: string;
+
+  // ✅ Nombre del creador para mostrar en UI sin lookups adicionales
+  @Prop({ type: String, default: null })
+  createdByName: string;
 
   // Estado ACTUAL de la orden
   @Prop({ index: true })
@@ -82,6 +89,7 @@ export class Notification {
     detalleIngreso?: string;
     technicians?: any[];
     createdBy?: string;
+    createdById?: string; // ✅ ID también dentro de orderData para consistencia
     createdAt?: Date;
   };
 
@@ -129,10 +137,15 @@ export class Notification {
 
 export const NotificationSchema = SchemaFactory.createForClass(Notification);
 
-// Índices compuestos
+// Índices compuestos existentes
 NotificationSchema.index({ entityType: 1, entityId: 1, createdAt: -1 });
 NotificationSchema.index({ userId: 1, read: 1, createdAt: -1 });
 NotificationSchema.index({ companyId: 1, createdAt: -1 });
 NotificationSchema.index({ readHistory: 1 });
 NotificationSchema.index({ currentStatus: 1, createdAt: 1 });
 NotificationSchema.index({ action: 1 });
+
+// ✅ Nuevos índices para filtrar por creador en el frontend
+NotificationSchema.index({ createdById: 1, createdAt: -1 });
+NotificationSchema.index({ createdById: 1, read: 1, createdAt: -1 });
+NotificationSchema.index({ createdById: 1, companyId: 1, createdAt: -1 });
