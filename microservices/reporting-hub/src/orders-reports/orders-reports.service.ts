@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, PipelineStage } from 'mongoose';
 
 import { OrderStatus, OrderStatusDocument } from '../orders-relay/schemas/order-status.schema';
 import { OrderType, OrderTypeDocument } from '../orders-relay/schemas/order-type.schema';
@@ -32,7 +32,6 @@ export class OrdersReportsService {
         private orderReplicaModel: Model<OrderReplicaDocument>,
     ) { }
 
-
     async getDashboardDrill(
         companyId: string,
         card: string,
@@ -55,17 +54,8 @@ export class OrdersReportsService {
         const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
         const now = new Date();
 
-        /**
-         * Cada estrategia = $match parcial (sin companyId).
-         * MongoDB puro → sin pasar por GetOrdersFilterDto ni buildMongoFilter.
-         * Agregar nuevas tarjetas aquí no toca nada más.
-         */
         const strategies: Record<DrillCardKey, Record<string, any>> = {
-
-            // ── Hoy ──────────────────────────────────────────────────────────────────
-            today_received: {
-                entry_date: { $gte: todayStart, $lte: todayEnd },
-            },
+            today_received: { entry_date: { $gte: todayStart, $lte: todayEnd } },
             today_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } },
                 'currentStatus.id': { $in: [7, 8] },
@@ -77,10 +67,7 @@ export class OrdersReportsService {
                 payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } } },
             },
 
-            // ── Semana ───────────────────────────────────────────────────────────────
-            week_received: {
-                entry_date: { $gte: weekStart, $lte: todayEnd },
-            },
+            week_received: { entry_date: { $gte: weekStart, $lte: todayEnd } },
             week_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } },
                 'currentStatus.id': { $in: [7, 8] },
@@ -92,10 +79,7 @@ export class OrdersReportsService {
                 payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } } },
             },
 
-            // ── Mes ──────────────────────────────────────────────────────────────────
-            month_received: {
-                entry_date: { $gte: monthStart, $lte: now },
-            },
+            month_received: { entry_date: { $gte: monthStart, $lte: now } },
             month_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } },
                 'currentStatus.id': { $in: [7, 8] },
@@ -107,40 +91,91 @@ export class OrdersReportsService {
                 payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } } },
             },
 
-            // ── Global (sin rango de fecha — solo estado actual) ──────────────────────
             global_all: {},
             global_pending: { 'currentStatus.id': { $in: [1] } },
             global_in_progress: { 'currentStatus.id': { $in: [6] } },
-            global_waiting_parts: { 'currentStatus.id': { $in: [5] } },  // EN_BUSQUEDA_REPUESTO
-            global_waiting_approval: { 'currentStatus.id': { $in: [4] } },  // EN_ESPERA_APROBACION
+            global_waiting_parts: { 'currentStatus.id': { $in: [5] } },
+            global_waiting_approval: { 'currentStatus.id': { $in: [4] } },
             global_finished: { 'currentStatus.id': { $in: [7, 8] } },
             global_delivered: { 'currentStatus.id': { $in: [8] } },
         };
+
+        const DELIVERED_CARDS: DrillCardKey[] = [
+            'today_delivered', 'week_delivered', 'month_delivered', 'global_delivered',
+        ];
+
+        // ── Ambos flags se derivan del mismo array ────────────────────────────────
+        const isDeliveredCard = DELIVERED_CARDS.includes(card as DrillCardKey);
 
         const matchStage: Record<string, any> = {
             'company.id': companyId,
             ...strategies[card as DrillCardKey],
         };
 
-        return this._executeDrillPipeline(matchStage, page, limit);
+        return this._executeDrillPipeline(
+            matchStage,
+            page,
+            limit,
+            isDeliveredCard,   // includeValidation
+            isDeliveredCard,   // sortByDelivered
+        );
     }
-
-    // ─── Pipeline propia del drill — sin acoplarse a getOrdersList ────────────────
     private async _executeDrillPipeline(
         matchStage: Record<string, any>,
         page: number,
         limit: number,
+        includeValidation = false,
+        sortByDelivered = false,
     ): Promise<{ data: any[]; total: number }> {
 
         const skip = (page - 1) * limit;
         const now = new Date();
 
+        const lookupStage: PipelineStage[] = includeValidation
+            ? [{ $lookup: { from: 'order_validations', localField: 'id', foreignField: 'order_id', as: '_validation' } }]
+            : [];
+
+        const deliveredAtStage: PipelineStage[] = sortByDelivered
+            ? [{
+                $addFields: {
+                    delivered_at: {
+                        $max: {
+                            $map: {
+                                input: {
+                                    $filter: {
+                                        input: { $ifNull: ['$statusHistory', []] },
+                                        as: 'h',
+                                        cond: { $eq: ['$$h.toStatus.id', 8] },
+                                    },
+                                },
+                                as: 'h',
+                                in: '$$h.changed_at',
+                            },
+                        },
+                    },
+                },
+            }]
+            : [];
+
+        const sortStage: PipelineStage = sortByDelivered
+            ? { $sort: { delivered_at: -1 } }
+            : { $sort: { entry_date: -1 } };
+
+        const validationProjection = includeValidation
+            ? { _validation: { $arrayElemAt: ['$_validation', 0] } }
+            : {};
+
+        const deliveredAtProjection = sortByDelivered
+            ? { delivered_at: 1 }
+            : {};
+
         const [result] = await this.orderReplicaModel.aggregate([
             { $match: matchStage },
-            { $sort: { entry_date: -1 } },
+            ...lookupStage,
+            ...deliveredAtStage,
+            sortStage,
             {
                 $facet: {
-                    // count y data en una sola round-trip
                     total: [{ $count: 'count' }],
                     data: [
                         { $skip: skip },
@@ -155,6 +190,8 @@ export class OrdersReportsService {
                                 technicians: 1, entry_date: 1,
                                 estimated_price: 1, statusHistory: 1,
                                 findings: 1, payments: 1,
+                                ...validationProjection,
+                                ...deliveredAtProjection,
                             },
                         },
                     ],
@@ -172,10 +209,12 @@ export class OrdersReportsService {
                 .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
             [0]?.changed_at ?? null;
 
-            const completedAt = order.statusHistory
-                ?.filter(h => h.toStatus?.id === 8)
-                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
-            [0]?.changed_at ?? null;
+            const completedAt = order.delivered_at          // ← del $addFields si aplica
+                ?? order.statusHistory
+                    ?.filter(h => h.toStatus?.id === 8)
+                    .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+                [0]?.changed_at
+                ?? null;
 
             const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
                 sumF + (finding.procedures?.reduce((sumP, proc) =>
@@ -201,6 +240,14 @@ export class OrdersReportsService {
                 }),
             ) ?? false;
 
+            const validation = order._validation
+                ? {
+                    _id: order._validation._id,
+                    is_checked: order._validation.is_checked ?? false,
+                    daily_sequential: order._validation.daily_sequential ?? null,
+                }
+                : null;
+
             return {
                 id: order.id,
                 order_number: order.order_number,
@@ -219,6 +266,7 @@ export class OrdersReportsService {
                 total_paid: totalPaid,
                 findings_summary: findingsSummary,
                 has_active_warranty: hasActiveWarranty,
+                validation,
             };
         });
 
@@ -1095,7 +1143,7 @@ export class OrdersReportsService {
                 delivered: statusMap[8] ?? 0,   // ENTREGADA
             },
         };
-        console.log(counts)
+
         // ── Cálculos derivados ────────────────────────────────────────────────────
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;

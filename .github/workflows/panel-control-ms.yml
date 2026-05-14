@@ -1,0 +1,160 @@
+name: 🎮 Panel de Control Microservicios
+
+on:
+  workflow_dispatch:
+    inputs:
+      action_type:
+        description: 'Selecciona la acción'
+        required: true
+        default: 'deploy_smart'
+        type: choice
+        options:
+          - deploy_smart
+          - deploy_force
+          - restart_only
+          - view_logs
+
+      target_service:
+        description: 'Selecciona el microservicio'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - gateway
+          - users
+          - companies
+          - clients
+          - orders
+          - subscriptions
+          - reports
+          - realtime
+          - notifications
+          - notification-dispatcher
+          # ── Infraestructura (solo logs/restart, nunca deploy) ──
+          - kafka
+          - rabbitmq
+          - init-kafka
+
+jobs:
+  control_panel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute Management Task
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_PORT }}
+          command_timeout: 60m
+          script: |
+            set -e
+            cd /home/ubuntu/proyects/tcm_microservicios || exit 1
+
+            ACTION="${{ github.event.inputs.action_type }}"
+            SERVICE="${{ github.event.inputs.target_service }}"
+
+            # Servicios de infraestructura: solo logs/restart, nunca deploy
+            INFRA_SERVICES="kafka rabbitmq init-kafka"
+
+            is_infra() {
+              echo "$INFRA_SERVICES" | grep -qw "$1"
+            }
+
+            # --- 1. VER LOGS ---
+            if [ "$ACTION" == "view_logs" ]; then
+              if [ "$SERVICE" == "all" ]; then
+                echo "📋 Mostrando logs globales (resumen)..."
+                docker compose -f docker/compose.prod.yml logs --tail=50
+              else
+                echo "📋 Mostrando logs de: $SERVICE"
+                docker compose -f docker/compose.prod.yml logs --tail=100 "$SERVICE"
+              fi
+              exit 0
+            fi
+
+            # --- 2. REINICIAR (SIN REBUILD) ---
+            if [ "$ACTION" == "restart_only" ]; then
+              if [ "$SERVICE" == "all" ]; then
+                echo "♻️ Reiniciando TODO el stack..."
+                docker compose -f docker/compose.prod.yml restart
+              else
+                echo "♻️ Reiniciando servicio: $SERVICE"
+                docker compose -f docker/compose.prod.yml restart "$SERVICE"
+              fi
+              exit 0
+            fi
+
+            # --- 3. DESPLIEGUE (SMART O FORZADO) ---
+
+            # Bloquear deploy directo a servicios de infraestructura
+            if is_infra "$SERVICE"; then
+              echo "🚫 '$SERVICE' es un servicio de infraestructura."
+              echo "   Usa restart_only o view_logs para este servicio."
+              exit 1
+            fi
+
+            cd docker
+            SERVICES_TO_PROCESS=""
+
+            # Solo microservicios de aplicación (kafka/rabbitmq/init-kafka excluidos)
+            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications gateway"
+
+            if [ "$ACTION" == "deploy_smart" ]; then
+              echo "🔍 Analizando cambios automáticos..."
+              cd ..
+              CHANGED=$(git diff --name-only HEAD HEAD~1)
+              cd docker
+
+              declare -A PATHS=(
+                ["gateway"]="gateway/"
+                ["users"]="microservices/users/"
+                ["companies"]="microservices/companies/"
+                ["clients"]="microservices/clients/"
+                ["orders"]="microservices/orders/"
+                ["subscriptions"]="microservices/subscriptions/"
+                ["reports"]="microservices/reporting-hub/"
+                ["realtime"]="realtime/"
+                ["notifications"]="microservices/notifications/"
+                ["notification-dispatcher"]="microservices/notification-dispatcher/"
+              )
+
+              for MS in "${!PATHS[@]}"; do
+                if echo "$CHANGED" | grep -q "${PATHS[$MS]}"; then
+                  SERVICES_TO_PROCESS="$SERVICES_TO_PROCESS $MS"
+                fi
+              done
+
+              if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|Dockerfile)'; then
+                echo "⚠️ Cambio estructural: Se procesará todo."
+                SERVICES_TO_PROCESS="$ALL_SERVICES"
+              fi
+
+            elif [ "$ACTION" == "deploy_force" ]; then
+              if [ "$SERVICE" == "all" ]; then
+                SERVICES_TO_PROCESS="$ALL_SERVICES"
+              else
+                SERVICES_TO_PROCESS="$SERVICE"
+              fi
+            fi
+
+            if [ -z "$(echo $SERVICES_TO_PROCESS | xargs)" ]; then
+              echo "✅ Nada que desplegar."
+              exit 0
+            fi
+
+            # --- EJECUCIÓN SECUENCIAL (CUIDANDO RAM) ---
+            for MS in $SERVICES_TO_PROCESS; do
+              echo "🔨 Procesando $MS (Build + Recreate)..."
+              docker compose -f compose.prod.yml up -d --build --force-recreate "$MS"
+
+              case "$MS" in
+                gateway|realtime) sleep 12 ;;
+                *) sleep 8 ;;
+              esac
+              echo "✅ $MS listo."
+            done
+
+            docker image prune -f
+            echo "🎉 Tarea finalizada con éxito."

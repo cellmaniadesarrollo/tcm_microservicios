@@ -70,203 +70,203 @@ export class OrderWorkflowService {
     private readonly broadcastService: BroadcastService,
   ) { }
 
-async createOrder(
-  dto: CreateOrderDto,
-  files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
-  user: { companyId: string; branchId: string; userId: string },
-) {
-  return this.orderRepo.manager.transaction(async (manager) => {
-    // 🔒 Resolver técnicos
-    const technicians = await manager.find(UserEmployeeCache, {
-      where: {
-        id: In(dto.technician_ids),
-        company: { id: user.companyId },
-      },
-    });
-
-    if (technicians.length !== dto.technician_ids.length) {
-      throw new Error('Uno o más técnicos no pertenecen a la empresa');
-    }
-
-    // ── Identificar si es PERSONALIZADO por nombre (robusto entre entornos) ──
-    const PERSONALIZADO_NOMBRE = 'PERSONALIZADO';
-    const isPersonalizado = String(dto.order_type_id)
-      .trim()
-      .toUpperCase() === PERSONALIZADO_NOMBRE.toUpperCase();
-
-    // 🔒 Validar device SOLO si NO es personalizado y se envió uno
-    if (!isPersonalizado && dto.device_id) {
-      const device = await manager.findOne(Device, {
+  async createOrder(
+    dto: CreateOrderDto,
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      // 🔒 Resolver técnicos
+      const technicians = await manager.find(UserEmployeeCache, {
         where: {
-          device_id: dto.device_id,
-          company_id: user.companyId,
+          id: In(dto.technician_ids),
+          company: { id: user.companyId },
         },
       });
 
-      if (!device) {
-        throw new Error('Device no pertenece a la empresa');
+      if (technicians.length !== dto.technician_ids.length) {
+        throw new Error('Uno o más técnicos no pertenecen a la empresa');
       }
-    }
 
-    // 📌 Estado inicial
-    const initialStatus = await manager.findOneOrFail(OrderStatus, {
-      where: { name: 'INGRESADO' },
-    });
+      // ── Identificar si es PERSONALIZADO por nombre (robusto entre entornos) ──
+      const PERSONALIZADO_NOMBRE = 'PERSONALIZADO';
+      const isPersonalizado = String(dto.order_type_id)
+        .trim()
+        .toUpperCase() === PERSONALIZADO_NOMBRE.toUpperCase();
 
-    // 🔢 Obtener último número por empresa
-    const result = await manager
-      .createQueryBuilder(Order, 'o')
-      .select('MAX(o.order_number)', 'max')
-      .where('o.company_id = :companyId', { companyId: user.companyId })
-      .getRawOne();
-
-    const nextOrderNumber = (result?.max ?? 0) + 1;
-
-    // ── Preparar detalleIngreso con fallback para personalizados ─────────────
-    const detalleIngresoFinal = dto.detalleIngreso?.trim()
-      ? dto.detalleIngreso.trim()
-      : isPersonalizado
-        ? 'Estuche personalizado'
-        : (dto.detalleIngreso || '');
-
-    // 🧠 Crear orden con campos condicionales
-    const order = manager.create(Order, {
-      public_id: uuidv4(),
-      order_number: nextOrderNumber,
-      order_type_id: dto.order_type_id,
-      order_priority_id: dto.order_priority_id,
-      customer_id: dto.customer_id,
-
-      // Campos forzados/limpiados según tipo
-      device_id: isPersonalizado ? undefined : (dto.device_id ?? undefined),
-      patron: isPersonalizado ? undefined : dto.patron,
-      password: isPersonalizado ? undefined : dto.password,
-      revisadoAntes: isPersonalizado ? false : dto.revisadoAntes,
-      detalleIngreso: detalleIngresoFinal,
-
-      previous_order_id: dto.previous_order_id ?? undefined,
-
-      company_id: user.companyId,
-      branch_id: user.branchId,
-      created_by_id: user.userId,
-
-      current_status_id: initialStatus.id,
-      technicians,
-    });
-
-    // ✅ 1️⃣ GUARDAR ORDEN (aquí nace el ID)
-    const savedOrder = await manager.save(order);
-
-    // 🧾 2️⃣ GUARDAR HISTORIAL DE ESTADO
-    await manager.save(OrderStatusHistory, {
-      order_id: savedOrder.id,
-      to_status_id: initialStatus.id,
-      changed_by_id: user.userId,
-      company_id: user.companyId,
-      branch_id: user.branchId,
-      observation: 'CREACIÓN DE ORDEN',
-    });
-
-    // 📎 Adjuntos (subida a S3)
-    const attachments: Attachment[] = [];
-
-    for (const file of files) {
-      const buffer = Buffer.from(file.buffer, 'base64');
-      const prefix = `order/${savedOrder.id}/`;
-      const url = await this.awsS3Service.uploadBuffer(
-        buffer,
-        file.originalname,
-        file.mimetype,
-        prefix,
-      );
-
-      const attachment = manager.create(Attachment, {
-        entity_type: AttachmentEntityType.ORDER,
-        entity_id: savedOrder.id,
-        file_name: file.originalname,
-        file_url: url,
-        file_type: file.mimetype,
-        uploaded_by_id: user.userId,
-        is_public: true,
-      });
-
-      attachments.push(await manager.save(attachment));
-    }
-
-    // 🔹 ========== OBTENER DATOS DEL DISPOSITIVO ==========
-    let deviceInfo: any = null;
-    if (dto.device_id && !isPersonalizado) {
-      const device = await manager.findOne(Device, {
-        where: { device_id: dto.device_id, company_id: user.companyId },
-        relations: ['model', 'model.brand', 'imeis', 'type']
-      });
-      
-      if (device) {
-        deviceInfo = {
-          id: device.device_id,
-          brand: device.model?.brand?.brands_name || null,
-          model: device.model?.models_name || null,
-          serial_number: device.serial_number,
-          color: device.color,
-          storage: device.storage,
-          imei: device.imeis?.[0]?.imei_number || null,
-          type: device.type?.name || null
-        };
-        console.log(`📱 Dispositivo encontrado: ${deviceInfo.brand} ${deviceInfo.model} (ID: ${deviceInfo.id})`);
-      }
-    }
-
-    // 🔹 OBTENER NOMBRE DEL USUARIO CREADOR
-    const creatorName = await this.userCacheService.getUsernameById(user.userId, user.companyId);
-    const orderfind = await this.getOrderNotificationData(savedOrder.id, user.companyId, manager);
-    
-    if (orderfind && creatorName) {
-      // 🔹 CREAR LISTA DE DESTINATARIOS (creador + técnicos)
-      const recipients = [
-        { userId: user.userId, userName: creatorName }  // Creador
-      ];
-      
-      // Agregar técnicos
-      for (const tech of technicians) {
-        const techName = tech.username || `${tech.first_name} ${tech.last_name}`;
-        recipients.push({
-          userId: tech.id,
-          userName: techName
-        });
-      }
-      
-      // Eliminar duplicados (por si acaso el creador también es técnico)
-      const uniqueRecipients = recipients.filter((v, i, a) => 
-        a.findIndex(t => t.userId === v.userId) === i
-      );
-      
-      console.log(`📨 Enviando notificaciones a ${uniqueRecipients.length} destinatarios:`);
-      
-      // Enviar notificación a CADA destinatario
-      for (const recipient of uniqueRecipients) {
-        console.log(`   - ${recipient.userName} (${recipient.userId})`);
-        await this.notificationsService.emitOrderCreated(
-          { 
-            ...savedOrder,
-            technicians,
-            device: deviceInfo
+      // 🔒 Validar device SOLO si NO es personalizado y se envió uno
+      if (!isPersonalizado && dto.device_id) {
+        const device = await manager.findOne(Device, {
+          where: {
+            device_id: dto.device_id,
+            company_id: user.companyId,
           },
-          orderfind,
-          recipient.userId,      // ← ID del destinatario
-          user.companyId,        // ← company_id
-          recipient.userName     // ← Nombre del destinatario
-        );
+        });
+
+        if (!device) {
+          throw new Error('Device no pertenece a la empresa');
+        }
       }
-    } else {
-      console.log(savedOrder.id, user.companyId)
-    }
-    
-    this.handleBroadcast(savedOrder.id, 'created');
-    
-    // Retornar la orden guardada + adjuntos
-    return { ...savedOrder, attachments };
-  });
-}
+
+      // 📌 Estado inicial
+      const initialStatus = await manager.findOneOrFail(OrderStatus, {
+        where: { name: 'INGRESADO' },
+      });
+
+      // 🔢 Obtener último número por empresa
+      const result = await manager
+        .createQueryBuilder(Order, 'o')
+        .select('MAX(o.order_number)', 'max')
+        .where('o.company_id = :companyId', { companyId: user.companyId })
+        .getRawOne();
+
+      const nextOrderNumber = (result?.max ?? 0) + 1;
+
+      // ── Preparar detalleIngreso con fallback para personalizados ─────────────
+      const detalleIngresoFinal = dto.detalleIngreso?.trim()
+        ? dto.detalleIngreso.trim()
+        : isPersonalizado
+          ? 'Estuche personalizado'
+          : (dto.detalleIngreso || '');
+
+      // 🧠 Crear orden con campos condicionales
+      const order = manager.create(Order, {
+        public_id: uuidv4(),
+        order_number: nextOrderNumber,
+        order_type_id: dto.order_type_id,
+        order_priority_id: dto.order_priority_id,
+        customer_id: dto.customer_id,
+
+        // Campos forzados/limpiados según tipo
+        device_id: isPersonalizado ? undefined : (dto.device_id ?? undefined),
+        patron: isPersonalizado ? undefined : dto.patron,
+        password: isPersonalizado ? undefined : dto.password,
+        revisadoAntes: isPersonalizado ? false : dto.revisadoAntes,
+        detalleIngreso: detalleIngresoFinal,
+
+        previous_order_id: dto.previous_order_id ?? undefined,
+
+        company_id: user.companyId,
+        branch_id: user.branchId,
+        created_by_id: user.userId,
+
+        current_status_id: initialStatus.id,
+        technicians,
+      });
+
+      // ✅ 1️⃣ GUARDAR ORDEN (aquí nace el ID)
+      const savedOrder = await manager.save(order);
+
+      // 🧾 2️⃣ GUARDAR HISTORIAL DE ESTADO
+      await manager.save(OrderStatusHistory, {
+        order_id: savedOrder.id,
+        to_status_id: initialStatus.id,
+        changed_by_id: user.userId,
+        company_id: user.companyId,
+        branch_id: user.branchId,
+        observation: 'CREACIÓN DE ORDEN',
+      });
+
+      // 📎 Adjuntos (subida a S3)
+      const attachments: Attachment[] = [];
+
+      for (const file of files) {
+        const buffer = Buffer.from(file.buffer, 'base64');
+        const prefix = `order/${savedOrder.id}/`;
+        const url = await this.awsS3Service.uploadBuffer(
+          buffer,
+          file.originalname,
+          file.mimetype,
+          prefix,
+        );
+
+        const attachment = manager.create(Attachment, {
+          entity_type: AttachmentEntityType.ORDER,
+          entity_id: savedOrder.id,
+          file_name: file.originalname,
+          file_url: url,
+          file_type: file.mimetype,
+          uploaded_by_id: user.userId,
+          is_public: true,
+        });
+
+        attachments.push(await manager.save(attachment));
+      }
+
+      // 🔹 ========== OBTENER DATOS DEL DISPOSITIVO ==========
+      let deviceInfo: any = null;
+      if (dto.device_id && !isPersonalizado) {
+        const device = await manager.findOne(Device, {
+          where: { device_id: dto.device_id, company_id: user.companyId },
+          relations: ['model', 'model.brand', 'imeis', 'type']
+        });
+
+        if (device) {
+          deviceInfo = {
+            id: device.device_id,
+            brand: device.model?.brand?.brands_name || null,
+            model: device.model?.models_name || null,
+            serial_number: device.serial_number,
+            color: device.color,
+            storage: device.storage,
+            imei: device.imeis?.[0]?.imei_number || null,
+            type: device.type?.name || null
+          };
+          console.log(`📱 Dispositivo encontrado: ${deviceInfo.brand} ${deviceInfo.model} (ID: ${deviceInfo.id})`);
+        }
+      }
+
+      // 🔹 OBTENER NOMBRE DEL USUARIO CREADOR
+      const creatorName = await this.userCacheService.getUsernameById(user.userId, user.companyId);
+      const orderfind = await this.getOrderNotificationData(savedOrder.id, user.companyId, manager);
+
+      if (orderfind && creatorName) {
+        // 🔹 CREAR LISTA DE DESTINATARIOS (creador + técnicos)
+        const recipients = [
+          { userId: user.userId, userName: creatorName }  // Creador
+        ];
+
+        // Agregar técnicos
+        for (const tech of technicians) {
+          const techName = tech.username || `${tech.first_name} ${tech.last_name}`;
+          recipients.push({
+            userId: tech.id,
+            userName: techName
+          });
+        }
+
+        // Eliminar duplicados (por si acaso el creador también es técnico)
+        const uniqueRecipients = recipients.filter((v, i, a) =>
+          a.findIndex(t => t.userId === v.userId) === i
+        );
+
+        console.log(`📨 Enviando notificaciones a ${uniqueRecipients.length} destinatarios:`);
+
+        // Enviar notificación a CADA destinatario
+        for (const recipient of uniqueRecipients) {
+          console.log(`   - ${recipient.userName} (${recipient.userId})`);
+          await this.notificationsService.emitOrderCreated(
+            {
+              ...savedOrder,
+              technicians,
+              device: deviceInfo
+            },
+            orderfind,
+            recipient.userId,      // ← ID del destinatario
+            user.companyId,        // ← company_id
+            recipient.userName     // ← Nombre del destinatario
+          );
+        }
+      } else {
+        console.log(savedOrder.id, user.companyId)
+      }
+
+      this.handleBroadcast(savedOrder.id, 'created');
+
+      // Retornar la orden guardada + adjuntos
+      return { ...savedOrder, attachments };
+    });
+  }
 
   // ─── Helper privado para emitir notificaciones ────────────────────────────
   private async emitNotification(
@@ -398,7 +398,6 @@ async createOrder(
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.createdAt', 'DESC')
       .getMany();
-    console.log(data)
     return {
       data,
       total,
@@ -520,32 +519,74 @@ async createOrder(
         .leftJoinAndSelect('order.currentStatus', 'currentStatus')
         .leftJoinAndSelect('order.createdBy', 'createdBy')
         .leftJoinAndSelect('order.technicians', 'technicians')
-        // ─── NOTAS ──────────────────────────────────────────────
-        .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', {
-          deleted: false,
-        })
+        .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
         .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
-        // ────────────────────────────────────────────────────────
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
         .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
-        .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', {
-          findingActive: true,
-        })
+        .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', { findingActive: true })
         .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
-        .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', {
-          procActive: true,
-        })
+        .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
         .leftJoinAndSelect('procedures.performedBy', 'performedBy')
         .where('order.id = :orderId', { orderId })
         .andWhere('order.company_id = :companyId', { companyId: user.companyId })
         .orderBy('findings.createdAt', 'ASC')
         .addOrderBy('payments.paid_at', 'ASC')
         .getOne();
+
       if (!order) {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
       }
+
+      // ─── CAMBIO AUTOMÁTICO: INGRESADO → VISTA ───────────────────────────────
+      const ESTADO_INGRESADO = 1;
+      const ESTADO_VISTA = 2;
+
+      if (order.currentStatus?.id === ESTADO_INGRESADO) {
+        const historyEntry = this.orderStatusHistoryRepository.create({
+          order_id: order.id,
+          from_status_id: ESTADO_INGRESADO,
+          to_status_id: ESTADO_VISTA,
+          changed_by_id: user.userId,
+          company_id: user.companyId,
+          branch_id: user.branchId,
+          observation: 'Cambio automático al visualizar la orden',
+        });
+        await this.orderStatusHistoryRepository.save(historyEntry);
+
+        await this.orderRepo.update(order.id, { current_status_id: ESTADO_VISTA });
+
+        order.currentStatus = { id: ESTADO_VISTA, name: 'VISTA' } as OrderStatus;
+        order.current_status_id = ESTADO_VISTA;
+
+        // ─── EMITIR CAMBIO DE ESTADO ─────────────────────────────────────────
+        const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
+
+        await this.emitNotification(
+          order.id,
+          user.companyId,
+          user.userId,
+          'status_changed',
+          'Se actualizó el estado de la orden',
+        );
+
+        await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
+          currentStatus: {
+            id: ESTADO_VISTA,
+            name: 'VISTA',
+          },
+          statusHistoryEntry: {
+            id: historyEntry.id,
+            fromStatus: { id: ESTADO_INGRESADO, name: 'INGRESADO' },
+            toStatus: { id: ESTADO_VISTA, name: 'VISTA' },
+            changedBy: mapUser(userEntity),
+            observation: historyEntry.observation ?? null,
+            changed_at: historyEntry.changed_at,
+          },
+        });
+      }
+      // ────────────────────────────────────────────────────────────────────────
 
       // Ordenamiento en memoria de procedimientos dentro de cada finding
       order.findings?.forEach((finding) => {
@@ -553,38 +594,21 @@ async createOrder(
       });
 
       // ─── CARGA MANUAL DE ATTACHMENTS ────────────────────────────────────────
-
-      const findingIds = order.findings?.length
-        ? order.findings.map((f) => f.id)
-        : [];
-
+      const findingIds = order.findings?.length ? order.findings.map((f) => f.id) : [];
       const procedureIds = order.findings?.length
         ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
         : [];
 
-      // Siempre incluimos los attachments de la orden
       const whereConditions: any[] = [
-        {
-          entity_type: AttachmentEntityType.ORDER,
-          entity_id: order.id,
-          is_active: true,
-        },
+        { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
       ];
 
       if (findingIds.length) {
-        whereConditions.push({
-          entity_type: AttachmentEntityType.FINDING,
-          entity_id: In(findingIds),
-          is_active: true,
-        });
+        whereConditions.push({ entity_type: AttachmentEntityType.FINDING, entity_id: In(findingIds), is_active: true });
       }
 
       if (procedureIds.length) {
-        whereConditions.push({
-          entity_type: AttachmentEntityType.PROCEDURE,
-          entity_id: In(procedureIds),
-          is_active: true,
-        });
+        whereConditions.push({ entity_type: AttachmentEntityType.PROCEDURE, entity_id: In(procedureIds), is_active: true });
       }
 
       const allAttachments = await this.attachmentRepository.find({
@@ -592,7 +616,6 @@ async createOrder(
         order: { createdAt: 'ASC' },
       });
 
-      // Construir mapa key: "ENTITY_TYPE_id" → Attachment[]
       const attachmentsMap = new Map<string, Attachment[]>();
       allAttachments.forEach((att) => {
         const key = `${att.entity_type}_${att.entity_id}`;
@@ -600,26 +623,17 @@ async createOrder(
         attachmentsMap.get(key)!.push(att);
       });
 
-      // Attachments de la orden
-      const orderKey = `${AttachmentEntityType.ORDER}_${order.id}`;
-      (order as any).attachments = attachmentsMap.get(orderKey) || [];
+      (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) || [];
 
-      // Attachments de findings y procedimientos
       order.findings?.forEach((finding) => {
-        const findingKey = `${AttachmentEntityType.FINDING}_${finding.id}`;
-        finding.attachments = attachmentsMap.get(findingKey) || [];
-
+        finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) || [];
         finding.procedures?.forEach((proc) => {
-          const procKey = `${AttachmentEntityType.PROCEDURE}_${proc.id}`;
-          proc.attachments = attachmentsMap.get(procKey) || [];
+          proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) || [];
         });
       });
 
-
-
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
-      // ─── FIRMADO DE URLs ─────────────────────────────────────────────────────
       await this.enrichAttachmentsWithSignedUrls(order);
 
       return order;
@@ -696,11 +710,11 @@ async createOrder(
   ) {
     const { orderId, toStatusId, observation } = dto;
 
+    const ESTADO_INGRESADO = 1;
+    const ESTADO_VISTA = 2;
+
     const order = await this.orderRepo.findOne({
-      where: {
-        id: orderId,
-        company_id: user.companyId,
-      },
+      where: { id: orderId, company_id: user.companyId },
       relations: ['currentStatus'],
     });
 
@@ -713,7 +727,18 @@ async createOrder(
     const fromStatusId = order.current_status_id;
     const fromStatusName = order.currentStatus?.name ?? '';
 
-    // Buscar el nombre del nuevo estado
+    // ─── VALIDACIÓN DE REGRESIÓN DE ESTADOS ─────────────────────────────────
+    // Nunca se puede regresar a INGRESADO
+    if (toStatusId === ESTADO_INGRESADO) {
+      throw new BadRequestException('No se puede regresar una orden al estado INGRESADO');
+    }
+
+    // Si la orden ya pasó de VISTA, no se puede regresar a VISTA
+    if (toStatusId === ESTADO_VISTA && fromStatusId > ESTADO_VISTA) {
+      throw new BadRequestException('No se puede regresar una orden al estado VISTA');
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const toStatus = await this.orderRepo.manager.findOne(OrderStatus, {
       where: { id: toStatusId },
     });
@@ -736,7 +761,6 @@ async createOrder(
 
     await this.orderStatusHistoryRepository.save(history);
 
-    // Obtener usuario completo para el snapshot
     const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
     await this.emitNotification(
@@ -836,7 +860,7 @@ async createOrder(
 
       // 2. Validación de estado (regla de dominio común)
       // Ejemplo: no permitir pagos en órdenes ya entregadas o canceladas
-      if (['ENTREGADO', 'CANCELADO'].includes(order.currentStatus?.name ?? '')) {
+      if (['ENTREGADA'].includes(order.currentStatus?.name ?? '')) {
         throw new RpcException(
           new BadRequestException('No se pueden registrar pagos en órdenes entregadas o canceladas'),
         );
@@ -951,12 +975,12 @@ async createOrder(
       if (order.current_status_id !== 7) {
         throw new RpcException(
           new BadRequestException(
-            `Solo se puede cerrar órdenes en estado TRABAJO_FINALIZADO. Estado actual: ${order.currentStatus?.name ?? 'desconocido'}`,
+            `Solo se puede cerrar órdenes en estado TRABAJO FINALIZADO. Estado actual: ${order.currentStatus?.name ?? 'desconocido'}`,
           ),
         );
       }
 
-      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO_FINALIZADO';
+      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
       const isOutgoing = order.order_type_id === 3;
       const deliveryRepo = manager.getRepository(OrderDelivery);
       const deliveredAt = new Date();
@@ -1006,7 +1030,7 @@ async createOrder(
         branch_id: user.branchId,
       });
 
-      await manager.save(finalPayment);
+      const savedPayment = await manager.save(finalPayment); // ← guardamos el resultado
 
       await manager.getRepository(Order).update(
         { id: order.id, company_id: user.companyId },
@@ -1043,7 +1067,14 @@ async createOrder(
         updatedAt: deliveredAt,
       });
 
-      return { delivery, fromStatusName, observationText, historyId: historyResult.id };
+      return {
+        delivery,
+        fromStatusName,
+        observationText,
+        historyId: historyResult.id,
+        savedPayment,   // ← nuevo
+        paymentType,    // ← nuevo
+      };
     });
 
     // ── Fuera de la transacción ────────────────────────────────────────────────
@@ -1058,14 +1089,34 @@ async createOrder(
     );
 
     await this.broadcastService.publishOrderUpdated(dto.orderId, 'closed', {
-      currentStatus: { id: 8, name: 'CERRADO' },
+      currentStatus: { id: 8, name: 'ENTREGADA' },
       statusHistoryEntry: {
         id: result.historyId,
         fromStatus: { id: 7, name: result.fromStatusName },
-        toStatus: { id: 8, name: 'CERRADO' },
+        toStatus: { id: 8, name: 'ENTREGADA' },
         changedBy: mapUser(userEntity),
         observation: result.observationText,
         changed_at: new Date(),
+      },
+    });
+
+    // ← Broadcast del pago final, después del cierre
+    await this.broadcastService.publishOrderUpdated(dto.orderId, 'payment_added', {
+      payment: {
+        id: result.savedPayment.id,
+        amount: result.savedPayment.amount,
+        flow_type: result.savedPayment.flow_type,
+        payment_type_id: result.savedPayment.payment_type_id,
+        payment_type_code: result.paymentType.code,
+        payment_type_name: result.paymentType.name,
+        payment_method_id: result.savedPayment.payment_method_id ?? undefined,
+        paid_at: result.savedPayment.paid_at,
+        receivedBy: mapUser(userEntity),
+        reference: result.savedPayment.reference,
+        observation: result.savedPayment.observation,
+        company_id: result.savedPayment.company_id,
+        branch_id: result.savedPayment.branch_id,
+        createdAt: result.savedPayment.createdAt,
       },
     });
 
@@ -2016,6 +2067,105 @@ async createOrder(
     };
   }
 
+
+
+  // En OrderWorkflowService
+
+  async autoAdvanceStatus(
+    orderId: number,
+    companyId: string,
+    branchId: string,
+    userId: string,
+    trigger: 'finding_created' | 'procedure_created',
+  ): Promise<void> {
+    const ESTADO_INGRESADO = 1;
+    const ESTADO_VISTA = 2;
+    const ESTADO_EN_REVISION = 3;
+    const ESTADO_EN_REPARACION = 6;
+
+    const order = await this.orderRepo.findOne({
+      where: { id: orderId, company_id: companyId },
+      relations: ['currentStatus'],
+    });
+
+    if (!order) return;
+
+    const currentId = order.current_status_id;
+
+    // Determinar el estado destino según el trigger y estado actual
+    let toStatusId: number | null = null;
+
+    if (trigger === 'finding_created') {
+      // Solo avanza si está en INGRESADO o VISTA
+      if (currentId === ESTADO_INGRESADO || currentId === ESTADO_VISTA) {
+        toStatusId = ESTADO_EN_REVISION;
+      }
+      // Si ya está en EN_REPARACION o más adelante → no hace nada
+    } else if (trigger === 'procedure_created') {
+      // Solo avanza si está en INGRESADO, VISTA o EN_REVISION
+      if (
+        currentId === ESTADO_INGRESADO ||
+        currentId === ESTADO_VISTA ||
+        currentId === ESTADO_EN_REVISION
+      ) {
+        toStatusId = ESTADO_EN_REPARACION;
+      }
+      // Si ya está en EN_REPARACION o más adelante → no hace nada
+    }
+
+    if (!toStatusId) return;
+
+    const fromStatusId = currentId;
+    const fromStatusName = order.currentStatus?.name ?? '';
+
+    const toStatus = await this.orderRepo.manager.findOne(OrderStatus, {
+      where: { id: toStatusId },
+    });
+
+    if (!toStatus) return;
+
+    // Actualizar la orden
+    await this.orderRepo.update(orderId, { current_status_id: toStatusId });
+
+    // Registrar historial
+    const history = this.orderStatusHistoryRepository.create({
+      order_id: orderId,
+      from_status_id: fromStatusId,
+      to_status_id: toStatusId,
+      changed_by_id: userId,
+      company_id: companyId,
+      branch_id: branchId,
+      observation: 'Cambio automático por acción en la orden',
+    });
+    await this.orderStatusHistoryRepository.save(history);
+
+    // Emitir notificación y broadcast
+    const userEntity = await this.userCacheService.getUserById(userId, companyId);
+
+    await this.emitNotification(
+      orderId,
+      companyId,
+      userId,
+      'status_changed',
+      'Se actualizó el estado de la orden automáticamente',
+    );
+
+    await this.broadcastService.publishOrderUpdated(orderId, 'status_changed', {
+      currentStatus: {
+        id: toStatusId,
+        name: toStatus.name,
+      },
+      statusHistoryEntry: {
+        id: history.id,
+        fromStatus: { id: fromStatusId, name: fromStatusName },
+        toStatus: { id: toStatusId, name: toStatus.name },
+        changedBy: mapUser(userEntity),
+        observation: history.observation ?? null,
+        changed_at: history.changed_at,
+      },
+    });
+  }
+
 }
 
 function mapUser(u: any) {
@@ -2029,4 +2179,7 @@ function mapUser(u: any) {
     ...(u.email !== undefined && { email: u.email }),
     ...(u.phone !== undefined && { phone: u.phone }),
   };
+
+
+
 }

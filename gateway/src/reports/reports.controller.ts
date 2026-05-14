@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Get, Query, ParseIntPipe, Param, DefaultValuePipe } from '@nestjs/common';
+import { Body, Controller, Post, Get, Query, ParseIntPipe, Param, DefaultValuePipe, Patch } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
@@ -47,5 +47,14 @@ export class ReportsController {
     @User() user: any,
   ) {
     return this.reportsService.getDashboardDrill(user, card, page, limit);
+  }
+
+  @Patch('validations/:id')
+  async toggleValidation(
+    @Param('id') id: string,
+    @Body('is_checked') isChecked: boolean,
+    @User() user: any,
+  ) {
+    return this.reportsService.toggleOrderValidation(id, isChecked, user);
   }
 }

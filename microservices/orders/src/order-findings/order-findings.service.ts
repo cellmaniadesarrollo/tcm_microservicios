@@ -103,7 +103,13 @@ export class OrderFindingsService {
       'finding_added',
       'Se agregó un Hallazgo a la orden',
     );
-
+    await this.orderWorkflow.autoAdvanceStatus(
+      order.id,
+      user.companyId,
+      user.branchId,
+      user.userId,
+      'finding_created',
+    );
     return {
       success: true,
       message: 'Hallazgo registrado correctamente',
@@ -187,7 +193,13 @@ export class OrderFindingsService {
       'procedure_added',
       'Se agregó un Procedimiento a un Hallazgo',
     );
-
+    await this.orderWorkflow.autoAdvanceStatus(
+      orderId,
+      user.companyId,
+      user.branchId,
+      user.userId,
+      'procedure_created',
+    );
     return {
       success: true,
       message: 'Procedimiento guardado correctamente',

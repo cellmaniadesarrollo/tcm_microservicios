@@ -77,8 +77,7 @@ export class OrderWorkflowController {
   @MessagePattern({ cmd: 'change_order_status' })
   async changeOrderStatus(@Payload() data: any) {
     try {
-      // 1. Log inicial para ver si el mensaje llega al MS
-      console.log('📥 MS Órdenes - Payload recibido:', JSON.stringify(data, null, 2));
+
 
       // 2. Validación manual rápida (por si el Pipe falla silenciosamente)
       if (!data.dto || !data.user) {
