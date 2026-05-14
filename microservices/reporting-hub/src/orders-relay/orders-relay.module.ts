@@ -7,6 +7,7 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { OrderStatus, OrderStatusSchema } from './schemas/order-status.schema';
 import { OrderType, OrderTypeSchema } from './schemas/order-type.schema';
+import { OrderValidationModule } from '../order-validation/order-validation.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { OrderType, OrderTypeSchema } from './schemas/order-type.schema';
         },
       },
     ]),
+    OrderValidationModule
   ],
   controllers: [OrdersRelayController],
   providers: [OrdersRelayService, OrdersEventsListener],
