@@ -33,6 +33,34 @@ export class NotificationsController {
     return this.notificationsService.getUnreadCount(data.userId);
   }
 
+  // ✅ NUEVO: Obtener notificaciones filtradas por el CREADOR de la orden
+  @MessagePattern({ cmd: 'get_notifications_by_creator' })
+  async getNotificationsByCreator(@Payload() data: {
+    createdById: string;
+    page?: number;
+    limit?: number;
+    onlyUnread?: boolean;
+    companyId?: string;
+  }) {
+    console.log(`📥 [Notifications] get_notifications_by_creator - createdById: ${data.createdById}, onlyUnread: ${data.onlyUnread}`);
+    const result = await this.notificationsService.getNotificationsByCreator(
+      data.createdById,
+      data.page,
+      data.limit,
+      data.onlyUnread || false,
+      data.companyId,
+    );
+    console.log(`✅ [Notifications] Respuesta: ${result.notifications?.length || 0} notificaciones, ${result.unreadCount} no leídas`);
+    return result;
+  }
+
+  // ✅ NUEVO: Obtener contador de no leídas por CREADOR (para badge del navbar)
+  @MessagePattern({ cmd: 'get_unread_count_by_creator' })
+  async getUnreadCountByCreator(@Payload() data: { createdById: string }) {
+    console.log(`📊 [Notifications] get_unread_count_by_creator - createdById: ${data.createdById}`);
+    return this.notificationsService.getUnreadCountByCreator(data.createdById);
+  }
+
   // 🆕 Obtener órdenes estancadas
   @MessagePattern({ cmd: 'get_current_stuck_orders' })
   async getCurrentStuckOrders(@Payload() data: { 
@@ -95,7 +123,7 @@ export class NotificationsController {
     return this.notificationsService.getAuditStats(data.companyId, data.startDate, data.endDate);
   }
 
-  // 🎯 Escuchar eventos de RabbitMQ - USAR EL NUEVO MÉTODO
+  // 🎯 Escuchar eventos de RabbitMQ
   @EventPattern('order.created')
   async handleOrderCreated(@Payload() event: any, @Ctx() context: RmqContext) {
     console.log(`📨 Evento recibido: order.created`);

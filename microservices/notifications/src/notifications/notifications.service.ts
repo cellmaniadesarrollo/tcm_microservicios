@@ -36,7 +36,20 @@ export class NotificationsService {
     const userId = orderEvent.userId || orderEvent.changed_by;
     const newStatus = orderData.status || orderEvent.newValue?.status || 'INGRESADO';
     const action = orderEvent.action || 'created';
-    
+
+    // ✅ FIX: userId es la fuente primaria (es quien crea/modifica la orden)
+    // Misma lógica que usa changedBy en statusHistory
+    const createdById = orderEvent.userId
+      || orderEvent.created_by_id
+      || orderEvent.createdById
+      || orderData.createdById
+      || null;
+
+    const createdByName = orderEvent.userName
+      || orderEvent.created_by
+      || orderData.createdBy
+      || 'Sistema';
+
     // Verificar si ya existe una notificación para esta orden
     let notification = await this.notificationModel.findOne({ 
       entityType: 'order', 
@@ -71,6 +84,11 @@ export class NotificationsService {
         _id: new Types.UUID().toString(),
         userId: userId,
         companyId: orderEvent.company_id,
+
+        // ✅ createdById = userId (mismo valor que changedBy en statusHistory)
+        createdById: createdById,
+        createdByName: createdByName,
+
         title,
         message: baseMessage,
         type: action === 'created' ? 'success' : 'info',
@@ -86,7 +104,8 @@ export class NotificationsService {
           device,
           detalleIngreso,
           technicians,
-          createdBy: orderEvent.userName || orderEvent.created_by,
+          createdBy: createdByName,
+          createdById: createdById,
           createdAt: orderEvent.timestamp
         },
         metadata: {
@@ -122,7 +141,6 @@ export class NotificationsService {
     const oldStatus = notification.currentStatus;
     
     if (oldStatus !== newStatus || action === 'updated') {
-      // Agregar al historial de estados
       const statusEntry: StatusHistoryEntry = {
         status: newStatus,
         changedBy: userId,
@@ -136,8 +154,13 @@ export class NotificationsService {
       notification.action = action;
       notification.newValues = { status: newStatus };
       notification.actionDescription = orderEvent.description || `Estado cambiado a ${newStatus}`;
+
+      // Rellenar createdById si estaba vacío (parche para docs anteriores)
+      if (!notification.createdById && createdById) {
+        notification.createdById = createdById;
+        notification.createdByName = createdByName;
+      }
       
-      // Actualizar el mensaje con el historial
       const statusHistoryText = notification.statusHistory
         .map(h => `  • ${new Date(h.changedAt).toLocaleString()} → ${h.status} (por ${h.changedByName})`)
         .join('\n');
@@ -166,9 +189,7 @@ export class NotificationsService {
     const skip = (page - 1) * limit;
     
     const query: any = { userId };
-    if (onlyUnread) {
-      query.read = false;
-    }
+    if (onlyUnread) query.read = false;
     
     const [notifications, total] = await Promise.all([
       this.notificationModel
@@ -188,6 +209,46 @@ export class NotificationsService {
       notifications,
       unreadCount: await this.getUnreadCount(userId)
     };
+  }
+
+  // ✅ OBTENER notificaciones filtradas por el creador de la orden
+  async getNotificationsByCreator(
+    createdById: string,
+    page: number = 1,
+    limit: number = 20,
+    onlyUnread: boolean = false,
+    companyId?: string,
+  ) {
+    const skip = (page - 1) * limit;
+
+    const query: any = { createdById };
+    if (onlyUnread) query.read = false;
+    if (companyId) query.companyId = companyId;
+
+    const [notifications, total, unreadCount] = await Promise.all([
+      this.notificationModel
+        .find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.notificationModel.countDocuments(query),
+      this.notificationModel.countDocuments({ createdById, read: false }),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications,
+      unreadCount,
+    };
+  }
+
+  // ✅ OBTENER contador de no leídas por creador
+  async getUnreadCountByCreator(createdById: string) {
+    return this.notificationModel.countDocuments({ createdById, read: false });
   }
 
   // 🔹 OBTENER órdenes estancadas (usando currentStatus)
@@ -215,7 +276,9 @@ export class NotificationsService {
       daysStuck: Math.floor((Date.now() - new Date(order.createdAt).getTime()) / (1000 * 60 * 60 * 24)),
       device: order.orderData?.device,
       technicians: order.orderData?.technicians,
-      statusHistory: order.statusHistory
+      statusHistory: order.statusHistory,
+      createdById: order.createdById,
+      createdByName: order.createdByName,
     }));
     
     console.log(`📊 [getCurrentStuckOrders] Usuario: ${userId}, Estado: ${targetStatus}, Días: ${minDays}`);
@@ -324,7 +387,9 @@ export class NotificationsService {
       currentStatus: notification.currentStatus,
       orderData: notification.orderData,
       lastViewedAt: notification.lastViewedAt,
-      createdAt: notification.createdAt
+      createdAt: notification.createdAt,
+      createdById: notification.createdById,
+      createdByName: notification.createdByName,
     };
   }
 
@@ -353,6 +418,8 @@ export class NotificationsService {
       statusHistory: record.statusHistory,
       currentStatus: record.currentStatus,
       metadata: record.metadata,
+      createdById: record.createdById,
+      createdByName: record.createdByName,
     }));
   }
 
@@ -363,6 +430,7 @@ export class NotificationsService {
     if (filters.entityId) query.entityId = filters.entityId;
     if (filters.action) query.action = filters.action;
     if (filters.userId) query.userId = filters.userId;
+    if (filters.createdById) query.createdById = filters.createdById;
     if (filters.startDate || filters.endDate) {
       query.createdAt = {};
       if (filters.startDate) query.createdAt.$gte = filters.startDate;

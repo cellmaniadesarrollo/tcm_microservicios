@@ -27,6 +27,8 @@ export class OrdersRelayService {
       createdBy: data.createdBy
         ? `${data.createdBy.first_name} ${data.createdBy.last_name}`
         : undefined,
+      // ✅ NUEVO: ID del creador también dentro de orderData
+      createdById: data.createdBy?.id ?? undefined,
       createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
     };
   }
@@ -58,6 +60,11 @@ export class OrdersRelayService {
       currentStatus: data.currentStatus?.name ?? '',
       statusHistory: this.buildStatusHistory(data),
       orderData: this.buildOrderData(data),
+      // ✅ NUEVO: createdById y createdByName en la raíz del documento
+      createdById: data.createdBy?.id ?? undefined,
+      createdByName: data.createdBy
+        ? `${data.createdBy.first_name} ${data.createdBy.last_name}`.trim()
+        : undefined,
       metadata: {
         orderId: data.id,
         orderNumber: data.order_number,
@@ -70,105 +77,108 @@ export class OrdersRelayService {
 
   // ─── Sync completo de orden ─────────────────────────────────────────────────
 
-    async syncOrder(data: any): Promise<void> {
+  async syncOrder(data: any): Promise<void> {
     console.log('[syncOrder] data:', JSON.stringify(data, null, 2));
 
     const base = this.buildBaseNotification(data, {
-        action: 'order_created',
-        actionDescription: `Orden #${data.order_number} ingresada con estado ${data.currentStatus?.name}`,
+      action: 'order_created',
+      actionDescription: `Orden #${data.order_number} ingresada con estado ${data.currentStatus?.name}`,
     });
 
     const docs: Partial<Notification>[] = [];
 
     if (data.createdBy?.id) {
-        docs.push({
+      docs.push({
         ...base,
         userId: data.createdBy.id,
         title: `Orden #${data.order_number} creada`,
         message: `Creaste la orden para ${base.orderData!.customerName}. Estado: ${data.currentStatus?.name}.`,
-        });
+      });
     }
 
     for (const tech of data.technicians ?? []) {
-        if (!tech.id) continue;
-        docs.push({
+      if (!tech.id) continue;
+      docs.push({
         ...base,
         userId: tech.id,
         title: `Nueva orden asignada #${data.order_number}`,
         message: `Se te asignó la orden de ${base.orderData!.customerName} (${base.orderData!.device?.model?.models_name ?? 'dispositivo'}). Detalle: ${data.detalleIngreso ?? '-'}.`,
-        });
+      });
     }
 
     if (docs.length === 0) {
-        console.warn('[syncOrder] Sin destinatarios, no se generaron notificaciones');
-        return;
+      console.warn('[syncOrder] Sin destinatarios, no se generaron notificaciones');
+      return;
     }
 
     await Promise.all(docs.map((doc) => this.upsertNotification(doc)));
     console.log(`[syncOrder] ${docs.length} notificación(es) upserted para orden #${data.order_number}`);
-    }
+  }
 
-    // ─── Upsert de una sola notificación ────────────────────────────────────────
+  // ─── Upsert de una sola notificación ────────────────────────────────────────
 
-    private async upsertNotification(doc: Partial<Notification>): Promise<void> {
+  private async upsertNotification(doc: Partial<Notification>): Promise<void> {
     await this.notificationModel.findOneAndUpdate(
-        {
+      {
         userId: doc.userId,
         entityType: doc.entityType,
         entityId: doc.entityId,
-        },
-        {
+      },
+      {
         $set: {
-            currentStatus: doc.currentStatus,
-            statusHistory: doc.statusHistory,
-            orderData: doc.orderData,
-            metadata: doc.metadata,
-            updatedAt: new Date(),
+          currentStatus: doc.currentStatus,
+          statusHistory: doc.statusHistory,
+          orderData: doc.orderData,
+          metadata: doc.metadata,
+          updatedAt: new Date(),
         },
         $setOnInsert: {
-            // Solo se escriben la primera vez
-            companyId: doc.companyId,
-            userId: doc.userId,
-            title: doc.title,
-            message: doc.message,
-            type: doc.type,
-            read: false,
-            action: doc.action,
-            actionDescription: doc.actionDescription,
-            entityType: doc.entityType,
-            entityId: doc.entityId,
-            createdAt: new Date(),
+          // Solo se escriben la primera vez
+          companyId: doc.companyId,
+          userId: doc.userId,
+          // ✅ NUEVO: persistir createdById y createdByName al insertar
+          createdById: doc.createdById ?? undefined,
+          createdByName: doc.createdByName ?? undefined,
+          title: doc.title,
+          message: doc.message,
+          type: doc.type,
+          read: false,
+          action: doc.action,
+          actionDescription: doc.actionDescription,
+          entityType: doc.entityType,
+          entityId: doc.entityId,
+          createdAt: new Date(),
         },
-        },
-        { upsert: true, new: true },
+      },
+      { upsert: true, new: true },
     );
-    }
+  }
 
   // ─── Sync bulk ──────────────────────────────────────────────────────────────
 
-    async syncOrdersBulk(orders: any[]): Promise<void> {
+  async syncOrdersBulk(orders: any[]): Promise<void> {
     console.log('[syncOrdersBulk] orders.length:', orders?.length);
 
     if (!orders?.length) {
-        console.log('[syncOrdersBulk] No hay órdenes para sincronizar');
-        return;
+      console.log('[syncOrdersBulk] No hay órdenes para sincronizar');
+      return;
     }
 
     let synced = 0;
     let failed = 0;
 
     for (const order of orders) {
-        try {
+      try {
         await this.syncOrder(order);
         synced++;
-        } catch (err: any) {
+      } catch (err: any) {
         failed++;
         console.error(`[syncOrdersBulk] Error en orden #${order?.order_number}: ${err.message}`);
-        }
+      }
     }
 
     console.log(`[syncOrdersBulk] ✅ ${synced} órdenes sincronizadas, ❌ ${failed} fallidas`);
-    }
+  }
 
   // ─── Último updatedAt conocido (para paginación incremental) ────────────────
 
@@ -195,8 +205,6 @@ export class OrdersRelayService {
 
       case 'status_changed':
       case 'closed': {
-        // Actualiza el currentStatus en todas las notificaciones de esta orden
-        // y agrega la nueva entrada al historial
         const newEntry = {
           status: payload.currentStatus?.name ?? '',
           changedBy: payload.statusHistoryEntry?.changedBy?.id ?? '',
@@ -218,7 +226,6 @@ export class OrdersRelayService {
 
       case 'note_added':
         console.log('[applyUpdate:note_added] note:', JSON.stringify(payload.note, null, 2));
-        // Extiende aquí si quieres notificar al técnico/creador sobre la nueva nota
         break;
 
       case 'note_updated':
