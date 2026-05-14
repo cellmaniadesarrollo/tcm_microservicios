@@ -519,32 +519,74 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.currentStatus', 'currentStatus')
         .leftJoinAndSelect('order.createdBy', 'createdBy')
         .leftJoinAndSelect('order.technicians', 'technicians')
-        // ─── NOTAS ──────────────────────────────────────────────
-        .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', {
-          deleted: false,
-        })
+        .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
         .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
-        // ────────────────────────────────────────────────────────
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
         .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
-        .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', {
-          findingActive: true,
-        })
+        .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = :findingActive', { findingActive: true })
         .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
-        .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', {
-          procActive: true,
-        })
+        .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
         .leftJoinAndSelect('procedures.performedBy', 'performedBy')
         .where('order.id = :orderId', { orderId })
         .andWhere('order.company_id = :companyId', { companyId: user.companyId })
         .orderBy('findings.createdAt', 'ASC')
         .addOrderBy('payments.paid_at', 'ASC')
         .getOne();
+
       if (!order) {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
       }
+
+      // ─── CAMBIO AUTOMÁTICO: INGRESADO → VISTA ───────────────────────────────
+      const ESTADO_INGRESADO = 1;
+      const ESTADO_VISTA = 2;
+
+      if (order.currentStatus?.id === ESTADO_INGRESADO) {
+        const historyEntry = this.orderStatusHistoryRepository.create({
+          order_id: order.id,
+          from_status_id: ESTADO_INGRESADO,
+          to_status_id: ESTADO_VISTA,
+          changed_by_id: user.userId,
+          company_id: user.companyId,
+          branch_id: user.branchId,
+          observation: 'Cambio automático al visualizar la orden',
+        });
+        await this.orderStatusHistoryRepository.save(historyEntry);
+
+        await this.orderRepo.update(order.id, { current_status_id: ESTADO_VISTA });
+
+        order.currentStatus = { id: ESTADO_VISTA, name: 'VISTA' } as OrderStatus;
+        order.current_status_id = ESTADO_VISTA;
+
+        // ─── EMITIR CAMBIO DE ESTADO ─────────────────────────────────────────
+        const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
+
+        await this.emitNotification(
+          order.id,
+          user.companyId,
+          user.userId,
+          'status_changed',
+          'Se actualizó el estado de la orden',
+        );
+
+        await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
+          currentStatus: {
+            id: ESTADO_VISTA,
+            name: 'VISTA',
+          },
+          statusHistoryEntry: {
+            id: historyEntry.id,
+            fromStatus: { id: ESTADO_INGRESADO, name: 'INGRESADO' },
+            toStatus: { id: ESTADO_VISTA, name: 'VISTA' },
+            changedBy: mapUser(userEntity),
+            observation: historyEntry.observation ?? null,
+            changed_at: historyEntry.changed_at,
+          },
+        });
+      }
+      // ────────────────────────────────────────────────────────────────────────
 
       // Ordenamiento en memoria de procedimientos dentro de cada finding
       order.findings?.forEach((finding) => {
@@ -552,38 +594,21 @@ export class OrderWorkflowService {
       });
 
       // ─── CARGA MANUAL DE ATTACHMENTS ────────────────────────────────────────
-
-      const findingIds = order.findings?.length
-        ? order.findings.map((f) => f.id)
-        : [];
-
+      const findingIds = order.findings?.length ? order.findings.map((f) => f.id) : [];
       const procedureIds = order.findings?.length
         ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
         : [];
 
-      // Siempre incluimos los attachments de la orden
       const whereConditions: any[] = [
-        {
-          entity_type: AttachmentEntityType.ORDER,
-          entity_id: order.id,
-          is_active: true,
-        },
+        { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
       ];
 
       if (findingIds.length) {
-        whereConditions.push({
-          entity_type: AttachmentEntityType.FINDING,
-          entity_id: In(findingIds),
-          is_active: true,
-        });
+        whereConditions.push({ entity_type: AttachmentEntityType.FINDING, entity_id: In(findingIds), is_active: true });
       }
 
       if (procedureIds.length) {
-        whereConditions.push({
-          entity_type: AttachmentEntityType.PROCEDURE,
-          entity_id: In(procedureIds),
-          is_active: true,
-        });
+        whereConditions.push({ entity_type: AttachmentEntityType.PROCEDURE, entity_id: In(procedureIds), is_active: true });
       }
 
       const allAttachments = await this.attachmentRepository.find({
@@ -591,7 +616,6 @@ export class OrderWorkflowService {
         order: { createdAt: 'ASC' },
       });
 
-      // Construir mapa key: "ENTITY_TYPE_id" → Attachment[]
       const attachmentsMap = new Map<string, Attachment[]>();
       allAttachments.forEach((att) => {
         const key = `${att.entity_type}_${att.entity_id}`;
@@ -599,26 +623,17 @@ export class OrderWorkflowService {
         attachmentsMap.get(key)!.push(att);
       });
 
-      // Attachments de la orden
-      const orderKey = `${AttachmentEntityType.ORDER}_${order.id}`;
-      (order as any).attachments = attachmentsMap.get(orderKey) || [];
+      (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) || [];
 
-      // Attachments de findings y procedimientos
       order.findings?.forEach((finding) => {
-        const findingKey = `${AttachmentEntityType.FINDING}_${finding.id}`;
-        finding.attachments = attachmentsMap.get(findingKey) || [];
-
+        finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) || [];
         finding.procedures?.forEach((proc) => {
-          const procKey = `${AttachmentEntityType.PROCEDURE}_${proc.id}`;
-          proc.attachments = attachmentsMap.get(procKey) || [];
+          proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) || [];
         });
       });
 
-
-
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
-      // ─── FIRMADO DE URLs ─────────────────────────────────────────────────────
       await this.enrichAttachmentsWithSignedUrls(order);
 
       return order;
@@ -695,11 +710,11 @@ export class OrderWorkflowService {
   ) {
     const { orderId, toStatusId, observation } = dto;
 
+    const ESTADO_INGRESADO = 1;
+    const ESTADO_VISTA = 2;
+
     const order = await this.orderRepo.findOne({
-      where: {
-        id: orderId,
-        company_id: user.companyId,
-      },
+      where: { id: orderId, company_id: user.companyId },
       relations: ['currentStatus'],
     });
 
@@ -712,7 +727,18 @@ export class OrderWorkflowService {
     const fromStatusId = order.current_status_id;
     const fromStatusName = order.currentStatus?.name ?? '';
 
-    // Buscar el nombre del nuevo estado
+    // ─── VALIDACIÓN DE REGRESIÓN DE ESTADOS ─────────────────────────────────
+    // Nunca se puede regresar a INGRESADO
+    if (toStatusId === ESTADO_INGRESADO) {
+      throw new BadRequestException('No se puede regresar una orden al estado INGRESADO');
+    }
+
+    // Si la orden ya pasó de VISTA, no se puede regresar a VISTA
+    if (toStatusId === ESTADO_VISTA && fromStatusId > ESTADO_VISTA) {
+      throw new BadRequestException('No se puede regresar una orden al estado VISTA');
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     const toStatus = await this.orderRepo.manager.findOne(OrderStatus, {
       where: { id: toStatusId },
     });
@@ -735,7 +761,6 @@ export class OrderWorkflowService {
 
     await this.orderStatusHistoryRepository.save(history);
 
-    // Obtener usuario completo para el snapshot
     const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
     await this.emitNotification(
@@ -835,7 +860,7 @@ export class OrderWorkflowService {
 
       // 2. Validación de estado (regla de dominio común)
       // Ejemplo: no permitir pagos en órdenes ya entregadas o canceladas
-      if (['ENTREGADO', 'CANCELADO'].includes(order.currentStatus?.name ?? '')) {
+      if (['ENTREGADA'].includes(order.currentStatus?.name ?? '')) {
         throw new RpcException(
           new BadRequestException('No se pueden registrar pagos en órdenes entregadas o canceladas'),
         );
@@ -950,12 +975,12 @@ export class OrderWorkflowService {
       if (order.current_status_id !== 7) {
         throw new RpcException(
           new BadRequestException(
-            `Solo se puede cerrar órdenes en estado TRABAJO_FINALIZADO. Estado actual: ${order.currentStatus?.name ?? 'desconocido'}`,
+            `Solo se puede cerrar órdenes en estado TRABAJO FINALIZADO. Estado actual: ${order.currentStatus?.name ?? 'desconocido'}`,
           ),
         );
       }
 
-      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO_FINALIZADO';
+      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
       const isOutgoing = order.order_type_id === 3;
       const deliveryRepo = manager.getRepository(OrderDelivery);
       const deliveredAt = new Date();
@@ -1064,11 +1089,11 @@ export class OrderWorkflowService {
     );
 
     await this.broadcastService.publishOrderUpdated(dto.orderId, 'closed', {
-      currentStatus: { id: 8, name: 'CERRADO' },
+      currentStatus: { id: 8, name: 'ENTREGADA' },
       statusHistoryEntry: {
         id: result.historyId,
         fromStatus: { id: 7, name: result.fromStatusName },
-        toStatus: { id: 8, name: 'CERRADO' },
+        toStatus: { id: 8, name: 'ENTREGADA' },
         changedBy: mapUser(userEntity),
         observation: result.observationText,
         changed_at: new Date(),
@@ -2042,6 +2067,105 @@ export class OrderWorkflowService {
     };
   }
 
+
+
+  // En OrderWorkflowService
+
+  async autoAdvanceStatus(
+    orderId: number,
+    companyId: string,
+    branchId: string,
+    userId: string,
+    trigger: 'finding_created' | 'procedure_created',
+  ): Promise<void> {
+    const ESTADO_INGRESADO = 1;
+    const ESTADO_VISTA = 2;
+    const ESTADO_EN_REVISION = 3;
+    const ESTADO_EN_REPARACION = 6;
+
+    const order = await this.orderRepo.findOne({
+      where: { id: orderId, company_id: companyId },
+      relations: ['currentStatus'],
+    });
+
+    if (!order) return;
+
+    const currentId = order.current_status_id;
+
+    // Determinar el estado destino según el trigger y estado actual
+    let toStatusId: number | null = null;
+
+    if (trigger === 'finding_created') {
+      // Solo avanza si está en INGRESADO o VISTA
+      if (currentId === ESTADO_INGRESADO || currentId === ESTADO_VISTA) {
+        toStatusId = ESTADO_EN_REVISION;
+      }
+      // Si ya está en EN_REPARACION o más adelante → no hace nada
+    } else if (trigger === 'procedure_created') {
+      // Solo avanza si está en INGRESADO, VISTA o EN_REVISION
+      if (
+        currentId === ESTADO_INGRESADO ||
+        currentId === ESTADO_VISTA ||
+        currentId === ESTADO_EN_REVISION
+      ) {
+        toStatusId = ESTADO_EN_REPARACION;
+      }
+      // Si ya está en EN_REPARACION o más adelante → no hace nada
+    }
+
+    if (!toStatusId) return;
+
+    const fromStatusId = currentId;
+    const fromStatusName = order.currentStatus?.name ?? '';
+
+    const toStatus = await this.orderRepo.manager.findOne(OrderStatus, {
+      where: { id: toStatusId },
+    });
+
+    if (!toStatus) return;
+
+    // Actualizar la orden
+    await this.orderRepo.update(orderId, { current_status_id: toStatusId });
+
+    // Registrar historial
+    const history = this.orderStatusHistoryRepository.create({
+      order_id: orderId,
+      from_status_id: fromStatusId,
+      to_status_id: toStatusId,
+      changed_by_id: userId,
+      company_id: companyId,
+      branch_id: branchId,
+      observation: 'Cambio automático por acción en la orden',
+    });
+    await this.orderStatusHistoryRepository.save(history);
+
+    // Emitir notificación y broadcast
+    const userEntity = await this.userCacheService.getUserById(userId, companyId);
+
+    await this.emitNotification(
+      orderId,
+      companyId,
+      userId,
+      'status_changed',
+      'Se actualizó el estado de la orden automáticamente',
+    );
+
+    await this.broadcastService.publishOrderUpdated(orderId, 'status_changed', {
+      currentStatus: {
+        id: toStatusId,
+        name: toStatus.name,
+      },
+      statusHistoryEntry: {
+        id: history.id,
+        fromStatus: { id: fromStatusId, name: fromStatusName },
+        toStatus: { id: toStatusId, name: toStatus.name },
+        changedBy: mapUser(userEntity),
+        observation: history.observation ?? null,
+        changed_at: history.changed_at,
+      },
+    });
+  }
+
 }
 
 function mapUser(u: any) {
@@ -2055,4 +2179,7 @@ function mapUser(u: any) {
     ...(u.email !== undefined && { email: u.email }),
     ...(u.phone !== undefined && { phone: u.phone }),
   };
+
+
+
 }
