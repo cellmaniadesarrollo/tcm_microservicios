@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, PipelineStage } from 'mongoose';
 
 import { OrderStatus, OrderStatusDocument } from '../orders-relay/schemas/order-status.schema';
 import { OrderType, OrderTypeDocument } from '../orders-relay/schemas/order-type.schema';
@@ -31,7 +31,6 @@ export class OrdersReportsService {
         @InjectModel(OrderReplica.name)
         private orderReplicaModel: Model<OrderReplicaDocument>,
     ) { }
-
 
     async getDashboardDrill(
         companyId: string,
@@ -101,55 +100,80 @@ export class OrdersReportsService {
             global_delivered: { 'currentStatus.id': { $in: [8] } },
         };
 
-        // ── Tarjetas que necesitan datos de validación ───────────────────────────
-        const FINISH_CARDS: DrillCardKey[] = [
-            'today_delivered', 'week_delivered', 'month_delivered',
-            'global_delivered',
+        const DELIVERED_CARDS: DrillCardKey[] = [
+            'today_delivered', 'week_delivered', 'month_delivered', 'global_delivered',
         ];
-        const includeValidation = FINISH_CARDS.includes(card as DrillCardKey);
+
+        // ── Ambos flags se derivan del mismo array ────────────────────────────────
+        const isDeliveredCard = DELIVERED_CARDS.includes(card as DrillCardKey);
 
         const matchStage: Record<string, any> = {
             'company.id': companyId,
             ...strategies[card as DrillCardKey],
         };
 
-        const dataaaa = await this._executeDrillPipeline(matchStage, page, limit, includeValidation);
-
-        return dataaaa
+        return this._executeDrillPipeline(
+            matchStage,
+            page,
+            limit,
+            isDeliveredCard,   // includeValidation
+            isDeliveredCard,   // sortByDelivered
+        );
     }
-
-    // ─── Pipeline ─────────────────────────────────────────────────────────────────
     private async _executeDrillPipeline(
         matchStage: Record<string, any>,
         page: number,
         limit: number,
-        includeValidation = false,   // ← nuevo flag
+        includeValidation = false,
+        sortByDelivered = false,
     ): Promise<{ data: any[]; total: number }> {
 
         const skip = (page - 1) * limit;
         const now = new Date();
 
-        // $lookup opcional — solo se inyecta para tarjetas finish
-        const lookupStage = includeValidation
+        const lookupStage: PipelineStage[] = includeValidation
+            ? [{ $lookup: { from: 'order_validations', localField: 'id', foreignField: 'order_id', as: '_validation' } }]
+            : [];
+
+        const deliveredAtStage: PipelineStage[] = sortByDelivered
             ? [{
-                $lookup: {
-                    from: 'order_validations',
-                    localField: 'id',   // number en la orden
-                    foreignField: 'order_id',        // number en OrderValidation
-                    as: '_validation',
+                $addFields: {
+                    delivered_at: {
+                        $max: {
+                            $map: {
+                                input: {
+                                    $filter: {
+                                        input: { $ifNull: ['$statusHistory', []] },
+                                        as: 'h',
+                                        cond: { $eq: ['$$h.toStatus.id', 8] },
+                                    },
+                                },
+                                as: 'h',
+                                in: '$$h.changed_at',
+                            },
+                        },
+                    },
                 },
             }]
             : [];
 
-        // Proyección del campo validation (solo cuando aplica)
+        const sortStage: PipelineStage = sortByDelivered
+            ? { $sort: { delivered_at: -1 } }
+            : { $sort: { entry_date: -1 } };
+
         const validationProjection = includeValidation
             ? { _validation: { $arrayElemAt: ['$_validation', 0] } }
             : {};
 
+        const deliveredAtProjection = sortByDelivered
+            ? { delivered_at: 1 }
+            : {};
+
         const [result] = await this.orderReplicaModel.aggregate([
             { $match: matchStage },
-            ...lookupStage,              // ← se agrega antes del sort/facet
-            { $sort: { entry_date: -1 } },
+            ...lookupStage,
+            ...deliveredAtStage,
+            sortStage,
             {
                 $facet: {
                     total: [{ $count: 'count' }],
@@ -166,7 +190,8 @@ export class OrdersReportsService {
                                 technicians: 1, entry_date: 1,
                                 estimated_price: 1, statusHistory: 1,
                                 findings: 1, payments: 1,
-                                ...validationProjection,  // ← se proyecta solo cuando aplica
+                                ...validationProjection,
+                                ...deliveredAtProjection,
                             },
                         },
                     ],
@@ -184,10 +209,12 @@ export class OrdersReportsService {
                 .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
             [0]?.changed_at ?? null;
 
-            const completedAt = order.statusHistory
-                ?.filter(h => h.toStatus?.id === 8)
-                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
-            [0]?.changed_at ?? null;
+            const completedAt = order.delivered_at          // ← del $addFields si aplica
+                ?? order.statusHistory
+                    ?.filter(h => h.toStatus?.id === 8)
+                    .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+                [0]?.changed_at
+                ?? null;
 
             const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
                 sumF + (finding.procedures?.reduce((sumP, proc) =>
@@ -213,7 +240,6 @@ export class OrdersReportsService {
                 }),
             ) ?? false;
 
-            // ── Datos de validación (solo presentes en tarjetas finish) ───────────
             const validation = order._validation
                 ? {
                     _id: order._validation._id,
@@ -240,7 +266,7 @@ export class OrdersReportsService {
                 total_paid: totalPaid,
                 findings_summary: findingsSummary,
                 has_active_warranty: hasActiveWarranty,
-                validation,             // ← null para tarjetas no-finish
+                validation,
             };
         });
 
