@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { OrderReplica, OrderReplicaDocument } from './schemas/order-replica.schema';
 import { OrderStatus, OrderStatusDocument } from './schemas/order-status.schema';
 import { OrderType, OrderTypeDocument } from './schemas/order-type.schema';
+import { OrderValidationService } from '../order-validation/order-validation.service';
 
 @Injectable()
 export class OrdersRelayService {
@@ -14,6 +15,7 @@ export class OrdersRelayService {
         private readonly orderStatusModel: Model<OrderStatusDocument>,
         @InjectModel(OrderType.name)
         private readonly orderTypeModel: Model<OrderTypeDocument>,
+        private readonly orderValidationService: OrderValidationService,
     ) { }
     async getLastUpdatedAt(): Promise<Date | null> {
         const result = await this.orderModel
@@ -96,6 +98,10 @@ export class OrdersRelayService {
                         }),
                     },
                 );
+                // ── Si la orden pasa a ENTREGADA, crear su registro de validación ──
+                if (payload.currentStatus.id === 8) {
+                    await this.orderValidationService.createForDeliveredOrder(orderId);
+                }
                 break;
 
             // ── Notas ────────────────────────────────────────────────────────────────
