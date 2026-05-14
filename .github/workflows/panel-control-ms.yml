@@ -9,11 +9,11 @@ on:
         default: 'deploy_smart'
         type: choice
         options:
-          - deploy_smart      # Solo lo que cambió (Detección automática)
-          - deploy_force      # Rebuild + Up (Forzar un servicio o todos)
-          - restart_only      # Solo Reiniciar (Sin rebuild)
-          - view_logs         # Ver logs (Últimas 100 líneas)
-      
+          - deploy_smart
+          - deploy_force
+          - restart_only
+          - view_logs
+
       target_service:
         description: 'Selecciona el microservicio'
         required: true
@@ -27,10 +27,14 @@ on:
           - clients
           - orders
           - subscriptions
-          - reporting-hub
+          - reports
           - realtime
           - notifications
           - notification-dispatcher
+          # ── Infraestructura (solo logs/restart, nunca deploy) ──
+          - kafka
+          - rabbitmq
+          - init-kafka
 
 jobs:
   control_panel:
@@ -47,11 +51,18 @@ jobs:
           script: |
             set -e
             cd /home/ubuntu/proyects/tcm_microservicios || exit 1
-            
+
             ACTION="${{ github.event.inputs.action_type }}"
             SERVICE="${{ github.event.inputs.target_service }}"
 
-            # --- 1. ACCIÓN: VER LOGS ---
+            # Servicios de infraestructura: solo logs/restart, nunca deploy
+            INFRA_SERVICES="kafka rabbitmq init-kafka"
+
+            is_infra() {
+              echo "$INFRA_SERVICES" | grep -qw "$1"
+            }
+
+            # --- 1. VER LOGS ---
             if [ "$ACTION" == "view_logs" ]; then
               if [ "$SERVICE" == "all" ]; then
                 echo "📋 Mostrando logs globales (resumen)..."
@@ -63,7 +74,7 @@ jobs:
               exit 0
             fi
 
-            # --- 2. ACCIÓN: REINICIAR (SIN REBUILD) ---
+            # --- 2. REINICIAR (SIN REBUILD) ---
             if [ "$ACTION" == "restart_only" ]; then
               if [ "$SERVICE" == "all" ]; then
                 echo "♻️ Reiniciando TODO el stack..."
@@ -75,22 +86,38 @@ jobs:
               exit 0
             fi
 
-            # --- 3. ACCIÓN: DESPLIEGUE (SMART O FORZADO) ---
+            # --- 3. DESPLIEGUE (SMART O FORZADO) ---
+
+            # Bloquear deploy directo a servicios de infraestructura
+            if is_infra "$SERVICE"; then
+              echo "🚫 '$SERVICE' es un servicio de infraestructura."
+              echo "   Usa restart_only o view_logs para este servicio."
+              exit 1
+            fi
+
             cd docker
             SERVICES_TO_PROCESS=""
+
+            # Solo microservicios de aplicación (kafka/rabbitmq/init-kafka excluidos)
+            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications gateway"
 
             if [ "$ACTION" == "deploy_smart" ]; then
               echo "🔍 Analizando cambios automáticos..."
               cd ..
               CHANGED=$(git diff --name-only HEAD HEAD~1)
               cd docker
-              
+
               declare -A PATHS=(
-                ["gateway"]="gateway/" ["users"]="microservices/users/" 
-                ["companies"]="microservices/companies/" ["clients"]="microservices/clients/" 
-                ["orders"]="microservices/orders/" ["subscriptions"]="microservices/subscriptions/" 
-                ["reporting-hub"]="microservices/reporting-hub/" ["realtime"]="realtime/"
-                ["notifications"]="microservices/notifications/" ["notification-dispatcher"]="microservices/notification-dispatcher/"
+                ["gateway"]="gateway/"
+                ["users"]="microservices/users/"
+                ["companies"]="microservices/companies/"
+                ["clients"]="microservices/clients/"
+                ["orders"]="microservices/orders/"
+                ["subscriptions"]="microservices/subscriptions/"
+                ["reports"]="microservices/reporting-hub/"
+                ["realtime"]="realtime/"
+                ["notifications"]="microservices/notifications/"
+                ["notification-dispatcher"]="microservices/notification-dispatcher/"
               )
 
               for MS in "${!PATHS[@]}"; do
@@ -101,12 +128,12 @@ jobs:
 
               if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|Dockerfile)'; then
                 echo "⚠️ Cambio estructural: Se procesará todo."
-                SERVICES_TO_PROCESS="companies users clients subscriptions orders reporting-hub realtime notification-dispatcher notifications gateway"
+                SERVICES_TO_PROCESS="$ALL_SERVICES"
               fi
-            
+
             elif [ "$ACTION" == "deploy_force" ]; then
               if [ "$SERVICE" == "all" ]; then
-                SERVICES_TO_PROCESS="companies users clients subscriptions orders reporting-hub realtime notification-dispatcher notifications gateway"
+                SERVICES_TO_PROCESS="$ALL_SERVICES"
               else
                 SERVICES_TO_PROCESS="$SERVICE"
               fi
@@ -121,8 +148,7 @@ jobs:
             for MS in $SERVICES_TO_PROCESS; do
               echo "🔨 Procesando $MS (Build + Recreate)..."
               docker compose -f compose.prod.yml up -d --build --force-recreate "$MS"
-              
-              # Pausas dinámicas según el servicio
+
               case "$MS" in
                 gateway|realtime) sleep 12 ;;
                 *) sleep 8 ;;
