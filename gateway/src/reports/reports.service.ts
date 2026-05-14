@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Body, Inject, Injectable, Param, Patch } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { GetOrdersFilterDto } from './dto/get-orders-filter.dto.gateway';
@@ -76,6 +76,21 @@ export class ReportsService {
                     card,
                     page,
                     limit,
+                },
+            ),
+        );
+    }
+
+
+    async toggleOrderValidation(validationId: string, isChecked: boolean, user: any) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'toggle_order_validation' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    validationId,
+                    isChecked,
+                    user,
                 },
             ),
         );
