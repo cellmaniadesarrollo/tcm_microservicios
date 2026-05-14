@@ -1,140 +1,26 @@
-name: Deploy to EC2 on Push
+name: Sync Files to EC2
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  deploy:
+  sync:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Deploy to EC2 via SSH
+      - name: Sync via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
-          command_timeout: 50m
           script: |
-            set -e
             cd /home/ubuntu/proyects/tcm_microservicios || exit 1
-
-            echo "🚀 Iniciando despliegue inteligente..."
-
-            # 1. Actualizar código
+            # Actualizamos la referencia de git para que el servidor sepa qué hay de nuevo
             git fetch origin main
-            CHANGED=$(git diff --name-only HEAD origin/main)
-            echo "Archivos cambiados:"
-            echo "$CHANGED"
             git reset --hard origin/main
-
-            cd docker
-
-            # 2. Infraestructura crítica
-            echo "🔧 Levantando infraestructura crítica..."
-            for SVC in redis rabbitmq kafka; do
-              if ! docker compose -f compose.prod.yml ps --status running | grep -q "$SVC"; then
-                echo "⚠️ $SVC no está corriendo → levantando"
-                docker compose -f compose.prod.yml up -d $SVC
-              else
-                echo "✅ $SVC ya está corriendo"
-              fi
-            done
-
-            # Sincronizar tópicos Kafka
-            echo "📡 Sincronizando tópicos Kafka..."
-            docker compose -f compose.prod.yml up -d init-kafka
-            timeout 90 docker compose -f compose.prod.yml wait init-kafka || true
-
-            # 3. Orden prioritario de despliegue
-            declare -a DEPLOY_ORDER=(
-              "companies"
-              "users"
-              "clients"
-              "subscriptions"
-              "orders"
-              "reports"
-              "realtime"
-              "notification-dispatcher"
-              "notifications"
-              "gateway"
-            )
-
-            # 4. Detectar cambios
-            SERVICES_TO_UPDATE=""
-            declare -A SERVICE_PATHS=(
-              ["gateway"]="gateway/"
-              ["users"]="microservices/users/"
-              ["companies"]="microservices/companies/"
-              ["clients"]="microservices/clients/"
-              ["orders"]="microservices/orders/"
-              ["subscriptions"]="microservices/subscriptions/"
-              ["reports"]="microservices/reporting-hub/"
-              ["realtime"]="realtime/"
-              ["notification-dispatcher"]="microservices/notification-dispatcher/"
-              ["notifications"]="microservices/notifications/"
-            )
-
-            echo "🔍 Analizando cambios..."
-            for SERVICE in "${!SERVICE_PATHS[@]}"; do
-              PATH_PATTERN="${SERVICE_PATHS[$SERVICE]}"
-              if echo "$CHANGED" | grep -q "$PATH_PATTERN"; then
-                echo "🔄 $SERVICE tiene cambios"
-                SERVICES_TO_UPDATE="$SERVICES_TO_UPDATE $SERVICE"
-              fi
-            done
-
-            # ✅ Cambios solo en .github/workflows/ o docker/ NO redespliegam microservicios
-            # Solo se redespliega todo si cambia compose.prod.yml o un Dockerfile de microservicio
-            if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|microservices/.*/Dockerfile|gateway/Dockerfile|realtime/Dockerfile)'; then
-              echo "⚠️ Cambio en compose o Dockerfile → actualizando todos los servicios"
-              SERVICES_TO_UPDATE="companies users clients orders subscriptions reports realtime notification-dispatcher notifications gateway"
-            fi
-
-            if [ -z "$(echo $SERVICES_TO_UPDATE | xargs)" ]; then
-              echo "✅ No hay cambios en microservicios. Despliegue finalizado."
-              exit 0
-            fi
-
-            # 5. Ordenar según prioridad
-            echo "📋 Servicios a actualizar: $SERVICES_TO_UPDATE"
-            SERVICES_TO_UPDATE_SORTED=""
-            for SVC in "${DEPLOY_ORDER[@]}"; do
-              if echo "$SERVICES_TO_UPDATE" | grep -qw "$SVC"; then
-                SERVICES_TO_UPDATE_SORTED="$SERVICES_TO_UPDATE_SORTED $SVC"
-              fi
-            done
-
-            echo "🔄 Orden de despliegue: $SERVICES_TO_UPDATE_SORTED"
-
-            # 6. Despliegue uno por uno
-            for SERVICE in $SERVICES_TO_UPDATE_SORTED; do
-              echo "========================================"
-              echo "🔨 Construyendo: $SERVICE"
-              echo "========================================"
-
-              docker compose -f compose.prod.yml build "$SERVICE"
-
-              echo "🚢 Levantando: $SERVICE"
-              docker compose -f compose.prod.yml up -d --force-recreate "$SERVICE"
-              echo "✅ $SERVICE desplegado"
-
-              # Pausas para que el servicio levante antes del siguiente
-              case "$SERVICE" in
-                users|companies|clients|subscriptions|orders)
-                  sleep 10 ;;
-                notification-dispatcher|reports|notifications)
-                  sleep 7 ;;
-                realtime|gateway)
-                  sleep 12 ;;
-              esac
-            done
-
-            # 7. Limpieza
-            docker image prune -f
-            echo "🎉 Despliegue completado exitosamente."
+            echo "✅ Archivos sincronizados. El sistema está listo para el despliegue manual."
