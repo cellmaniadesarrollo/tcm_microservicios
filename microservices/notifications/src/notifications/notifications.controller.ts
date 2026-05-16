@@ -123,11 +123,70 @@ export class NotificationsController {
     return this.notificationsService.getAuditStats(data.companyId, data.startDate, data.endDate);
   }
 
-  // 🎯 Escuchar eventos de RabbitMQ
+  // ✅ NUEVO: Actualizar observaciones de una notificación
+  @MessagePattern({ cmd: 'update_observations' })
+  async updateObservations(@Payload() data: { id: string; observations: string }) {
+    console.log(`📝 [Notifications] update_observations - id: ${data.id}`);
+    const result = await this.notificationsService.updateObservations(data.id, data.observations);
+    console.log(`✅ [Notifications] Observaciones actualizadas`);
+    return result;
+  }
+
+  // ✅ NUEVO: Reagendar una notificación
+  @MessagePattern({ cmd: 'reschedule_notification' })
+  async rescheduleNotification(@Payload() data: { 
+    id: string; 
+    scheduledFor: Date; 
+    observations?: string 
+  }) {
+    console.log(`📅 [Notifications] reschedule_notification - id: ${data.id}, scheduledFor: ${data.scheduledFor}`);
+    const result = await this.notificationsService.rescheduleNotification(
+      data.id, 
+      data.scheduledFor, 
+      data.observations
+    );
+    console.log(`✅ [Notifications] Notificación reagendada para: ${data.scheduledFor}`);
+    return result;
+  }
+
+  // ✅ NUEVO: Obtener notificaciones pendientes (para worker/scheduler)
+  @MessagePattern({ cmd: 'get_scheduled_notifications' })
+  async getScheduledNotifications(@Payload() data: { currentDate?: Date }) {
+    console.log(`⏰ [Notifications] get_scheduled_notifications - date: ${data.currentDate || new Date()}`);
+    const result = await this.notificationsService.getScheduledNotifications(data.currentDate);
+    console.log(`✅ [Notifications] Encontradas: ${result.length} notificaciones pendientes`);
+    return result;
+  }
+
+  // ✅ NUEVO: Obtener notificaciones futuras (programadas)
+  @MessagePattern({ cmd: 'get_future_notifications' })
+  async getFutureNotifications(@Payload() data: { page?: number; limit?: number }) {
+    console.log(`📅 [Notifications] get_future_notifications - page: ${data.page}, limit: ${data.limit}`);
+    const result = await this.notificationsService.getFutureNotifications(data.page, data.limit);
+    console.log(`✅ [Notifications] Total futuras: ${result.total}`);
+    return result;
+  }
+
+  // ✅ NUEVO: Cancelar programación (enviar inmediatamente)
+  @MessagePattern({ cmd: 'cancel_scheduling' })
+  async cancelScheduling(@Payload() data: { id: string }) {
+    console.log(`⏰ [Notifications] cancel_scheduling - id: ${data.id}`);
+    const result = await this.notificationsService.cancelScheduling(data.id);
+    console.log(`✅ [Notifications] Programación cancelada, notificación visible ahora`);
+    return result;
+  }
+
+  // 🎯 Escuchar eventos de RabbitMQ (con soporte para scheduledFor y observations)
   @EventPattern('order.created')
   async handleOrderCreated(@Payload() event: any, @Ctx() context: RmqContext) {
     console.log(`📨 Evento recibido: order.created`);
-    await this.notificationsService.createOrUpdateFromOrderEvent({ ...event, action: 'created' });
+    // ✅ Soporte para scheduledFor y observations desde el evento
+    await this.notificationsService.createOrUpdateFromOrderEvent({ 
+      ...event, 
+      action: 'created',
+      scheduledFor: event.scheduledFor || null,
+      observations: event.observations || null
+    });
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     channel.ack(originalMsg);
@@ -136,7 +195,12 @@ export class NotificationsController {
   @EventPattern('order.updated')
   async handleOrderUpdated(@Payload() event: any, @Ctx() context: RmqContext) {
     console.log(`📨 Evento recibido: order.updated`);
-    await this.notificationsService.createOrUpdateFromOrderEvent({ ...event, action: 'updated' });
+    await this.notificationsService.createOrUpdateFromOrderEvent({ 
+      ...event, 
+      action: 'updated',
+      scheduledFor: event.scheduledFor || null,
+      observations: event.observations || null
+    });
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     channel.ack(originalMsg);
@@ -145,7 +209,12 @@ export class NotificationsController {
   @EventPattern('order.status_changed')
   async handleOrderStatusChanged(@Payload() event: any, @Ctx() context: RmqContext) {
     console.log(`📨 Evento recibido: order.status_changed`);
-    await this.notificationsService.createOrUpdateFromOrderEvent({ ...event, action: 'status_changed' });
+    await this.notificationsService.createOrUpdateFromOrderEvent({ 
+      ...event, 
+      action: 'status_changed',
+      scheduledFor: event.scheduledFor || null,
+      observations: event.observations || null
+    });
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     channel.ack(originalMsg);
@@ -154,7 +223,12 @@ export class NotificationsController {
   @EventPattern('order.viewed')
   async handleOrderViewed(@Payload() event: any, @Ctx() context: RmqContext) {
     console.log(`📨 Evento recibido: order.viewed`);
-    await this.notificationsService.createOrUpdateFromOrderEvent({ ...event, action: 'viewed' });
+    await this.notificationsService.createOrUpdateFromOrderEvent({ 
+      ...event, 
+      action: 'viewed',
+      scheduledFor: event.scheduledFor || null,
+      observations: event.observations || null
+    });
     const channel = context.getChannelRef();
     const originalMsg = context.getMessage();
     channel.ack(originalMsg);

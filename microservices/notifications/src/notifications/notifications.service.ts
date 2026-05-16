@@ -19,6 +19,9 @@ export class NotificationsService {
       readHistory: [],
       viewsCount: 0,
       createdAt: new Date(),
+      // ✅ Soporte para los nuevos campos
+      observations: createDto.observations || null,
+      scheduledFor: createDto.scheduledFor || null,
     });
     return await notification.save();
   }
@@ -38,7 +41,6 @@ export class NotificationsService {
     const action = orderEvent.action || 'created';
 
     // ✅ FIX: userId es la fuente primaria (es quien crea/modifica la orden)
-    // Misma lógica que usa changedBy en statusHistory
     const createdById = orderEvent.userId
       || orderEvent.created_by_id
       || orderEvent.createdById
@@ -79,16 +81,16 @@ export class NotificationsService {
       `📅 **Fecha creación:** ${new Date(orderEvent.timestamp).toLocaleString()}`;
     
     if (!notification) {
-      // CREAR nueva notificación (primera vez)
+      // ✅ CREAR nueva notificación con soporte para scheduledFor y observations
+      const scheduledFor = orderEvent.scheduledFor || null;
+      const observations = orderEvent.observations || null;
+
       notification = new this.notificationModel({
         _id: new Types.UUID().toString(),
         userId: userId,
         companyId: orderEvent.company_id,
-
-        // ✅ createdById = userId (mismo valor que changedBy en statusHistory)
         createdById: createdById,
         createdByName: createdByName,
-
         title,
         message: baseMessage,
         type: action === 'created' ? 'success' : 'info',
@@ -123,6 +125,9 @@ export class NotificationsService {
         readHistory: [],
         viewsCount: 0,
         createdAt: new Date(),
+        // ✅ Nuevos campos
+        observations: observations,
+        scheduledFor: scheduledFor,
       });
       
       // Agregar estado inicial al historial
@@ -174,12 +179,103 @@ export class NotificationsService {
     return notification;
   }
 
-  // Mantener método original para compatibilidad
-  async createFromOrderEvent(orderEvent: any) {
-    return this.createOrUpdateFromOrderEvent(orderEvent);
+  // ✅ NUEVO MÉTODO: Actualizar observaciones de una notificación
+  async updateObservations(id: string, observations: string) {
+    const notification = await this.notificationModel.findOneAndUpdate(
+      { _id: id },
+      { 
+        observations: observations,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+
+    return notification;
   }
 
-  // 🔹 OBTENER notificaciones de un usuario
+  // ✅ NUEVO MÉTODO: Reagendar una notificación
+  async rescheduleNotification(id: string, scheduledFor: Date, observations?: string) {
+    const updateData: any = {
+      scheduledFor: scheduledFor,
+      updatedAt: new Date()
+    };
+
+    if (observations) {
+      updateData.observations = observations;
+    }
+
+    const notification = await this.notificationModel.findOneAndUpdate(
+      { _id: id },
+      updateData,
+      { new: true }
+    );
+
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+
+    return notification;
+  }
+
+  // ✅ NUEVO MÉTODO: Obtener notificaciones pendientes por fecha programada
+  async getScheduledNotifications(currentDate: Date = new Date()) {
+    return await this.notificationModel.find({
+      scheduledFor: { $lte: currentDate },
+      read: false
+    }).sort({ scheduledFor: 1 });
+  }
+
+  // ✅ NUEVO MÉTODO: Obtener notificaciones futuras (programadas)
+  async getFutureNotifications(page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+    const currentDate = new Date();
+
+    const query = {
+      scheduledFor: { $gt: currentDate }
+    };
+
+    const [notifications, total] = await Promise.all([
+      this.notificationModel
+        .find(query)
+        .sort({ scheduledFor: 1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.notificationModel.countDocuments(query),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications,
+    };
+  }
+
+  // ✅ NUEVO MÉTODO: Cancelar programación (enviar inmediatamente)
+  async cancelScheduling(id: string) {
+    const notification = await this.notificationModel.findOneAndUpdate(
+      { _id: id },
+      { 
+        scheduledFor: null,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+
+    return notification;
+  }
+
+  // 🔹 OBTENER notificaciones de un usuario (solo las que deben mostrarse)
   async getUserNotifications(
     userId: string, 
     page: number = 1, 
@@ -187,8 +283,19 @@ export class NotificationsService {
     onlyUnread: boolean = false
   ) {
     const skip = (page - 1) * limit;
+    const currentDate = new Date();
     
-    const query: any = { userId };
+    // ✅ Solo mostrar notificaciones que:
+    // 1. Son del usuario
+    // 2. No tienen fecha programada O la fecha programada ya pasó
+    const query: any = { 
+      userId,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
+    };
+    
     if (onlyUnread) query.read = false;
     
     const [notifications, total] = await Promise.all([
@@ -220,8 +327,16 @@ export class NotificationsService {
     companyId?: string,
   ) {
     const skip = (page - 1) * limit;
+    const currentDate = new Date();
 
-    const query: any = { createdById };
+    const query: any = { 
+      createdById,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
+    };
+    
     if (onlyUnread) query.read = false;
     if (companyId) query.companyId = companyId;
 
@@ -248,7 +363,15 @@ export class NotificationsService {
 
   // ✅ OBTENER contador de no leídas por creador
   async getUnreadCountByCreator(createdById: string) {
-    return this.notificationModel.countDocuments({ createdById, read: false });
+    const currentDate = new Date();
+    return this.notificationModel.countDocuments({ 
+      createdById, 
+      read: false,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
+    });
   }
 
   // 🔹 OBTENER órdenes estancadas (usando currentStatus)
@@ -279,6 +402,8 @@ export class NotificationsService {
       statusHistory: order.statusHistory,
       createdById: order.createdById,
       createdByName: order.createdByName,
+      observations: order.observations, // ✅ Incluir observaciones
+      scheduledFor: order.scheduledFor, // ✅ Incluir fecha programada
     }));
     
     console.log(`📊 [getCurrentStuckOrders] Usuario: ${userId}, Estado: ${targetStatus}, Días: ${minDays}`);
@@ -294,9 +419,14 @@ export class NotificationsService {
 
   // 🔹 OBTENER contador de notificaciones NO LEÍDAS
   async getUnreadCount(userId: string) {
+    const currentDate = new Date();
     return await this.notificationModel.countDocuments({ 
       userId, 
-      read: false 
+      read: false,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
     });
   }
 
@@ -390,6 +520,8 @@ export class NotificationsService {
       createdAt: notification.createdAt,
       createdById: notification.createdById,
       createdByName: notification.createdByName,
+      observations: notification.observations, // ✅ Incluir observaciones
+      scheduledFor: notification.scheduledFor, // ✅ Incluir fecha programada
     };
   }
 
@@ -420,6 +552,8 @@ export class NotificationsService {
       metadata: record.metadata,
       createdById: record.createdById,
       createdByName: record.createdByName,
+      observations: record.observations, // ✅ Incluir observaciones
+      scheduledFor: record.scheduledFor, // ✅ Incluir fecha programada
     }));
   }
 

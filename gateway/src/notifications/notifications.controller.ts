@@ -24,19 +24,19 @@ export class NotificationsController {
     return this.notificationsService.getUnreadCount(userId);
   }
 
-@Get('user/:userId/stuck')
-async getCurrentStuckOrders(
-  @Param('userId') userId: string,
-  @Query('status') status?: string,
-  @Query('days') days?: string,  // ← Recibir como string
-) {
-  const daysNum = days !== undefined ? parseInt(days, 10) : 3;  // ← Validar específicamente
-  return this.notificationsService.getCurrentStuckOrders(
-    userId,
-    status || 'INGRESADO',
-    daysNum
-  );
-}
+  @Get('user/:userId/stuck')
+  async getCurrentStuckOrders(
+    @Param('userId') userId: string,
+    @Query('status') status?: string,
+    @Query('days') days?: string,  // ← Recibir como string
+  ) {
+    const daysNum = days !== undefined ? parseInt(days, 10) : 3;  // ← Validar específicamente
+    return this.notificationsService.getCurrentStuckOrders(
+      userId,
+      status || 'INGRESADO',
+      daysNum
+    );
+  }
 
   // GET /notifications/audit/:entityType/:entityId
   @Get('audit/:entityType/:entityId')
@@ -65,5 +65,50 @@ async getCurrentStuckOrders(
     @Body() body: { userId: string; actionData: any },
   ) {
     return this.notificationsService.trackAccess(id, body.userId, body.actionData);
+  }
+
+    // ============================================
+  // ✅ NUEVOS ENDPOINTS PARA OBSERVACIONES Y PROGRAMACIÓN
+  // ============================================
+
+  // PATCH /notifications/:id/observations
+  @Patch(':id/observations')
+  async updateObservations(
+    @Param('id') id: string,
+    @Body('observations') observations: string,
+  ) {
+    return this.notificationsService.updateObservations(id, observations);
+  }
+
+  // PATCH /notifications/:id/reschedule
+  @Patch(':id/reschedule')
+  async rescheduleNotification(
+    @Param('id') id: string,
+    @Body('scheduledFor') scheduledFor: Date,
+    @Body('observations') observations?: string,
+  ) {
+    return this.notificationsService.rescheduleNotification(id, scheduledFor, observations);
+  }
+
+  // PATCH /notifications/:id/cancel-scheduling
+  @Patch(':id/cancel-scheduling')
+  async cancelScheduling(@Param('id') id: string) {
+    return this.notificationsService.cancelScheduling(id);
+  }
+
+  // GET /notifications/scheduled/pending
+  @Get('scheduled/pending')
+  async getScheduledNotifications(@Query('currentDate') currentDate?: string) {
+    const date = currentDate ? new Date(currentDate) : new Date();
+    return this.notificationsService.getScheduledNotifications(date);
+  }
+
+  // GET /notifications/scheduled/future
+  @Get('scheduled/future')
+  async getFutureNotifications(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.notificationsService.getFutureNotifications(page, limit);
   }
 }
