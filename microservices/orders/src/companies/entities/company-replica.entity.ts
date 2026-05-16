@@ -12,28 +12,28 @@ import { UserEmployeeCache } from '../../users-employees-events/entities/user_em
 @Entity('companies_replica')
 export class CompanyReplica {
   @PrimaryColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ unique: true })
-  name: string;
+  name!: string;
 
   @Column({ default: true })
-  status: boolean;
+  status!: boolean;
 
   @Column({ type: 'int', default: 5 })
-  maxUsers: number;
+  maxUsers!: number;
 
   @OneToMany(() => BranchReplica, branch => branch.company, {
     cascade: true,
   })
-  branches: BranchReplica[];
+  branches!: BranchReplica[];
 
   // ⏱️ Fechas replicadas, NO generadas
   @Column({ type: 'timestamp', nullable: true })
-  createdAt: Date;
+  createdAt!: Date;
 
   @Column({ type: 'timestamp', nullable: true })
-  updatedAt: Date;
+  updatedAt!: Date;
   @OneToMany(() => UserEmployeeCache, user => user.company)
-  users: UserEmployeeCache[];
+  users!: UserEmployeeCache[];
 } 
