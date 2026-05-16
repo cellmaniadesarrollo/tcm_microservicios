@@ -8,6 +8,9 @@ import { UserEmployeeCache, UserEmployeeCacheDocument } from '../users-employees
 
 const ENTREGADA_STATUS_ID = 8;
 
+// Zona horaria de la empresa. Muévelo a ConfigService si manejas multi-zona.
+const DEFAULT_TIMEZONE = 'America/Guayaquil'; // UTC-5, sin DST
+
 @Injectable()
 export class OrderValidationService implements OnModuleInit {
     private readonly logger = new Logger(OrderValidationService.name);
@@ -18,6 +21,7 @@ export class OrderValidationService implements OnModuleInit {
 
         @InjectModel(OrderReplica.name)
         private readonly orderReplicaModel: Model<OrderReplicaDocument>,
+
         @InjectModel(UserEmployeeCache.name)
         private readonly userCacheModel: Model<UserEmployeeCacheDocument>,
     ) { }
@@ -72,8 +76,8 @@ export class OrderValidationService implements OnModuleInit {
 
         this.logger.log(`Creando validaciones para ${pending.length} orden(es)...`);
 
-        // 3. Agrupar por fecha de entrega real (último cambio a ENTREGADA en statusHistory)
-        //    Si por alguna razón no tiene historial, cae en el día de hoy
+        // 3. Agrupar por fecha de entrega real en zona horaria local.
+        //    Usa el último cambio a ENTREGADA del statusHistory; si no existe, fecha actual.
         const groupsByDate = new Map<string, typeof pending>();
 
         for (const order of pending) {
@@ -81,6 +85,7 @@ export class OrderValidationService implements OnModuleInit {
                 .reverse()
                 .find((h) => h.toStatus?.id === ENTREGADA_STATUS_ID);
 
+            // ✅ toDateKey convierte a zona local antes de extraer YYYY-MM-DD
             const deliveredAt = deliveredEntry?.changed_at ?? new Date();
             const dateKey = this.toDateKey(deliveredAt);
 
@@ -125,12 +130,14 @@ export class OrderValidationService implements OnModuleInit {
         this.logger.log(`✔ ${result.length} validación(es) creadas correctamente.`);
     }
 
+    // ─── Create ───────────────────────────────────────────────────────────────
 
     /**
- * Crea el registro de validación cuando una orden pasa a estado ENTREGADA.
- * Si ya existe (reintento de evento), simplemente lo ignora.
- */
+     * Crea el registro de validación cuando una orden pasa a estado ENTREGADA.
+     * Si ya existe (reintento de evento), simplemente lo ignora.
+     */
     async createForDeliveredOrder(orderId: number): Promise<void> {
+        // ✅ Usa la fecha local (zona horaria Ecuador) en lugar de UTC
         const dateKey = this.toDateKey(new Date());
 
         const last = await this.validationModel
@@ -161,10 +168,7 @@ export class OrderValidationService implements OnModuleInit {
         }
     }
 
-    private toDateKey(date: Date): string {
-        return date.toISOString().slice(0, 10);
-    }
-
+    // ─── Toggle ───────────────────────────────────────────────────────────────
 
     async toggleIsChecked(
         validationId: string,
@@ -198,5 +202,19 @@ export class OrderValidationService implements OnModuleInit {
         });
 
         return doc.save();
+    }
+
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
+    /**
+     * Convierte una fecha a string YYYY-MM-DD respetando la zona horaria local.
+     * `en-CA` produce exactamente ese formato sin necesidad de slice ni padding manual.
+     *
+     * Ejemplo con UTC-5 (Ecuador):
+     *   new Date('2026-05-14T00:18:00Z') → "2026-05-13"  ✅
+     *   new Date('2026-05-14T05:30:00Z') → "2026-05-14"  ✅
+     */
+    private toDateKey(date: Date, tz: string = DEFAULT_TIMEZONE): string {
+        return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(date);
     }
 }

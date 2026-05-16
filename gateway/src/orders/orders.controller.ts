@@ -276,6 +276,7 @@ export class OrdersController {
 
   @Post('list')
   async listOrders(@Body() dto: ListOrdersGatewayDto, @User() user: any) {
+
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'list_orders' },
@@ -744,6 +745,22 @@ export class OrdersController {
       this.CustomerService.send(
         { cmd: 'check_warranty_by_imei' },
         { dto: { imei } },
+      ),
+    );
+  }
+
+
+  @Get('search-history')
+  async getSearchHistory(@User() user: any) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_search_history' },
+        {
+          user: {
+            userId: user.sub,
+            companyId: user.companyId,
+          },
+        },
       ),
     );
   }

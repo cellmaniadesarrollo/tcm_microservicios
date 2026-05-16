@@ -35,6 +35,7 @@ import { UsersEmployeesEventsService } from '../users-employees-events/users-emp
 import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { ConnectableObservable } from 'rxjs';
+import { SearchHistoryService } from '../search-history/search-history.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -68,6 +69,7 @@ export class OrderWorkflowService {
     private readonly notificationsService: NotificationsService,
     private readonly userCacheService: UsersEmployeesEventsService,
     private readonly broadcastService: BroadcastService,
+    private readonly searchHistoryService: SearchHistoryService,
   ) { }
 
   async createOrder(
@@ -398,6 +400,19 @@ export class OrderWorkflowService {
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.createdAt', 'DESC')
       .getMany();
+
+
+    if (search && search.trim() !== '') {
+      // fire-and-forget: no hace await para no añadir latencia al response
+      this.searchHistoryService
+        .saveFromSearch({
+          companyId: user.companyId,
+          userId: user.userId,
+          searchTerm: search.trim(),
+          resultCount: total,          // viene de getManyAndCount()
+          searchType: 'order',
+        })
+    }
     return {
       data,
       total,
@@ -406,6 +421,7 @@ export class OrderWorkflowService {
       totalPages: Math.ceil(total / limit),
     };
   }
+
   async listMyOrders(
     user: { companyId: string; branchId: string; userId: string },
     dto: any,

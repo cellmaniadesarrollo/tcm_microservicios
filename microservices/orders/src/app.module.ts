@@ -16,6 +16,8 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { KafkaModule } from './kafka/kafka.module';
 import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
+import { SearchHistoryModule } from './search-history/search-history.module';
+
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -29,7 +31,9 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
       synchronize: true,
     }), CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule,
     MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule,
-    HealthModule],
+    HealthModule,
+    SearchHistoryModule,
+  ],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],
 })
