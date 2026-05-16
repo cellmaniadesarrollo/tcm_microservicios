@@ -610,16 +610,8 @@ export class OrdersReportsService {
     // ── CASHIERS ──────────────────────────────────────────────────────────────────
     // En getDashboard, pasar userId al cashier
     private async getCashierDashboard(companyId: string, userId: string): Promise<any> {
-        const now = new Date();
-        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const todayEnd = new Date(todayStart.getTime() + 86_400_000);
-
-        // Lunes y domingo de la semana anterior
-        const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); // 1=lun … 7=dom
-        const lastMonday = new Date(todayStart);
-        lastMonday.setDate(todayStart.getDate() - dayOfWeek - 6);
-        const lastSunday = new Date(lastMonday);
-        lastSunday.setDate(lastMonday.getDate() + 7);
+        const { todayStart, todayEnd } = this._dayBoundaries();
+        const { lastMondayUTC, lastSundayUTC, lastMondayLocal } = this._lastWeekBoundaries();
 
         const [todayData, lastWeekData] = await Promise.all([
 
@@ -637,7 +629,7 @@ export class OrdersReportsService {
                         _id: null,
                         ingresadas: { $sum: 1 },
                         entregadas: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] }
+                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
                         },
                     },
                 },
@@ -649,17 +641,21 @@ export class OrdersReportsService {
                     $match: {
                         'company.id': companyId,
                         'createdBy.id': userId,
-                        entry_date: { $gte: lastMonday, $lt: lastSunday },
+                        entry_date: { $gte: lastMondayUTC, $lt: lastSundayUTC },
                     },
                 },
                 {
                     $group: {
                         _id: {
-                            $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' }
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$entry_date',
+                                timezone: 'America/Guayaquil',
+                            },
                         },
                         ingresadas: { $sum: 1 },
                         entregadas: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] }
+                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
                         },
                     },
                 },
@@ -667,11 +663,10 @@ export class OrdersReportsService {
             ]),
         ]);
 
-        // Rellenar los 7 días aunque no tengan datos
         const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
         const byDay = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(lastMonday);
-            d.setDate(lastMonday.getDate() + i);
+            const d = new Date(lastMondayLocal);
+            d.setDate(lastMondayLocal.getDate() + i);
             const key = d.toISOString().split('T')[0];
             const found = lastWeekData.find((r: any) => r._id === key);
             return {
@@ -716,7 +711,29 @@ export class OrdersReportsService {
         const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
         return { todayStart, todayEnd };
     }
+    private _lastWeekBoundaries(): { lastMondayUTC: Date; lastSundayUTC: Date; lastMondayLocal: Date } {
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
+        const CUT_HOUR = 3;
 
+        const nowLocal = new Date(new Date().getTime() + GYE_OFFSET_MS);
+
+        const baseLocal = new Date(nowLocal);
+        if (nowLocal.getHours() < CUT_HOUR) baseLocal.setDate(baseLocal.getDate() - 1);
+        baseLocal.setHours(CUT_HOUR, 0, 0, 0);
+
+        const dow = baseLocal.getDay() === 0 ? 7 : baseLocal.getDay(); // 1=Lun … 7=Dom
+        const lastMondayLocal = new Date(baseLocal);
+        lastMondayLocal.setDate(baseLocal.getDate() - dow - 6);
+
+        const lastSundayLocal = new Date(lastMondayLocal);
+        lastSundayLocal.setDate(lastMondayLocal.getDate() + 7);
+
+        return {
+            lastMondayUTC: new Date(lastMondayLocal.getTime() - GYE_OFFSET_MS),
+            lastSundayUTC: new Date(lastSundayLocal.getTime() - GYE_OFFSET_MS),
+            lastMondayLocal, // necesario para generar las keys del byDay
+        };
+    }
     // ── Estadísticas de un período: órdenes ingresadas + cobros registrados ───────
     private async _periodStats(companyId: string, from: Date, to: Date) {
         const [orders, payments] = await Promise.all([
