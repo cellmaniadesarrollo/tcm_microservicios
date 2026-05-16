@@ -128,6 +128,14 @@ export class Notification {
   @Prop({ type: Array, default: [] })
   readHistory: ReadHistoryEntry[];
 
+  // 🆕 CAMPO DE OBSERVACIONES (texto libre para notas internas)
+  @Prop({ type: String, default: null })
+  observations: string;
+
+  // 🆕 FECHA PROGRAMADA PARA NOTIFICACIÓN (reagendado)
+  @Prop({ type: Date, default: null, index: true })
+  scheduledFor: Date;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 
@@ -149,3 +157,7 @@ NotificationSchema.index({ action: 1 });
 NotificationSchema.index({ createdById: 1, createdAt: -1 });
 NotificationSchema.index({ createdById: 1, read: 1, createdAt: -1 });
 NotificationSchema.index({ createdById: 1, companyId: 1, createdAt: -1 });
+
+// 🆕 Índice para filtrar por fecha programada
+NotificationSchema.index({ scheduledFor: 1, createdAt: -1 });
+NotificationSchema.index({ scheduledFor: 1, read: 1 });
