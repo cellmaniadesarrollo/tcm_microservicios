@@ -16,6 +16,8 @@ import { UserEmployeeCache, UserEmployeeCacheSchema } from '../users-employees-e
     ],
     controllers: [OrderValidationController],
     providers: [OrderValidationService],
-    exports: [OrderValidationService]
+    exports: [OrderValidationService, MongooseModule.forFeature([
+        { name: OrderValidation.name, schema: OrderValidationSchema }
+    ]),]
 })
 export class OrderValidationModule { }

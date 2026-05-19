@@ -84,4 +84,21 @@ export class OrdersReportsController {
       data.limit,
     );
   }
+  @MessagePattern({ cmd: 'get_admin_dashboard_range' })
+  async getAdminDashboardRange(data: {
+    user: {
+      userId: string;
+      companyId: string;
+      // branchId?: string;
+    };
+    from: string;
+    to: string;
+  }) {
+    return this.ordersReportsService.getAdminDashboardRange(
+      data.user.companyId,
+      data.from,
+      data.to
+    );
+  }
+
 }
