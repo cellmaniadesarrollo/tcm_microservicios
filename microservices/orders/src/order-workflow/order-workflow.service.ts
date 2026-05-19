@@ -314,7 +314,10 @@ export class OrderWorkflowService {
     const paginatedQb = this.orderRepo
       .createQueryBuilder('o')
       .leftJoin('o.customer', 'c')
-      .leftJoin('c.contacts', 'contact')
+      .leftJoin('o.device', 'device')
+      .leftJoin('device.model', 'deviceModel')
+      .leftJoin('deviceModel.brand', 'deviceBrand')
+      .leftJoin('device.imeis', 'imei')
       .select(['o.id', 'o.createdAt'])
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
@@ -323,45 +326,48 @@ export class OrderWorkflowService {
       const cleanSearch = search.trim();
 
       if (cleanSearch.startsWith('#')) {
+        // Caso 1: Número de orden explícito → #123
         const orderNumberStr = cleanSearch.slice(1).trim();
-
         if (orderNumberStr !== '' && !isNaN(Number(orderNumberStr))) {
-          const orderNumber = Number(orderNumberStr);
-          paginatedQb.andWhere('o.order_number = :orderNumber', { orderNumber });
+          paginatedQb.andWhere('o.order_number = :orderNumber', {
+            orderNumber: Number(orderNumberStr),
+          });
         } else {
           paginatedQb.andWhere('1 = 0');
         }
+
       } else {
         const isUUID =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-            cleanSearch,
-          );
-
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSearch);
         const isNumeric = !isNaN(Number(cleanSearch)) && cleanSearch !== '';
 
-        paginatedQb.andWhere(
-          new Brackets((q) => {
-            if (isUUID) {
-              q.where('o.public_id = :publicId', { publicId: cleanSearch });
-            } else if (isNumeric) {
-              q.where('o.order_number = :orderNumber', {
-                orderNumber: Number(cleanSearch),
-              });
-            } else {
-              const terms = cleanSearch.split(' ').filter(Boolean);
-              terms.forEach((term, i) => {
-                q.orWhere(
-                  `c.firstName ILIKE :t${i} OR c.lastName ILIKE :t${i}`,
-                  { [`t${i}`]: `%${term}%` },
-                );
-              });
+        if (isUUID) {
+          // Caso 2: UUID público de la orden
+          paginatedQb.andWhere('o.public_id = :publicId', { publicId: cleanSearch });
 
-              q.orWhere('contact.value ILIKE :search', {
-                search: `%${cleanSearch}%`,
-              });
-            }
-          }),
-        );
+        } else if (isNumeric && cleanSearch.length === 15) {
+          // Caso 3: IMEI (exacto, 15 dígitos)
+          paginatedQb.andWhere('imei.imei_number = :imei', { imei: cleanSearch });
+
+        } else if (isNumeric) {
+          // Caso 4: Cédula (10 dígitos) o RUC (13 dígitos)
+          paginatedQb.andWhere('c.idNumber = :idNumber', { idNumber: cleanSearch });
+
+        } else {
+          // Caso 5: Texto libre — AND entre términos, OR entre campos
+          // Ejemplo: "ju ca" → quien tenga "ju" Y "ca" en nombre/apellido/modelo/marca
+          const terms = cleanSearch.split(' ').filter(Boolean);
+          terms.forEach((term, i) => {
+            paginatedQb.andWhere(
+              new Brackets((q) => {
+                q.where(`c.firstName ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
+                  .orWhere(`c.lastName ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
+                  .orWhere(`deviceModel.models_name ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
+                  .orWhere(`deviceBrand.brands_name ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
+              }),
+            );
+          });
+        }
       }
     }
 
@@ -397,22 +403,25 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('device.model', 'deviceModel')
       .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
       .leftJoinAndSelect('o.createdBy', 'createdBy')
+      .leftJoinAndSelect('o.delivery', 'delivery')
+      .leftJoinAndSelect('delivery.deliveredBy', 'deliveredBy')
+      .leftJoinAndSelect('o.payments', 'payments')          // ← agrega esto
+      .leftJoinAndSelect('payments.paymentType', 'paymentType')   // ← y esto si quieres el tipo
+      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod') // ← y el método
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.createdAt', 'DESC')
       .getMany();
 
-
     if (search && search.trim() !== '') {
-      // fire-and-forget: no hace await para no añadir latencia al response
-      this.searchHistoryService
-        .saveFromSearch({
-          companyId: user.companyId,
-          userId: user.userId,
-          searchTerm: search.trim(),
-          resultCount: total,          // viene de getManyAndCount()
-          searchType: 'order',
-        })
+      this.searchHistoryService.saveFromSearch({
+        companyId: user.companyId,
+        userId: user.userId,
+        searchTerm: search.trim(),
+        resultCount: total,
+        searchType: 'order',
+      });
     }
+
     return {
       data,
       total,

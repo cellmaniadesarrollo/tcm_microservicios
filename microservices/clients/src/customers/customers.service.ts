@@ -52,7 +52,9 @@ export class CustomersService {
 
                 contacts: data.customer.contacts?.map(c => ({
                     contactType: { id: c.contactTypeId },
-                    value: c.value,
+                    value: c.contactTypeId === 1
+                        ? this.normalizeMobilePhone(c.value)
+                        : c.value,
                     isPrimary: c.isPrimary ?? false,
                 })),
 
@@ -163,7 +165,9 @@ export class CustomersService {
             customer.contacts = updates.contacts.map(c => ({
                 id: c.id ?? undefined,
                 contactType: c.contactTypeId ? { id: c.contactTypeId } : undefined,
-                value: c.value,
+                value: c.contactTypeId === 1
+                    ? this.normalizeMobilePhone(c.value)
+                    : c.value,
                 isPrimary: c.isPrimary ?? false,
                 customer: { id } as any
             }));
@@ -203,6 +207,23 @@ export class CustomersService {
         await this.broadcast.publishClientUpdated(customersavedata);
         return customersave;
     }
+
+    private normalizeMobilePhone(phone: string): string {
+        if (!phone) return phone;
+
+        let cleaned = phone.trim();
+
+        // Caso común en Ecuador: +5930983... → +593983...
+        if (cleaned.startsWith('+5930')) {
+            cleaned = '+593' + cleaned.substring(5); // Elimina el '0' después de +593
+        }
+
+        // También puedes limpiar otros formatos comunes
+        cleaned = cleaned.replace(/\s+/g, ''); // Quitar espacios
+
+        return cleaned;
+    }
+
     async findPaginated(
         dto: { page: number; limit: number; search?: string },
         user: any

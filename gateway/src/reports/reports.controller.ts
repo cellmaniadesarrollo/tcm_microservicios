@@ -3,6 +3,7 @@ import { ReportsService } from './reports.service';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
 import { GetOrdersFilterDto } from './dto/get-orders-filter.dto.gateway';
+import { GetAdminDashboardRangeDto } from './dto/get-admin-dashboard.dto.gateway';
 // Importa tu DTO correctamente
 // import { FindCustomerDto } from './dto/find-customer.dto'; 
 
@@ -56,5 +57,13 @@ export class ReportsController {
     @User() user: any,
   ) {
     return this.reportsService.toggleOrderValidation(id, isChecked, user);
+  }
+
+  @Get('admin-dashboard')
+  async getAdminDashboardRange(
+    @Query() dto: GetAdminDashboardRangeDto,   // ← así
+    @User() user: any,
+  ) {
+    return this.reportsService.getAdminDashboardRange(user, dto);
   }
 }

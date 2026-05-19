@@ -7,13 +7,11 @@ export class CustomersController {
     @MessagePattern({ cmd: 'get_all_customers' })
     findAll() {
 
-        console.log('data')
         return true
     }
     @MessagePattern({ cmd: 'save_one_customer' })
     saveOne(data: any) {
-        console.log(data)
-        return this.customerService.create(data); 
+        return this.customerService.create(data);
     }
     @MessagePattern({ cmd: 'update_one_customer' })
     async updateOne(data: any) {
