@@ -13,6 +13,7 @@ import { RpcException } from '@nestjs/microservices';
 import { OrdersFilterInternalDto } from '../orders-relay/schemas/order-filters-internal.dto';
 // Enum de claves válidas — agrega aquí cuando haya nuevas tarjetas
 import { DRILL_CARD_KEYS, DrillCardKey } from './constants/drill-cards.constants';
+import { OrderValidation, OrderValidationDocument } from '../order-validation/schemas/order-validation.schema';
 
 @Injectable()
 export class OrdersReportsService {
@@ -30,6 +31,7 @@ export class OrdersReportsService {
         private userEmployeeCacheModel: Model<UserEmployeeCacheDocument>,
         @InjectModel(OrderReplica.name)
         private orderReplicaModel: Model<OrderReplicaDocument>,
+        @InjectModel(OrderValidation.name) private orderValidationModel: Model<OrderValidationDocument>,
     ) { }
 
     async getDashboardDrill(
@@ -38,23 +40,48 @@ export class OrdersReportsService {
         page: number,
         limit: number,
     ): Promise<{ data: any[]; total: number }> {
+        console.log(card);
 
-        if (!DRILL_CARD_KEYS.includes(card as DrillCardKey)) {
-            throw new RpcException({ status: 400, message: `Unknown card key: "${card}"` });
-        }
-
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
         const { todayStart, todayEnd } = this._dayBoundaries();
 
         const weekStart = new Date(todayStart);
         weekStart.setDate(weekStart.getDate() - 6);
 
-        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
         const localNow = new Date(Date.now() + GYE_OFFSET_MS);
         const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
         const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
         const now = new Date();
 
-        const strategies: Record<DrillCardKey, Record<string, any>> = {
+        // ── Detectar si es una card de rango ─────────────────────────────────────
+        const rangeMatch = card.match(/^(range_\w+)\((\d{4}-\d{2}-\d{2})\|(\d{4}-\d{2}-\d{2})\)$/);
+
+        let resolvedCard: string = card;
+        let rangeFrom: Date | null = null;
+        let rangeTo: Date | null = null;
+
+        if (rangeMatch) {
+            resolvedCard = rangeMatch[1]; // "range_received"
+            // Convertir YYYY-MM-DD a Date con inicio/fin de día en GYE
+            const [fromY, fromM, fromD] = rangeMatch[2].split('-').map(Number);
+            const [toY, toM, toD] = rangeMatch[3].split('-').map(Number);
+
+            // Inicio del día "from" a las 03:00 UTC (= 00:00 GYE)
+            rangeFrom = new Date(Date.UTC(fromY, fromM - 1, fromD, 3, 0, 0, 0));
+            // Fin del día "to" a las 02:59:59.999 UTC del día siguiente (= 23:59:59 GYE)
+            rangeTo = new Date(Date.UTC(toY, toM - 1, toD + 1, 2, 59, 59, 999));
+        }
+
+        // ── Validación ────────────────────────────────────────────────────────────
+        const ALL_VALID_KEYS = [...DRILL_CARD_KEYS, 'range_received', 'range_finished', 'range_delivered', 'range_collected', 'global_validation_checked',    // ← nuevo
+            'global_validation_unchecked',];
+
+        if (!ALL_VALID_KEYS.includes(resolvedCard as any)) {
+            throw new RpcException({ status: 400, message: `Unknown card key: "${card}"` });
+        }
+
+        // ── Strategies existentes ─────────────────────────────────────────────────
+        const strategies: Record<string, Record<string, any>> = {
             today_received: { entry_date: { $gte: todayStart, $lte: todayEnd } },
             today_finished: {
                 statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } },
@@ -98,28 +125,45 @@ export class OrdersReportsService {
             global_waiting_approval: { 'currentStatus.id': { $in: [4] } },
             global_finished: { 'currentStatus.id': { $in: [7, 8] } },
             global_delivered: { 'currentStatus.id': { $in: [8] } },
+
+            // ── Range strategies (usan las fechas parseadas) ──────────────────────
+            ...(rangeFrom && rangeTo ? {
+                range_received: { entry_date: { $gte: rangeFrom, $lte: rangeTo } },
+                range_finished: {
+                    statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: rangeFrom, $lte: rangeTo } } },
+                    'currentStatus.id': { $in: [7, 8] },
+                },
+                range_delivered: {
+                    statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: rangeFrom, $lte: rangeTo } } },
+                },
+                range_collected: {
+                    payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: rangeFrom, $lte: rangeTo } } },
+                },
+            } : {}),
         };
 
-        const DELIVERED_CARDS: DrillCardKey[] = [
-            'today_delivered', 'week_delivered', 'month_delivered', 'global_delivered',
+        // ── DELIVERED_CARDS (incluye rango) ───────────────────────────────────────
+        const DELIVERED_CARDS = [
+            'today_delivered', 'week_delivered', 'month_delivered',
+            'global_delivered', 'range_delivered',
         ];
 
-        // ── Ambos flags se derivan del mismo array ────────────────────────────────
-        const isDeliveredCard = DELIVERED_CARDS.includes(card as DrillCardKey);
+        const isDeliveredCard = DELIVERED_CARDS.includes(resolvedCard);
 
         const matchStage: Record<string, any> = {
             'company.id': companyId,
-            ...strategies[card as DrillCardKey],
+            ...strategies[resolvedCard],
         };
 
         return this._executeDrillPipeline(
             matchStage,
             page,
             limit,
-            isDeliveredCard,   // includeValidation
-            isDeliveredCard,   // sortByDelivered
+            isDeliveredCard,
+            isDeliveredCard,
         );
     }
+
     private async _executeDrillPipeline(
         matchStage: Record<string, any>,
         page: number,
@@ -776,6 +820,23 @@ export class OrdersReportsService {
             paymentsCount: payments[0]?.paymentsCount ?? 0,
         };
     }
+    /**
+     * 'YYYY-MM-DD' → inicio del día en hora GYE
+     * 03:00 GYE == 08:00 UTC
+     */
+    private _gyeDayStart(dateStr: string): Date {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(Date.UTC(y, m - 1, d, 8, 0, 0, 0));
+    }
+
+    /**
+     * 'YYYY-MM-DD' → inicio del día SIGUIENTE en hora GYE
+     * Así el día `to` queda completamente incluido en el rango
+     */
+    private _gyeDayEnd(dateStr: string): Date {
+        const start = this._gyeDayStart(dateStr);
+        return new Date(start.getTime() + 24 * 60 * 60 * 1000);
+    }
 
     // ── Dashboard principal ───────────────────────────────────────────────────────
     private async getAdminDashboard(companyId: string): Promise<any> {
@@ -806,6 +867,7 @@ export class OrdersReportsService {
             paymentMethods,
             resolutionTime,
             drillCounts,
+            validationCounts,
         ] = await Promise.all([
 
             // ── Por estado (global) ───────────────────────────────────────────────
@@ -1121,6 +1183,28 @@ export class OrdersReportsService {
                     },
                 },
             ]),
+            // ── Validaciones de órdenes entregadas ───────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'currentStatus.id': 8 } },
+                {
+                    $lookup: {
+                        from: 'order_validations',
+                        localField: 'id',
+                        foreignField: 'order_id',
+                        as: 'validation',
+                    },
+                },
+                { $unwind: { path: '$validation', preserveNullAndEmptyArrays: true } },
+                {
+                    $group: {
+                        _id: null,
+                        checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } },
+                        unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } },
+                    },
+                },
+                { $project: { _id: 0, checked: 1, unchecked: 1 } },
+            ]),
+
         ]);
 
         // ── Helper para leer el $facet ────────────────────────────────────────────
@@ -1159,6 +1243,10 @@ export class OrdersReportsService {
                 finished: statusMap[7] ?? 0,   // TRABAJO_FINALIZADO
                 delivered: statusMap[8] ?? 0,   // ENTREGADA
             },
+            validations: {
+                checked: validationCounts[0]?.checked ?? 0,
+                unchecked: validationCounts[0]?.unchecked ?? 0,
+            },
         };
         console.log(counts)
         // ── Cálculos derivados ────────────────────────────────────────────────────
@@ -1192,6 +1280,497 @@ export class OrdersReportsService {
             weeklyTrend,
             hourlyToday,
             resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
+        };
+    }
+
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // DASHBOARD CON RANGO CUSTOM
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    async getAdminDashboardRange(
+        companyId: string,
+        from: string,       // 'YYYY-MM-DD'
+        to: string,         // 'YYYY-MM-DD'
+    ): Promise<any> {
+
+        // ── Límites UTC con corte 03:00 GYE ──────────────────────────────────────
+        const rangeStart = this._gyeDayStart(from);   // from  03:00 GYE → UTC
+        const rangeEnd = this._gyeDayEnd(to);        // to+1d 03:00 GYE → UTC
+
+        // ── Todas las queries en paralelo ─────────────────────────────────────────
+        const [
+            byStatus,
+            financeData,
+            byBranch,
+            byTechnician,
+            weeklyTrend,
+            periodStats,
+            hourlyRange,
+            byDeviceBrand,
+            byOrderType,
+            paymentMethods,
+            resolutionTime,
+            rangeCounts,
+            validationCounts,
+        ] = await Promise.all([
+
+            // ── Por estado (órdenes ingresadas en el rango) ───────────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: { id: '$currentStatus.id', name: '$currentStatus.name' },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, id: '$_id.id', name: '$_id.name', count: 1 } },
+                { $sort: { id: 1 } },
+            ]),
+
+            // ── Finanzas (órdenes ingresadas en el rango) ─────────────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                { $unwind: { path: '$findings', preserveNullAndEmptyArrays: true } },
+                { $unwind: { path: '$findings.procedures', preserveNullAndEmptyArrays: true } },
+                {
+                    $group: {
+                        _id: null,
+                        totalProceduresCost: {
+                            $sum: {
+                                $cond: [
+                                    { $eq: ['$findings.procedures.is_active', true] },
+                                    { $ifNull: ['$findings.procedures.procedure_cost', 0] },
+                                    0,
+                                ],
+                            },
+                        },
+                    },
+                },
+            ]),
+
+            // ── Por sucursal (rango) ──────────────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: { id: '$branch.id', name: '$branch.name' },
+                        total: { $sum: 1 },
+                        delivered: {
+                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
+                        },
+                        revenue: {
+                            $sum: {
+                                $reduce: {
+                                    input: '$payments', initialValue: 0,
+                                    in: {
+                                        $add: [
+                                            '$$value',
+                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] },
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        branchId: '$_id.id', branchName: '$_id.name',
+                        total: 1, delivered: 1, revenue: 1,
+                    },
+                },
+                { $sort: { total: -1 } },
+            ]),
+
+            // ── Top 10 técnicos (rango) ───────────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                        'technicians.0': { $exists: true },
+                    },
+                },
+                { $unwind: '$technicians' },
+                {
+                    $group: {
+                        _id: '$technicians.id',
+                        name: {
+                            $first: {
+                                $concat: ['$technicians.first_name', ' ', '$technicians.last_name'],
+                            },
+                        },
+                        total: { $sum: 1 },
+                        resolved: {
+                            $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] },
+                        },
+                    },
+                },
+                { $project: { _id: 0, techId: '$_id', name: 1, total: 1, resolved: 1 } },
+                { $sort: { total: -1 } },
+                { $limit: 10 },
+            ]),
+
+            // ── Tendencia diaria del rango (reemplaza weeklyTrend) ────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: {
+                                format: '%Y-%m-%d',
+                                date: '$entry_date',
+                                timezone: 'America/Guayaquil',
+                            },
+                        },
+                        ingresadas: { $sum: 1 },
+                        entregadas: {
+                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
+                        },
+                        revenue: {
+                            $sum: {
+                                $reduce: {
+                                    input: '$payments', initialValue: 0,
+                                    in: {
+                                        $add: [
+                                            '$$value',
+                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] },
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                { $project: { _id: 0, date: '$_id', ingresadas: 1, entregadas: 1, revenue: 1 } },
+                { $sort: { date: 1 } },
+            ]),
+
+            // ── Estadísticas del período (cobrado + pagos) ────────────────────────
+            // Reutiliza el helper existente con los límites del rango
+            this._periodStats(companyId, rangeStart, rangeEnd),
+
+            // ── Distribución horaria del rango ────────────────────────────────────
+            // Para rangos cortos (1-3 días) es muy útil; para rangos largos sirve
+            // para ver qué horas son más activas en promedio
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            $hour: { date: '$entry_date', timezone: 'America/Guayaquil' },
+                        },
+                        count: { $sum: 1 },
+                        revenue: {
+                            $sum: {
+                                $reduce: {
+                                    input: '$payments', initialValue: 0,
+                                    in: {
+                                        $add: [
+                                            '$$value',
+                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] },
+                                        ],
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+                { $project: { _id: 0, hour: '$_id', count: 1, revenue: 1 } },
+                { $sort: { hour: 1 } },
+            ]),
+
+            // ── Top 8 marcas (rango) ──────────────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                        'device.model.brand_name': { $exists: true, $ne: null },
+                    },
+                },
+                {
+                    $group: {
+                        _id: { id: '$device.model.brand_id', name: '$device.model.brand_name' },
+                        total: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, brandId: '$_id.id', brandName: '$_id.name', total: 1 } },
+                { $sort: { total: -1 } },
+                { $limit: 8 },
+            ]),
+
+            // ── Por tipo de orden (rango) ─────────────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: { id: '$type.id', name: '$type.name' },
+                        count: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, typeId: '$_id.id', typeName: '$_id.name', count: 1 } },
+                { $sort: { count: -1 } },
+            ]),
+
+            // ── Métodos de pago (pagos realizados en el rango) ────────────────────
+            // Nota: filtra por paid_at, no por entry_date, para capturar cobros
+            // de órdenes antiguas pagadas dentro del rango
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $unwind: '$payments' },
+                {
+                    $match: {
+                        'payments.flow_type': 'INGRESO',
+                        'payments.paid_at': { $gte: rangeStart, $lt: rangeEnd },
+                    },
+                },
+                {
+                    $group: {
+                        _id: {
+                            id: '$payments.payment_method_id',
+                            name: '$payments.payment_method_name',
+                        },
+                        total: { $sum: '$payments.amount' },
+                        count: { $sum: 1 },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        methodId: '$_id.id', methodName: '$_id.name',
+                        total: 1, count: 1,
+                    },
+                },
+                { $sort: { total: -1 } },
+            ]),
+
+            // ── Tiempo promedio de resolución (órdenes del rango) ─────────────────
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
+                        'currentStatus.id': { $in: [7, 8] },
+                    },
+                },
+                { $unwind: '$statusHistory' },
+                { $match: { 'statusHistory.toStatus.id': { $in: [7, 8] } } },
+                {
+                    $group: {
+                        _id: '$_id',
+                        entry_date: { $first: '$entry_date' },
+                        resolved_at: { $max: '$statusHistory.changed_at' },
+                    },
+                },
+                {
+                    $project: {
+                        diffDays: {
+                            $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        avgDays: { $avg: '$diffDays' },
+                        minDays: { $min: '$diffDays' },
+                        maxDays: { $max: '$diffDays' },
+                    },
+                },
+                {
+                    $project: {
+                        _id: 0,
+                        avgDays: { $round: ['$avgDays', 1] },
+                        minDays: { $round: ['$minDays', 1] },
+                        maxDays: { $round: ['$maxDays', 1] },
+                    },
+                },
+            ]),
+
+            // ── Conteos del rango ($facet = 1 sola round-trip) ───────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                {
+                    $facet: {
+
+                        // Ingresadas: entry_date dentro del rango
+                        range_received: [
+                            { $match: { entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                            { $count: 'n' },
+                        ],
+
+                        // Terminadas: alcanzaron estado 7 dentro del rango
+                        range_finished: [
+                            {
+                                $match: {
+                                    'currentStatus.id': { $in: [7, 8] },
+                                    statusHistory: {
+                                        $elemMatch: {
+                                            'toStatus.id': 7,
+                                            changed_at: { $gte: rangeStart, $lt: rangeEnd },
+                                        },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+
+                        // Entregadas: alcanzaron estado 8 dentro del rango
+                        range_delivered: [
+                            {
+                                $match: {
+                                    statusHistory: {
+                                        $elemMatch: {
+                                            'toStatus.id': 8,
+                                            changed_at: { $gte: rangeStart, $lt: rangeEnd },
+                                        },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+
+                        // Cobros: tiene al menos 1 pago INGRESO en el rango
+                        range_payments_count: [
+                            {
+                                $match: {
+                                    payments: {
+                                        $elemMatch: {
+                                            flow_type: 'INGRESO',
+                                            paid_at: { $gte: rangeStart, $lt: rangeEnd },
+                                        },
+                                    },
+                                },
+                            },
+                            { $count: 'n' },
+                        ],
+
+                    },
+                },
+            ]),
+            // ── Validaciones de órdenes entregadas ───────────────────────────────────
+            // ── Validaciones de órdenes entregadas ───────────────────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'currentStatus.id': 8 } },
+                {
+                    $lookup: {
+                        from: 'order_validations',
+                        localField: 'id',
+                        foreignField: 'order_id',
+                        as: 'validation',
+                    },
+                },
+                { $unwind: { path: '$validation', preserveNullAndEmptyArrays: true } },
+                {
+                    $group: {
+                        _id: null,
+                        checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } },
+                        unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } },
+                    },
+                },
+                { $project: { _id: 0, checked: 1, unchecked: 1 } },
+            ]),
+
+        ]);
+
+        // ── Helper para leer el $facet ────────────────────────────────────────────
+        const c = (key: string): number => rangeCounts[0]?.[key]?.[0]?.n ?? 0;
+
+        // ── Globales derivados de byStatus ────────────────────────────────────────
+        const statusMap: Record<number, number> = Object.fromEntries(
+            byStatus.map((s: any) => [s.id, s.count])
+        );
+
+        // ── Finanzas del rango ────────────────────────────────────────────────────
+        const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
+        const totalCost = financeData[0]?.totalProceduresCost ?? 0;
+        const rangeDelivered = c('range_delivered');
+        const avgTicket = rangeDelivered > 0
+            ? +(totalPaid / rangeDelivered).toFixed(2)
+            : 0;
+
+        const counts = {
+            range: {
+                received: c('range_received'),
+                finished: c('range_finished'),
+                delivered: rangeDelivered,
+                collected: c('range_payments_count'),
+            },
+            // global sigue siendo útil para los KPI de estado actual
+            global: {
+                all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
+                pending: statusMap[1] ?? 0,
+                in_progress: statusMap[6] ?? 0,
+                waiting_approval: statusMap[4] ?? 0,
+                waiting_parts: statusMap[5] ?? 0,
+                finished: statusMap[7] ?? 0,
+                delivered: statusMap[8] ?? 0,
+            },
+        };
+
+        return {
+            // ── Mismos nombres que el dashboard normal → frontend no cambia ───────
+            periods: { range: periodStats },
+            counts,
+            byStatus,
+            finance: {
+                totalProceduresCost: totalCost,
+                totalPaid,
+                totalPending: totalCost - totalPaid,
+                avgTicket,
+            },
+            byBranch,
+            byTechnician,
+            byOrderType,
+            byDeviceBrand,
+            paymentMethods,
+            weeklyTrend: weeklyTrend,      // tendencia diaria del rango
+            hourlyToday: hourlyRange,       // mismo nombre → chart funciona igual
+            resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
+            // Metadata útil para mostrar en el frontend
+            meta: {
+                from,
+                to,
+                rangeStart: rangeStart.toISOString(),
+                rangeEnd: rangeEnd.toISOString(),
+            },
+            validations: {
+                checked: validationCounts[0]?.checked ?? 0,
+                unchecked: validationCounts[0]?.unchecked ?? 0,
+            },
         };
     }
 }

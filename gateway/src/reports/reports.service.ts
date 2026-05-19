@@ -2,6 +2,7 @@ import { Body, Inject, Injectable, Param, Patch } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { GetOrdersFilterDto } from './dto/get-orders-filter.dto.gateway';
+import { GetAdminDashboardRangeDto } from './dto/get-admin-dashboard.dto.gateway';
 
 @Injectable()
 export class ReportsService {
@@ -91,6 +92,22 @@ export class ReportsService {
                     validationId,
                     isChecked,
                     user,
+                },
+            ),
+        );
+    }
+    async getAdminDashboardRange(user: any, dto: GetAdminDashboardRangeDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_admin_dashboard_range' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    user: {
+                        userId: user.sub,
+                        companyId: user.companyId,
+                    },
+                    from: dto.from,
+                    to: dto.to,
                 },
             ),
         );
