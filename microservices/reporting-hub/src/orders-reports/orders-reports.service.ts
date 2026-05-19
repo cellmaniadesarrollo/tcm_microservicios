@@ -125,6 +125,8 @@ export class OrdersReportsService {
             global_waiting_approval: { 'currentStatus.id': { $in: [4] } },
             global_finished: { 'currentStatus.id': { $in: [7, 8] } },
             global_delivered: { 'currentStatus.id': { $in: [8] } },
+            global_validation_checked: { 'currentStatus.id': { $in: [8] } },
+            global_validation_unchecked: { 'currentStatus.id': { $in: [8] } },
 
             // ── Range strategies (usan las fechas parseadas) ──────────────────────
             ...(rangeFrom && rangeTo ? {
@@ -148,7 +150,16 @@ export class OrdersReportsService {
             'global_delivered', 'range_delivered',
         ];
 
+        const VALIDATION_CARDS = ['global_validation_checked', 'global_validation_unchecked']; // ← nuevo
+
         const isDeliveredCard = DELIVERED_CARDS.includes(resolvedCard);
+        const isValidationCard = VALIDATION_CARDS.includes(resolvedCard);  // ← nuevo
+
+        const postLookupMatch = resolvedCard === 'global_validation_checked'
+            ? { '_validation.is_checked': true }
+            : resolvedCard === 'global_validation_unchecked'
+                ? { '_validation.is_checked': false }
+                : null;
 
         const matchStage: Record<string, any> = {
             'company.id': companyId,
@@ -159,8 +170,9 @@ export class OrdersReportsService {
             matchStage,
             page,
             limit,
+            isDeliveredCard || isValidationCard,
             isDeliveredCard,
-            isDeliveredCard,
+            postLookupMatch,
         );
     }
 
@@ -170,6 +182,7 @@ export class OrdersReportsService {
         limit: number,
         includeValidation = false,
         sortByDelivered = false,
+        postLookupMatch: Record<string, any> | null = null,
     ): Promise<{ data: any[]; total: number }> {
 
         const skip = (page - 1) * limit;
@@ -212,10 +225,13 @@ export class OrdersReportsService {
         const deliveredAtProjection = sortByDelivered
             ? { delivered_at: 1 }
             : {};
-
+        const postLookupMatchStage: PipelineStage[] = postLookupMatch
+            ? [{ $match: postLookupMatch }]
+            : [];
         const [result] = await this.orderReplicaModel.aggregate([
             { $match: matchStage },
             ...lookupStage,
+            ...postLookupMatchStage,
             ...deliveredAtStage,
             sortStage,
             {
@@ -1280,6 +1296,10 @@ export class OrdersReportsService {
             weeklyTrend,
             hourlyToday,
             resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
+            validations: {
+                checked: validationCounts[0]?.checked ?? 0,
+                unchecked: validationCounts[0]?.unchecked ?? 0,
+            },
         };
     }
 
