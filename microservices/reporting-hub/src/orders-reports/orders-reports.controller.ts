@@ -84,6 +84,7 @@ export class OrdersReportsController {
       data.limit,
     );
   }
+
   @MessagePattern({ cmd: 'get_admin_dashboard_range' })
   async getAdminDashboardRange(data: {
     user: {

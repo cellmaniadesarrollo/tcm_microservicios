@@ -9,7 +9,7 @@ import {
     SearchHistoryItemDto,
 } from './dto/search-history.dto';
 
-const MAX_LIMIT = 20;
+const MAX_LIMIT = 5;
 const IS_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
