@@ -4,6 +4,7 @@ import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
 import { GetOrdersFilterDto } from './dto/get-orders-filter.dto.gateway';
 import { GetAdminDashboardRangeDto } from './dto/get-admin-dashboard.dto.gateway';
+import { Groups } from '../common/auth/decorators/groups.decorator';
 // Importa tu DTO correctamente
 // import { FindCustomerDto } from './dto/find-customer.dto'; 
 
@@ -51,6 +52,7 @@ export class ReportsController {
   }
 
   @Patch('validations/:id')
+  @Groups('ORDER_AUDIT')
   async toggleValidation(
     @Param('id') id: string,
     @Body('is_checked') isChecked: boolean,
@@ -58,10 +60,18 @@ export class ReportsController {
   ) {
     return this.reportsService.toggleOrderValidation(id, isChecked, user);
   }
+  @Get('validation-status/:id')
+  @Groups('ORDER_AUDIT')
+  async getValidationStatus(
+    @Param('id') id: string,
+  ) {
+
+    return this.reportsService.getValidationStatus(id);
+  }
 
   @Get('admin-dashboard')
   async getAdminDashboardRange(
-    @Query() dto: GetAdminDashboardRangeDto,   // ← así
+    @Query() dto: GetAdminDashboardRangeDto,
     @User() user: any,
   ) {
     return this.reportsService.getAdminDashboardRange(user, dto);

@@ -96,6 +96,19 @@ export class ReportsService {
             ),
         );
     }
+
+    async getValidationStatus(OrderId: string,) {
+        return await firstValueFrom(
+            this.client.send(
+                { "cmd": "get_order_validation_status" },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    OrderId,
+                },
+            ),
+        );
+    }
+
     async getAdminDashboardRange(user: any, dto: GetAdminDashboardRangeDto) {
         return await firstValueFrom(
             this.client.send(

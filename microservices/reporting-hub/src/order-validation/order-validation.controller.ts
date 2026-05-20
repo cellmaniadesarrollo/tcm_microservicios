@@ -18,4 +18,11 @@ export class OrderValidationController {
             data.user,
         );
     }
+    @MessagePattern({ cmd: 'get_order_validation_status' })
+    async getOrderValidationStatus(
+        @Payload() data: { OrderId: string }
+    ) {
+        return this.orderValidationService.getOrderValidationStatus(data.OrderId)
+    }
+
 }
