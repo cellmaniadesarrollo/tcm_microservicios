@@ -40,7 +40,7 @@ export class OrdersReportsService {
         page: number,
         limit: number,
     ): Promise<{ data: any[]; total: number }> {
-        console.log(card);
+
 
         const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
         const { todayStart, todayEnd } = this._dayBoundaries();
@@ -608,7 +608,7 @@ export class OrdersReportsService {
     // orders-reports.service.ts  — agregar método
 
     async getDashboard(companyId: string, userId: string, groups: string[]): Promise<any> {
-
+        console.log(userId)
         const isAdmin = groups.some(g => ['COMPANY_ADMIN', 'ADMINS', 'IFE'].includes(g));
         const isTechnician = groups.some(g => ['TECHNICIANS', 'CSRSPER'].includes(g));
         const isCashier = groups.includes('CASHIERS');
