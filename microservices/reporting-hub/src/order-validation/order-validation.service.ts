@@ -204,6 +204,30 @@ export class OrderValidationService implements OnModuleInit {
         return doc.save();
     }
 
+    async getOrderValidationStatus(id: string) {
+        const orderId = Number(id);
+
+        const validation = await this.validationModel
+            .findOne({ order_id: orderId })
+            .select('_id is_checked')
+            .lean()
+            .exec();
+
+        if (!validation) {
+            return {
+                found: false,
+                is_validated: false,
+            };
+        }
+
+        return {
+            found: true,
+            id: validation._id.toString(),
+            is_validated: validation.is_checked,
+        };
+    }
+
+
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     /**

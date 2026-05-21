@@ -14,7 +14,7 @@ import { OrdersFilterInternalDto } from '../orders-relay/schemas/order-filters-i
 // Enum de claves válidas — agrega aquí cuando haya nuevas tarjetas
 import { DRILL_CARD_KEYS, DrillCardKey } from './constants/drill-cards.constants';
 import { OrderValidation, OrderValidationDocument } from '../order-validation/schemas/order-validation.schema';
-
+type SortMode = 'entry_date' | 'finalized_at' | 'delivered_at' | 'last_paid_at';
 @Injectable()
 export class OrdersReportsService {
     constructor(
@@ -34,13 +34,14 @@ export class OrdersReportsService {
         @InjectModel(OrderValidation.name) private orderValidationModel: Model<OrderValidationDocument>,
     ) { }
 
+
+
     async getDashboardDrill(
         companyId: string,
         card: string,
         page: number,
         limit: number,
     ): Promise<{ data: any[]; total: number }> {
-        console.log(card);
 
         const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
         const { todayStart, todayEnd } = this._dayBoundaries();
@@ -53,7 +54,6 @@ export class OrdersReportsService {
         const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
         const now = new Date();
 
-        // ── Detectar si es una card de rango ─────────────────────────────────────
         const rangeMatch = card.match(/^(range_\w+)\((\d{4}-\d{2}-\d{2})\|(\d{4}-\d{2}-\d{2})\)$/);
 
         let resolvedCard: string = card;
@@ -61,26 +61,23 @@ export class OrdersReportsService {
         let rangeTo: Date | null = null;
 
         if (rangeMatch) {
-            resolvedCard = rangeMatch[1]; // "range_received"
-            // Convertir YYYY-MM-DD a Date con inicio/fin de día en GYE
+            resolvedCard = rangeMatch[1];
             const [fromY, fromM, fromD] = rangeMatch[2].split('-').map(Number);
             const [toY, toM, toD] = rangeMatch[3].split('-').map(Number);
-
-            // Inicio del día "from" a las 03:00 UTC (= 00:00 GYE)
             rangeFrom = new Date(Date.UTC(fromY, fromM - 1, fromD, 3, 0, 0, 0));
-            // Fin del día "to" a las 02:59:59.999 UTC del día siguiente (= 23:59:59 GYE)
             rangeTo = new Date(Date.UTC(toY, toM - 1, toD + 1, 2, 59, 59, 999));
         }
 
-        // ── Validación ────────────────────────────────────────────────────────────
-        const ALL_VALID_KEYS = [...DRILL_CARD_KEYS, 'range_received', 'range_finished', 'range_delivered', 'range_collected', 'global_validation_checked',    // ← nuevo
-            'global_validation_unchecked',];
+        const ALL_VALID_KEYS = [
+            ...DRILL_CARD_KEYS,
+            'range_received', 'range_finished', 'range_delivered', 'range_collected',
+            'global_validation_checked', 'global_validation_unchecked',
+        ];
 
         if (!ALL_VALID_KEYS.includes(resolvedCard as any)) {
             throw new RpcException({ status: 400, message: `Unknown card key: "${card}"` });
         }
 
-        // ── Strategies existentes ─────────────────────────────────────────────────
         const strategies: Record<string, Record<string, any>> = {
             today_received: { entry_date: { $gte: todayStart, $lte: todayEnd } },
             today_finished: {
@@ -128,7 +125,6 @@ export class OrdersReportsService {
             global_validation_checked: { 'currentStatus.id': { $in: [8] } },
             global_validation_unchecked: { 'currentStatus.id': { $in: [8] } },
 
-            // ── Range strategies (usan las fechas parseadas) ──────────────────────
             ...(rangeFrom && rangeTo ? {
                 range_received: { entry_date: { $gte: rangeFrom, $lte: rangeTo } },
                 range_finished: {
@@ -144,16 +140,34 @@ export class OrdersReportsService {
             } : {}),
         };
 
-        // ── DELIVERED_CARDS (incluye rango) ───────────────────────────────────────
-        const DELIVERED_CARDS = [
-            'today_delivered', 'week_delivered', 'month_delivered',
-            'global_delivered', 'range_delivered',
-        ];
+        // ── SortMode por card ─────────────────────────────────────────────────────
+        const SORT_MODE_MAP: Record<string, SortMode> = {
+            today_received: 'entry_date',
+            week_received: 'entry_date',
+            month_received: 'entry_date',
+            range_received: 'entry_date',
 
-        const VALIDATION_CARDS = ['global_validation_checked', 'global_validation_unchecked']; // ← nuevo
+            today_finished: 'finalized_at',
+            week_finished: 'finalized_at',
+            month_finished: 'finalized_at',
+            range_finished: 'finalized_at',
 
-        const isDeliveredCard = DELIVERED_CARDS.includes(resolvedCard);
-        const isValidationCard = VALIDATION_CARDS.includes(resolvedCard);  // ← nuevo
+            today_delivered: 'delivered_at',
+            week_delivered: 'delivered_at',
+            month_delivered: 'delivered_at',
+            range_delivered: 'delivered_at',
+            global_delivered: 'delivered_at',
+
+            today_collected: 'last_paid_at',
+            week_collected: 'last_paid_at',
+            month_collected: 'last_paid_at',
+            range_collected: 'last_paid_at',
+        };
+
+        const sortMode: SortMode = SORT_MODE_MAP[resolvedCard] ?? 'entry_date';
+
+        const VALIDATION_CARDS = ['global_validation_checked', 'global_validation_unchecked'];
+        const isValidationCard = VALIDATION_CARDS.includes(resolvedCard);
 
         const postLookupMatch = resolvedCard === 'global_validation_checked'
             ? { '_validation.is_checked': true }
@@ -170,8 +184,8 @@ export class OrdersReportsService {
             matchStage,
             page,
             limit,
-            isDeliveredCard || isValidationCard,
-            isDeliveredCard,
+            sortMode === 'delivered_at' || isValidationCard, // includeValidation
+            sortMode,
             postLookupMatch,
         );
     }
@@ -181,7 +195,7 @@ export class OrdersReportsService {
         page: number,
         limit: number,
         includeValidation = false,
-        sortByDelivered = false,
+        sortMode: SortMode = 'entry_date',
         postLookupMatch: Record<string, any> | null = null,
     ): Promise<{ data: any[]; total: number }> {
 
@@ -192,47 +206,98 @@ export class OrdersReportsService {
             ? [{ $lookup: { from: 'order_validations', localField: 'id', foreignField: 'order_id', as: '_validation' } }]
             : [];
 
-        const deliveredAtStage: PipelineStage[] = sortByDelivered
-            ? [{
-                $addFields: {
-                    delivered_at: {
-                        $max: {
-                            $map: {
-                                input: {
-                                    $filter: {
-                                        input: { $ifNull: ['$statusHistory', []] },
-                                        as: 'h',
-                                        cond: { $eq: ['$$h.toStatus.id', 8] },
-                                    },
-                                },
-                                as: 'h',
-                                in: '$$h.changed_at',
-                            },
-                        },
-                    },
-                },
-            }]
+        const postLookupMatchStage: PipelineStage[] = postLookupMatch
+            ? [{ $match: postLookupMatch }]
             : [];
 
-        const sortStage: PipelineStage = sortByDelivered
-            ? { $sort: { delivered_at: -1 } }
-            : { $sort: { entry_date: -1 } };
+        // ── $addFields: calcula _sort_date según el modo ──────────────────────────
+        const addFieldsStage: PipelineStage[] = (() => {
+            switch (sortMode) {
+                case 'delivered_at':
+                    return [{
+                        $addFields: {
+                            _sort_date: {
+                                $max: {
+                                    $map: {
+                                        input: {
+                                            $filter: {
+                                                input: { $ifNull: ['$statusHistory', []] },
+                                                as: 'h',
+                                                cond: { $eq: ['$$h.toStatus.id', 8] },
+                                            },
+                                        },
+                                        as: 'h',
+                                        in: '$$h.changed_at',
+                                    },
+                                },
+                            },
+                        },
+                    }];
+
+                case 'finalized_at':
+                    return [{
+                        $addFields: {
+                            _sort_date: {
+                                $max: {
+                                    $map: {
+                                        input: {
+                                            $filter: {
+                                                input: { $ifNull: ['$statusHistory', []] },
+                                                as: 'h',
+                                                cond: { $eq: ['$$h.toStatus.id', 7] },
+                                            },
+                                        },
+                                        as: 'h',
+                                        in: '$$h.changed_at',
+                                    },
+                                },
+                            },
+                        },
+                    }];
+
+                case 'last_paid_at':
+                    return [{
+                        $addFields: {
+                            _sort_date: {
+                                $max: {
+                                    $map: {
+                                        input: {
+                                            $filter: {
+                                                input: { $ifNull: ['$payments', []] },
+                                                as: 'p',
+                                                cond: { $eq: ['$$p.flow_type', 'INGRESO'] },
+                                            },
+                                        },
+                                        as: 'p',
+                                        in: '$$p.paid_at',
+                                    },
+                                },
+                            },
+                        },
+                    }];
+
+                default: // 'entry_date' — no necesita $addFields
+                    return [];
+            }
+        })();
+
+        const sortStage: PipelineStage = sortMode === 'entry_date'
+            ? { $sort: { entry_date: -1 } }
+            : { $sort: { _sort_date: -1 } };
 
         const validationProjection = includeValidation
             ? { _validation: { $arrayElemAt: ['$_validation', 0] } }
             : {};
 
-        const deliveredAtProjection = sortByDelivered
-            ? { delivered_at: 1 }
+        const sortDateProjection = sortMode !== 'entry_date'
+            ? { _sort_date: 1 }
             : {};
-        const postLookupMatchStage: PipelineStage[] = postLookupMatch
-            ? [{ $match: postLookupMatch }]
-            : [];
+
         const [result] = await this.orderReplicaModel.aggregate([
             { $match: matchStage },
             ...lookupStage,
             ...postLookupMatchStage,
-            ...deliveredAtStage,
+            ...addFieldsStage,
             sortStage,
             {
                 $facet: {
@@ -251,7 +316,7 @@ export class OrdersReportsService {
                                 estimated_price: 1, statusHistory: 1,
                                 findings: 1, payments: 1,
                                 ...validationProjection,
-                                ...deliveredAtProjection,
+                                ...sortDateProjection,
                             },
                         },
                     ],
@@ -264,17 +329,19 @@ export class OrdersReportsService {
 
         const data = raw.map((order): any => {
 
-            const finalizedAt = order.statusHistory
-                ?.filter(h => h.toStatus?.id === 7)
-                .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
-            [0]?.changed_at ?? null;
+            const finalizedAt = sortMode === 'finalized_at'
+                ? (order._sort_date ?? null)
+                : order.statusHistory
+                    ?.filter(h => h.toStatus?.id === 7)
+                    .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
+                [0]?.changed_at ?? null;
 
-            const completedAt = order.delivered_at          // ← del $addFields si aplica
-                ?? order.statusHistory
+            const completedAt = sortMode === 'delivered_at'
+                ? (order._sort_date ?? null)
+                : order.statusHistory
                     ?.filter(h => h.toStatus?.id === 8)
                     .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
-                [0]?.changed_at
-                ?? null;
+                [0]?.changed_at ?? null;
 
             const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
                 sumF + (finding.procedures?.reduce((sumP, proc) =>
@@ -608,7 +675,7 @@ export class OrdersReportsService {
     // orders-reports.service.ts  — agregar método
 
     async getDashboard(companyId: string, userId: string, groups: string[]): Promise<any> {
-
+        console.log(userId)
         const isAdmin = groups.some(g => ['COMPANY_ADMIN', 'ADMINS', 'IFE'].includes(g));
         const isTechnician = groups.some(g => ['TECHNICIANS', 'CSRSPER'].includes(g));
         const isCashier = groups.includes('CASHIERS');

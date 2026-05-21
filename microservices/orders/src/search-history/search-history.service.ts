@@ -172,7 +172,7 @@ export class SearchHistoryService {
             .andWhere('h.group_id IN (:...groupIds)', { groupIds })
             .orderBy('h.search_term', 'ASC')   // requerido por DISTINCT ON
             .addOrderBy('h.searched_at', 'DESC')
-            .limit(20)
+            .limit(5)
             .getRawMany<{ searchTerm: string; groupName: string; searchedAt: Date }>();
 
         // Reordenar por fecha descendente (DISTINCT ON necesitó el ORDER BY previo)
