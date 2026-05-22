@@ -14,6 +14,8 @@ import { OrdersFilterInternalDto } from '../orders-relay/schemas/order-filters-i
 // Enum de claves válidas — agrega aquí cuando haya nuevas tarjetas
 import { DRILL_CARD_KEYS, DrillCardKey } from './constants/drill-cards.constants';
 import { OrderValidation, OrderValidationDocument } from '../order-validation/schemas/order-validation.schema';
+import { EmployeeCommission, EmployeeCommissionDocument } from '../users-employees-events/schemas/employee-commission.schema';
+import { calculateCommissions, hasActiveCommissions } from './helpers/commission.helper';
 type SortMode = 'entry_date' | 'finalized_at' | 'delivered_at' | 'last_paid_at';
 @Injectable()
 export class OrdersReportsService {
@@ -32,6 +34,8 @@ export class OrdersReportsService {
         @InjectModel(OrderReplica.name)
         private orderReplicaModel: Model<OrderReplicaDocument>,
         @InjectModel(OrderValidation.name) private orderValidationModel: Model<OrderValidationDocument>,
+        @InjectModel(EmployeeCommission.name)
+        private readonly employeeCommissionModel: Model<EmployeeCommissionDocument>
     ) { }
 
 
@@ -692,10 +696,11 @@ export class OrdersReportsService {
     // ── TECHNICIAN ────────────────────────────────────────────────────────────────
     private async getTechnicianDashboard(companyId: string, userId: string): Promise<any> {
         const RESOLVED_IDS = [7, 8]; // TRABAJO_FINALIZADO, ENTREGADA
+        const FINALIZED_STATUS_ID = 7;    // TRABAJO_FINALIZADO — punto de corte para comisiones
 
-        const [byStatus, byBranch] = await Promise.all([
+        const [byStatus, byBranch, ordersForCommission, employeeCommission] = await Promise.all([
 
-            // Conteo por estado
+            // ── Conteo por estado ─────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'technicians.id': userId } },
                 { $group: { _id: '$currentStatus.name', count: { $sum: 1 } } },
@@ -703,7 +708,7 @@ export class OrdersReportsService {
                 { $sort: { count: -1 } },
             ]),
 
-            // Conteo por sucursal con resolved
+            // ── Conteo por sucursal con resolved ─────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'technicians.id': userId } },
                 {
@@ -712,25 +717,93 @@ export class OrdersReportsService {
                         total: { $sum: 1 },
                         resolved: {
                             $sum: {
-                                $cond: [{ $in: ['$currentStatus.id', RESOLVED_IDS] }, 1, 0]
-                            }
+                                $cond: [{ $in: ['$currentStatus.id', RESOLVED_IDS] }, 1, 0],
+                            },
                         },
                     },
                 },
                 { $project: { _id: 0, name: '$_id', total: 1, resolved: 1 } },
                 { $sort: { total: -1 } },
             ]),
+
+            // ── Órdenes candidatas a comisión ─────────────────────────────────────
+            // Condiciones en la query:
+            //   1. El técnico está asignado
+            //   2. La orden tiene al menos un evento TRABAJO_FINALIZADO en el historial
+            //   3. El técnico hizo al menos un procedimiento con costo
+            // Proyección mínima: solo los campos que usa calculateCommissions
+            this.orderReplicaModel.find(
+                {
+                    'company.id': companyId,
+                    'technicians.id': userId,
+                    'statusHistory.toStatus.id': FINALIZED_STATUS_ID,
+                    'findings.procedures.performedBy.id': userId,
+                    'findings.procedures.procedure_cost': { $gt: 0 },
+                },
+                {
+                    id: 1,
+                    order_number: 1,
+                    'device.type': 1,
+                    // Solo procedimientos del técnico con costo (filtro fino en el helper)
+                    'findings.procedures.id': 1,
+                    'findings.procedures.description': 1,
+                    'findings.procedures.procedure_cost': 1,
+                    'findings.procedures.performedBy': 1,
+                    // Historial: solo los eventos TRABAJO_FINALIZADO
+                    // (traemos todo y filtramos en el helper para mantener la lógica allí)
+                    'statusHistory.toStatus': 1,
+                    'statusHistory.changed_at': 1,
+                },
+            ).lean(),
+
+            // ── Configuración de comisiones del técnico ───────────────────────────
+            this.employeeCommissionModel
+                .findOne({ employeeId: userId })
+                .lean(),
         ]);
 
+        // ── Calcular comisiones ───────────────────────────────────────────────────
+        const commissions = employeeCommission?.commissions ?? [];
+        const technicianHasCommissions = hasActiveCommissions(commissions);
+
+        const commissionData = technicianHasCommissions
+            ? calculateCommissions(userId, commissions, ordersForCommission as any)
+            : null;
+
+        // ── Totales de órdenes ────────────────────────────────────────────────────
         const totalAssigned = byStatus.reduce((s, r) => s + r.count, 0);
         const totalResolved = byBranch.reduce((s, r) => s + r.resolved, 0);
 
         return {
+            // — Órdenes —
             totalAssigned,
             totalResolved,
             totalPending: totalAssigned - totalResolved,
             byStatus,
             byBranch,
+
+            // — Comisiones —
+            hasCommissions: technicianHasCommissions,
+            commissions: commissionData
+                ? {
+                    today: {
+                        total: commissionData.today.totalAmount,
+                        entries: commissionData.today.entries,
+                    },
+                    week: {
+                        total: commissionData.week.totalAmount,
+                        entries: commissionData.week.entries,
+                    },
+                    month: {
+                        total: commissionData.month.totalAmount,
+                        entries: commissionData.month.entries,
+                    },
+                    allTime: {
+                        total: commissionData.allTime.totalAmount,
+                        entries: commissionData.allTime.entries,
+                    },
+                }
+                : null,
         };
     }
 
