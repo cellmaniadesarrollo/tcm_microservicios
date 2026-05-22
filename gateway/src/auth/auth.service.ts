@@ -26,6 +26,7 @@ export class AuthService {
       // 3️⃣ Payload del token
       const payload = {
         sub: user.id,
+        username: user.name,
         email: user.email,
         companyId: user.company.id,
         companyName: user.company.name,
