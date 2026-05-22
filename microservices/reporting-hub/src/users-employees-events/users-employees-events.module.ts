@@ -8,11 +8,13 @@ import {
   UserEmployeeCache,
   UserEmployeeCacheSchema,
 } from './schemas/user-employee-cache.schema';
+import { EmployeeCommission, EmployeeCommissionSchema } from './schemas/employee-commission.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: UserEmployeeCache.name, schema: UserEmployeeCacheSchema },
+      { name: EmployeeCommission.name, schema: EmployeeCommissionSchema }
     ]),
     ClientsModule.register([
       {
@@ -31,6 +33,7 @@ import {
   controllers: [UsersEmployeesEventsController],
   exports: [UsersEmployeesEventsService, UsersEventsListener, MongooseModule.forFeature([
     { name: UserEmployeeCache.name, schema: UserEmployeeCacheSchema },
+    { name: EmployeeCommission.name, schema: EmployeeCommissionSchema }
   ]),],
 })
 export class UsersEmployeesEventsModule { }

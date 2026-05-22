@@ -49,6 +49,7 @@ export class UserEmployeeCache {
     @Prop({ type: [GroupCacheSchema], default: [] })
     groups!: GroupCache[];
 
+
     @Prop({ type: Date, default: null })
     createdAt!: Date;
 
