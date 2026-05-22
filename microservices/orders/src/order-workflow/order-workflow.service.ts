@@ -36,6 +36,7 @@ import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { ConnectableObservable } from 'rxjs';
 import { SearchHistoryService } from '../search-history/search-history.service';
+import { buildDateRangeUTC } from './helpers/date-range.helper';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -296,6 +297,7 @@ export class OrderWorkflowService {
 
 
 
+
   async listOrders(
     user: { companyId: string; branchId: string; userId: string },
     dto: any,
@@ -306,9 +308,14 @@ export class OrderWorkflowService {
       search = '',
       orderTypeId = 0,
       orderStatusId = 0,
+      dateFrom = null,
+      dateTo = null,
     } = dto;
 
     const skip = (page - 1) * limit;
+
+    // Convierte las fechas locales a rango UTC (America/Guayaquil)
+    const { from: utcFrom, to: utcTo } = buildDateRangeUTC(dateFrom, dateTo);
 
     // ==================== QUERY 1: IDs paginados ====================
     const paginatedQb = this.orderRepo
@@ -318,7 +325,7 @@ export class OrderWorkflowService {
       .leftJoin('device.model', 'deviceModel')
       .leftJoin('deviceModel.brand', 'deviceBrand')
       .leftJoin('device.imeis', 'imei')
-      .select(['o.id', 'o.createdAt'])
+      .select(['o.id', 'o.entry_date'])
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
     // ==================== BÚSQUEDA ====================
@@ -326,7 +333,6 @@ export class OrderWorkflowService {
       const cleanSearch = search.trim();
 
       if (cleanSearch.startsWith('#')) {
-        // Caso 1: Número de orden explícito → #123
         const orderNumberStr = cleanSearch.slice(1).trim();
         if (orderNumberStr !== '' && !isNaN(Number(orderNumberStr))) {
           paginatedQb.andWhere('o.order_number = :orderNumber', {
@@ -342,20 +348,15 @@ export class OrderWorkflowService {
         const isNumeric = !isNaN(Number(cleanSearch)) && cleanSearch !== '';
 
         if (isUUID) {
-          // Caso 2: UUID público de la orden
           paginatedQb.andWhere('o.public_id = :publicId', { publicId: cleanSearch });
 
         } else if (isNumeric && cleanSearch.length === 15) {
-          // Caso 3: IMEI (exacto, 15 dígitos)
           paginatedQb.andWhere('imei.imei_number = :imei', { imei: cleanSearch });
 
         } else if (isNumeric) {
-          // Caso 4: Cédula (10 dígitos) o RUC (13 dígitos)
           paginatedQb.andWhere('c.idNumber = :idNumber', { idNumber: cleanSearch });
 
         } else {
-          // Caso 5: Texto libre — AND entre términos, OR entre campos
-          // Ejemplo: "ju ca" → quien tenga "ju" Y "ca" en nombre/apellido/modelo/marca
           const terms = cleanSearch.split(' ').filter(Boolean);
           terms.forEach((term, i) => {
             paginatedQb.andWhere(
@@ -363,7 +364,7 @@ export class OrderWorkflowService {
                 q.where(`c.firstName ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
                   .orWhere(`c.lastName ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
                   .orWhere(`deviceModel.models_name ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
-                  .orWhere(`deviceBrand.brands_name ILIKE :t${i}`, { [`t${i}`]: `%${term}%` })
+                  .orWhere(`deviceBrand.brands_name ILIKE :t${i}`, { [`t${i}`]: `%${term}%` });
               }),
             );
           });
@@ -380,7 +381,15 @@ export class OrderWorkflowService {
       paginatedQb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
     }
 
-    paginatedQb.orderBy('o.createdAt', 'DESC').skip(skip).take(limit);
+    // ==================== FILTRO DE FECHAS ====================
+    if (utcFrom) {
+      paginatedQb.andWhere('o.entry_date >= :utcFrom', { utcFrom });
+    }
+    if (utcTo) {
+      paginatedQb.andWhere('o.entry_date <= :utcTo', { utcTo });
+    }
+
+    paginatedQb.orderBy('o.entry_date', 'DESC').skip(skip).take(limit);
 
     const [idsResult, total] = await paginatedQb.getManyAndCount();
     const ids = idsResult.map((o) => o.id);
@@ -405,11 +414,11 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.createdBy', 'createdBy')
       .leftJoinAndSelect('o.delivery', 'delivery')
       .leftJoinAndSelect('delivery.deliveredBy', 'deliveredBy')
-      .leftJoinAndSelect('o.payments', 'payments')          // ← agrega esto
-      .leftJoinAndSelect('payments.paymentType', 'paymentType')   // ← y esto si quieres el tipo
-      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod') // ← y el método
+      .leftJoinAndSelect('o.payments', 'payments')
+      .leftJoinAndSelect('payments.paymentType', 'paymentType')
+      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
       .where('o.id IN (:...ids)', { ids })
-      .orderBy('o.createdAt', 'DESC')
+      .orderBy('o.entry_date', 'DESC')
       .getMany();
 
     if (search && search.trim() !== '') {
@@ -441,9 +450,21 @@ export class OrderWorkflowService {
       search = '',
       orderTypeId = 0,
       orderStatusId = 0,
+      myOrdersFilter = [],
+      dateFrom = null,
+      dateTo = null,
     } = dto;
 
+    console.log(dto);
     const skip = (page - 1) * limit;
+
+    const activeFilter: string | null =
+      Array.isArray(myOrdersFilter) && myOrdersFilter.length > 0
+        ? myOrdersFilter[0]
+        : null;
+
+    // Convierte las fechas locales a rango UTC teniendo en cuenta America/Guayaquil
+    const { from: utcFrom, to: utcTo } = buildDateRangeUTC(dateFrom, dateTo);
 
     const qb = this.orderRepo
       .createQueryBuilder('o')
@@ -455,28 +476,87 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.technicians', 'technicians')
       .leftJoinAndSelect('o.device', 'device')
       .leftJoinAndSelect('device.imeis', 'imei')
-      // ↓ Joins nuevos para marca y modelo del dispositivo
       .leftJoinAndSelect('device.model', 'deviceModel')
       .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
+      .where('o.company_id = :companyId', { companyId: user.companyId });
 
-      .where('o.company_id = :companyId', { companyId: user.companyId })
-      .andWhere('technicians.id = :technicianId', { technicianId: user.userId });
+    // ── Filtro principal según myOrdersFilter ──────────────────────────────────
+    switch (activeFilter) {
 
+      case 'ingresadas':
+        qb.andWhere('o.created_by_id = :userId', { userId: user.userId });
+        qb.orderBy('o.entry_date', 'DESC');
+        break;
+
+      case 'entregadas':
+        qb.innerJoin(
+          'order_deliveries',
+          'delivery',
+          'delivery.order_id = o.id AND delivery.delivered_by_id = :userId',
+          { userId: user.userId },
+        );
+        qb.addSelect('delivery.delivered_at', 'delivery_delivered_at');
+        qb.orderBy('delivery.delivered_at', 'DESC');
+        break;
+
+      case 'finalizadas':
+        qb.innerJoin(
+          'order_status_history',
+          'hist',
+          'hist.order_id = o.id AND hist.to_status_id = :finalStatus AND hist.changed_by_id = :userId',
+          { finalStatus: 7, userId: user.userId },
+        );
+        qb.addSelect('hist.changed_at', 'hist_changed_at');
+        qb.orderBy('hist.changed_at', 'DESC');
+        break;
+
+      case 'asignadas':
+      default:
+        qb.andWhere('technicians.id = :technicianId', { technicianId: user.userId });
+        qb.orderBy('o.entry_date', 'DESC');
+        break;
+    }
+
+    // ── Filtro de fechas ───────────────────────────────────────────────────────
+    // La columna a filtrar depende del activeFilter:
+    //   - 'entregadas'  → delivery.delivered_at  (join ya aplicado arriba)
+    //   - 'finalizadas' → hist.changed_at         (join ya aplicado arriba)
+    //   - resto         → o.entry_date
+    if (utcFrom || utcTo) {
+      let dateColumn: string;
+
+      switch (activeFilter) {
+        case 'entregadas':
+          dateColumn = 'delivery.delivered_at';
+          break;
+        case 'finalizadas':
+          dateColumn = 'hist.changed_at';
+          break;
+        default:
+          dateColumn = 'o.entry_date';
+          break;
+      }
+
+      if (utcFrom) {
+        qb.andWhere(`${dateColumn} >= :utcFrom`, { utcFrom });
+      }
+      if (utcTo) {
+        qb.andWhere(`${dateColumn} <= :utcTo`, { utcTo });
+      }
+    }
+
+    // ── Búsqueda ───────────────────────────────────────────────────────────────
     if (search && search.trim() !== '') {
       const cleanSearch = search.trim();
 
-      // ── Búsqueda por número de orden: #12, #007, etc. ──────────────────
       if (cleanSearch.startsWith('#')) {
-        const orderNumber = cleanSearch.slice(1); // quitar el "#"
-
+        const orderNumber = cleanSearch.slice(1);
         if (!isNaN(Number(orderNumber)) && orderNumber !== '') {
           qb.andWhere('o.order_number = :orderNumber', {
             orderNumber: Number(orderNumber),
           });
         }
-        // Si viene "#" solo o "#abc" (no numérico), no aplica filtro adicional
       } else {
-        // ── Búsqueda general ────────────────────────────────────────────
         qb.andWhere(
           new Brackets((q) => {
             if (!isNaN(Number(cleanSearch))) {
@@ -501,6 +581,7 @@ export class OrderWorkflowService {
       }
     }
 
+    // ── Filtros de tipo y estado ───────────────────────────────────────────────
     if (orderTypeId && orderTypeId !== 0) {
       qb.andWhere('o.order_type_id = :orderTypeId', { orderTypeId });
     }
@@ -509,7 +590,6 @@ export class OrderWorkflowService {
       qb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
     }
 
-    qb.orderBy('o.createdAt', 'DESC');
     qb.skip(skip).take(limit);
 
     const [data, total] = await qb.getManyAndCount();

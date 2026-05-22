@@ -1,4 +1,6 @@
 import {
+  IsArray,
+  IsDateString,
   IsInt,
   IsOptional,
   IsString,
@@ -8,21 +10,35 @@ import {
 export class ListOrdersGatewayDto {
   @IsInt()
   @Min(1)
-  page: number;
+  page!: number;
 
   @IsInt()
   @Min(1)
-  limit: number;
+  limit!: number;
 
   @IsOptional()
   @IsString()
-  search?: string; // "" = todos
+  search?: string;
 
   @IsOptional()
   @IsInt()
-  orderTypeId?: number; // 0 = todos
+  orderTypeId?: number;
 
   @IsOptional()
   @IsInt()
-  orderStatusId?: number; // 0 = todos
+  orderStatusId?: number;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  myOrdersFilter?: string[];
+
+  // Propiedades agregadas:
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string | null;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string | null;
 }
