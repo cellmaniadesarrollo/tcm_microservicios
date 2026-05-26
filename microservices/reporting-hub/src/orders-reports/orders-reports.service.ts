@@ -695,10 +695,23 @@ export class OrdersReportsService {
 
     // ── TECHNICIAN ────────────────────────────────────────────────────────────────
     private async getTechnicianDashboard(companyId: string, userId: string): Promise<any> {
-        const RESOLVED_IDS = [7, 8]; // TRABAJO_FINALIZADO, ENTREGADA
-        const FINALIZED_STATUS_ID = 7;    // TRABAJO_FINALIZADO — punto de corte para comisiones
+        const RESOLVED_IDS = [7, 8];
+        const FINALIZED_STATUS_ID = 7;
 
-        const [byStatus, byBranch, ordersForCommission, employeeCommission] = await Promise.all([
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfWeek = new Date(startOfToday);
+        startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const [
+            byStatus,
+            byBranch,
+            finalizationsByPeriod,
+            assignmentsByPeriod,
+            ordersForCommission,
+            employeeCommission,
+        ] = await Promise.all([
 
             // ── Conteo por estado ─────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
@@ -708,7 +721,7 @@ export class OrdersReportsService {
                 { $sort: { count: -1 } },
             ]),
 
-            // ── Conteo por sucursal con resolved ─────────────────────────────────
+            // ── Por sucursal: pendientes + finalizadas ────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'technicians.id': userId } },
                 {
@@ -716,22 +729,74 @@ export class OrdersReportsService {
                         _id: '$branch.name',
                         total: { $sum: 1 },
                         resolved: {
+                            $sum: { $cond: [{ $in: ['$currentStatus.id', RESOLVED_IDS] }, 1, 0] },
+                        },
+                        pending: {
+                            $sum: { $cond: [{ $not: { $in: ['$currentStatus.id', RESOLVED_IDS] } }, 1, 0] },
+                        },
+                    },
+                },
+                { $project: { _id: 0, name: '$_id', total: 1, resolved: 1, pending: 1 } },
+                { $sort: { total: -1 } },
+            ]),
+
+            // ── Finalizaciones por período ────────────────────────────────────────
+            // Desanidamos statusHistory para filtrar por toStatus.id = 7 y changed_at
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        'company.id': companyId,
+                        'technicians.id': userId,
+                        'statusHistory.toStatus.id': FINALIZED_STATUS_ID,
+                    },
+                },
+                { $unwind: '$statusHistory' },
+                { $match: { 'statusHistory.toStatus.id': FINALIZED_STATUS_ID } },
+                {
+                    $group: {
+                        _id: null,
+                        today: {
+                            $sum: { $cond: [{ $gte: ['$statusHistory.changed_at', startOfToday] }, 1, 0] },
+                        },
+                        week: {
+                            $sum: { $cond: [{ $gte: ['$statusHistory.changed_at', startOfWeek] }, 1, 0] },
+                        },
+                        month: {
+                            $sum: { $cond: [{ $gte: ['$statusHistory.changed_at', startOfMonth] }, 1, 0] },
+                        },
+                        allTime: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, today: 1, week: 1, month: 1, allTime: 1 } },
+            ]),
+
+            // ── Asignaciones por período (proxy: entry_date) ──────────────────────
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'technicians.id': userId } },
+                {
+                    $group: {
+                        _id: null,
+                        today: {
+                            $sum: { $cond: [{ $gte: ['$entry_date', startOfToday] }, 1, 0] },
+                        },
+                        week: {
+                            $sum: { $cond: [{ $gte: ['$entry_date', startOfWeek] }, 1, 0] },
+                        },
+                        month: {
+                            $sum: { $cond: [{ $gte: ['$entry_date', startOfMonth] }, 1, 0] },
+                        },
+                        allTime: { $sum: 1 },
+                        activePending: {
                             $sum: {
-                                $cond: [{ $in: ['$currentStatus.id', RESOLVED_IDS] }, 1, 0],
+                                $cond: [{ $not: { $in: ['$currentStatus.id', RESOLVED_IDS] } }, 1, 0],
                             },
                         },
                     },
                 },
-                { $project: { _id: 0, name: '$_id', total: 1, resolved: 1 } },
-                { $sort: { total: -1 } },
+                { $project: { _id: 0, today: 1, week: 1, month: 1, allTime: 1, activePending: 1 } },
             ]),
 
             // ── Órdenes candidatas a comisión ─────────────────────────────────────
-            // Condiciones en la query:
-            //   1. El técnico está asignado
-            //   2. La orden tiene al menos un evento TRABAJO_FINALIZADO en el historial
-            //   3. El técnico hizo al menos un procedimiento con costo
-            // Proyección mínima: solo los campos que usa calculateCommissions
             this.orderReplicaModel.find(
                 {
                     'company.id': companyId,
@@ -744,64 +809,67 @@ export class OrdersReportsService {
                     id: 1,
                     order_number: 1,
                     'device.type': 1,
-                    // Solo procedimientos del técnico con costo (filtro fino en el helper)
                     'findings.procedures.id': 1,
                     'findings.procedures.description': 1,
                     'findings.procedures.procedure_cost': 1,
                     'findings.procedures.performedBy': 1,
-                    // Historial: solo los eventos TRABAJO_FINALIZADO
-                    // (traemos todo y filtramos en el helper para mantener la lógica allí)
                     'statusHistory.toStatus': 1,
                     'statusHistory.changed_at': 1,
                 },
             ).lean(),
 
-            // ── Configuración de comisiones del técnico ───────────────────────────
-            this.employeeCommissionModel
-                .findOne({ employeeId: userId })
-                .lean(),
+            // ── Configuración de comisiones ───────────────────────────────────────
+            this.employeeCommissionModel.findOne({ employeeId: userId }).lean(),
         ]);
+
+        // ── Normalizar resultados de agregaciones de período ─────────────────────
+        const finalizations = finalizationsByPeriod[0] ?? { today: 0, week: 0, month: 0, allTime: 0 };
+        const assignments = assignmentsByPeriod[0] ?? { today: 0, week: 0, month: 0, allTime: 0, activePending: 0 };
 
         // ── Calcular comisiones ───────────────────────────────────────────────────
         const commissions = employeeCommission?.commissions ?? [];
         const technicianHasCommissions = hasActiveCommissions(commissions);
-
         const commissionData = technicianHasCommissions
             ? calculateCommissions(userId, commissions, ordersForCommission as any)
             : null;
 
-        // ── Totales de órdenes ────────────────────────────────────────────────────
+        // ── Totales generales ─────────────────────────────────────────────────────
         const totalAssigned = byStatus.reduce((s, r) => s + r.count, 0);
         const totalResolved = byBranch.reduce((s, r) => s + r.resolved, 0);
 
         return {
-            // — Órdenes —
-            totalAssigned,
-            totalResolved,
-            totalPending: totalAssigned - totalResolved,
+            // — KPIs principales —
+            summary: {
+                totalAssigned,
+                totalResolved,
+                activePending: assignments.activePending,
+            },
+
+            // — Finalizaciones por período —
+            finalizations,
+
+            // — Asignaciones por período —
+            assignments: {
+                today: assignments.today,
+                week: assignments.week,
+                month: assignments.month,
+                allTime: assignments.allTime,
+            },
+
+            // — Distribución por estado —
             byStatus,
+
+            // — Por sucursal —
             byBranch,
 
             // — Comisiones —
             hasCommissions: technicianHasCommissions,
             commissions: commissionData
                 ? {
-                    today: {
-                        total: commissionData.today.totalAmount,
-                        entries: commissionData.today.entries,
-                    },
-                    week: {
-                        total: commissionData.week.totalAmount,
-                        entries: commissionData.week.entries,
-                    },
-                    month: {
-                        total: commissionData.month.totalAmount,
-                        entries: commissionData.month.entries,
-                    },
-                    allTime: {
-                        total: commissionData.allTime.totalAmount,
-                        entries: commissionData.allTime.entries,
-                    },
+                    today: { total: commissionData.today.totalAmount, entries: commissionData.today.entries },
+                    week: { total: commissionData.week.totalAmount, entries: commissionData.week.entries },
+                    month: { total: commissionData.month.totalAmount, entries: commissionData.month.entries },
+                    allTime: { total: commissionData.allTime.totalAmount, entries: commissionData.allTime.entries },
                 }
                 : null,
         };
