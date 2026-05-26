@@ -295,10 +295,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private normalizePhone(phone: string): string {
+        // 1. Quitar cualquier carácter que no sea un número (elimina +, espacios, guiones)
         let digits = phone.replace(/\D/g, '');
+
+        // 2. Si el número empieza con el formato local '09...', reemplazar el '0' por '593'
         if (digits.startsWith('0')) {
             digits = '593' + digits.slice(1);
         }
+
+        // 3. ¡EL PARCHE!: Si el número ya viene con '59309...', eliminar ese '0' sobrante
+        if (digits.startsWith('5930')) {
+            digits = '593' + digits.slice(4); // Mantiene el 593 y salta el 0
+        }
+
         return digits;
     }
 
