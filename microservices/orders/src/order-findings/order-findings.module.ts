@@ -18,7 +18,7 @@ import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
   imports: [UsersEmployeesEventsModule, OrderWorkflowModule, NotificationsModule,
-    AwsS3Module, TypeOrmModule.forFeature([Attachment, FindingProcedure, OrderFinding, Order
+    AwsS3Module, TypeOrmModule.forFeature([Attachment, FindingProcedure, OrderFinding, Order, UserEmployeeCache
     ]), BroadcastModule],
   controllers: [OrderFindingsController],
   providers: [OrderFindingsService],

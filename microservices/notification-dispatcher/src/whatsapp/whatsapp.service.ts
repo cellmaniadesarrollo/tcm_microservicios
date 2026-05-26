@@ -225,15 +225,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             if (this.lastSentAt > 0 && elapsed < SEND_DELAY_MAX_MS) {
                 await this.randomDelay();
             }
-            const value = await task();
-            this.lastSentAt = Date.now();
-            return value;
+
+            // Creamos una carrera: o el envío responde, o el temporizador de 12s lo tumba
+            return await Promise.race([
+                task(),
+                new Promise<never>((_, reject) =>
+                    setTimeout(() => reject(new Error('Timeout: El envío de WhatsApp tardó demasiado en responder')), 12_000)
+                )
+            ]);
         });
 
-        // La cola avanza aunque el task falle — no se traba
         this.sendQueue = result.then(
-            () => { },
-            () => { },
+            () => { this.lastSentAt = Date.now(); },
+            () => { this.lastSentAt = Date.now(); }, // Avanzar la estampa de tiempo incluso si falló
         );
 
         return result;
@@ -244,7 +248,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     async sendText(to: string, text: string) {
         return this.enqueue(async () => {
             await this.wake();
-            const result = await this.socket!.sendMessage(this.toJid(to), { text });
+            if (!this.socket) throw new Error('No se pudo establecer la conexión con el socket de WhatsApp');
+
+            const result = await this.socket.sendMessage(this.toJid(to), { text });
             this.scheduleDisconnect();
             return result;
         });
@@ -289,10 +295,19 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
     private normalizePhone(phone: string): string {
+        // 1. Quitar cualquier carácter que no sea un número (elimina +, espacios, guiones)
         let digits = phone.replace(/\D/g, '');
+
+        // 2. Si el número empieza con el formato local '09...', reemplazar el '0' por '593'
         if (digits.startsWith('0')) {
             digits = '593' + digits.slice(1);
         }
+
+        // 3. ¡EL PARCHE!: Si el número ya viene con '59309...', eliminar ese '0' sobrante
+        if (digits.startsWith('5930')) {
+            digits = '593' + digits.slice(4); // Mantiene el 593 y salta el 0
+        }
+
         return digits;
     }
 
