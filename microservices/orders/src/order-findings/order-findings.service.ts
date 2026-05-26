@@ -16,6 +16,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { OrderWorkflowService } from '../order-workflow/order-workflow.service';
 import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
 import { BroadcastService } from '../broadcast/broadcast.service';
+import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 
 @Injectable()
 export class OrderFindingsService {
@@ -31,6 +32,9 @@ export class OrderFindingsService {
 
     @InjectRepository(Attachment)
     private readonly attachmentRepository: Repository<Attachment>,
+
+    @InjectRepository(UserEmployeeCache)
+    private readonly userEmployeeCacheRepository: Repository<UserEmployeeCache>,
 
     private readonly awsS3Service: AwsS3Service,
     private readonly notificationsService: NotificationsService,
@@ -163,6 +167,26 @@ export class OrderFindingsService {
         .relation(Order, 'technicians')
         .of(orderId)
         .add(technicianId);
+
+      // ── Emitir el evento con el snapshot del técnico ──
+      const technician = await this.userEmployeeCacheRepository.findOne({
+        where: { id: technicianId },
+      });
+
+      if (technician) {
+        await this.broadcastService.publishOrderUpdated(orderId, 'technician_added', {
+          technician: {
+            id: technician.id,
+            username: technician.username,
+            first_name: technician.first_name,
+            last_name: technician.last_name,
+            dni: technician.dni ?? null,
+            email: technician.email,
+            phone: technician.phone ?? null,
+          },
+        });
+      }
+
       console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId}`);
     }
     await this.broadcastService.publishOrderUpdated(orderId, 'procedure_added', {
