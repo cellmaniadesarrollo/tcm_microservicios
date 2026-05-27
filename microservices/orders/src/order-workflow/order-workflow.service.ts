@@ -311,7 +311,6 @@ export class OrderWorkflowService {
       dateFrom = null,
       dateTo = null,
     } = dto;
-
     const skip = (page - 1) * limit;
 
     // Convierte las fechas locales a rango UTC (America/Guayaquil)
@@ -455,7 +454,6 @@ export class OrderWorkflowService {
       dateTo = null,
     } = dto;
 
-    console.log(dto);
     const skip = (page - 1) * limit;
 
     const activeFilter: string | null =
@@ -463,7 +461,6 @@ export class OrderWorkflowService {
         ? myOrdersFilter[0]
         : null;
 
-    // Convierte las fechas locales a rango UTC teniendo en cuenta America/Guayaquil
     const { from: utcFrom, to: utcTo } = buildDateRangeUTC(dateFrom, dateTo);
 
     const qb = this.orderRepo
@@ -510,6 +507,32 @@ export class OrderWorkflowService {
         qb.orderBy('hist.changed_at', 'DESC');
         break;
 
+      case 'ejecutadas':
+        qb.innerJoin(
+          'order_findings',
+          'finding',
+          'finding.order_id = o.id AND finding.is_active = true',
+        );
+        qb.innerJoin(
+          'finding_procedures',
+          'proc',
+          'proc.finding_id = finding.id AND proc.performed_by_id = :userId AND proc.is_active = true',
+          { userId: user.userId },
+        );
+        // Evita duplicados cuando hay múltiples procedimientos del mismo técnico en la misma orden
+        qb.groupBy(`
+          o.id,
+          c.id,
+          type.id,
+          status.id,
+          priority.id,
+          device.id,
+          deviceModel.id,
+          deviceBrand.id
+        `);
+        qb.orderBy('o.entry_date', 'DESC');
+        break;
+
       case 'asignadas':
       default:
         qb.andWhere('technicians.id = :technicianId', { technicianId: user.userId });
@@ -518,10 +541,6 @@ export class OrderWorkflowService {
     }
 
     // ── Filtro de fechas ───────────────────────────────────────────────────────
-    // La columna a filtrar depende del activeFilter:
-    //   - 'entregadas'  → delivery.delivered_at  (join ya aplicado arriba)
-    //   - 'finalizadas' → hist.changed_at         (join ya aplicado arriba)
-    //   - resto         → o.entry_date
     if (utcFrom || utcTo) {
       let dateColumn: string;
 
@@ -531,6 +550,9 @@ export class OrderWorkflowService {
           break;
         case 'finalizadas':
           dateColumn = 'hist.changed_at';
+          break;
+        case 'ejecutadas':
+          dateColumn = 'proc.createdAt';
           break;
         default:
           dateColumn = 'o.entry_date';
@@ -590,6 +612,114 @@ export class OrderWorkflowService {
       qb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
     }
 
+    // ── Paginación ─────────────────────────────────────────────────────────────
+    // Para 'ejecutadas' usamos paginación manual sobre subquery porque
+    // getManyAndCount() + groupBy no cuenta correctamente las filas agrupadas.
+    if (activeFilter === 'ejecutadas') {
+      // Subquery que devuelve solo los IDs únicos de órdenes que cumplen todos los filtros
+      const subQb = this.orderRepo
+        .createQueryBuilder('o')
+        .select('DISTINCT o.id', 'id')
+        .innerJoin(
+          'order_findings',
+          'finding',
+          'finding.order_id = o.id AND finding.is_active = true',
+        )
+        .innerJoin(
+          'finding_procedures',
+          'proc',
+          'proc.finding_id = finding.id AND proc.performed_by_id = :userId AND proc.is_active = true',
+          { userId: user.userId },
+        )
+        .where('o.company_id = :companyId', { companyId: user.companyId });
+
+      // Reaplica filtros de fecha sobre proc.createdAt
+      if (utcFrom) subQb.andWhere('proc.createdAt >= :utcFrom', { utcFrom });
+      if (utcTo) subQb.andWhere('proc.createdAt <= :utcTo', { utcTo });
+
+      // Reaplica filtros de tipo y estado
+      if (orderTypeId && orderTypeId !== 0) {
+        subQb.andWhere('o.order_type_id = :orderTypeId', { orderTypeId });
+      }
+      if (orderStatusId && orderStatusId !== 0) {
+        subQb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
+      }
+
+      // Reaplica búsqueda
+      if (search && search.trim() !== '') {
+        const cleanSearch = search.trim();
+        subQb
+          .leftJoin('o.customer', 'c')
+          .leftJoin('c.contacts', 'contact');
+
+        if (cleanSearch.startsWith('#')) {
+          const orderNumber = cleanSearch.slice(1);
+          if (!isNaN(Number(orderNumber)) && orderNumber !== '') {
+            subQb.andWhere('o.order_number = :orderNumber', {
+              orderNumber: Number(orderNumber),
+            });
+          }
+        } else {
+          subQb.andWhere(
+            new Brackets((q) => {
+              if (!isNaN(Number(cleanSearch))) {
+                q.where(
+                  'c.idNumber ILIKE :num OR o.order_number::text ILIKE :num',
+                  { num: `%${cleanSearch}%` },
+                );
+              } else {
+                const terms = cleanSearch.split(' ').filter(Boolean);
+                terms.forEach((term, i) => {
+                  q.orWhere(
+                    `c.firstName ILIKE :t${i} OR c.lastName ILIKE :t${i}`,
+                    { [`t${i}`]: `%${term}%` },
+                  );
+                });
+              }
+              q.orWhere('contact.value ILIKE :search', {
+                search: `%${cleanSearch}%`,
+              });
+            }),
+          );
+        }
+      }
+
+      const rawIds = await subQb.getRawMany<{ id: number }>();
+      const ids = rawIds.map((r) => r.id);
+      const total = ids.length;
+
+      if (total === 0) {
+        return { data: [], total: 0, page, limit, totalPages: 0 };
+      }
+
+      const pagedIds = ids.slice(skip, skip + limit);
+
+      const data = await this.orderRepo
+        .createQueryBuilder('o')
+        .leftJoinAndSelect('o.customer', 'c')
+        .leftJoinAndSelect('c.contacts', 'contact')
+        .leftJoinAndSelect('o.type', 'type')
+        .leftJoinAndSelect('o.currentStatus', 'status')
+        .leftJoinAndSelect('o.priority', 'priority')
+        .leftJoinAndSelect('o.technicians', 'technicians')
+        .leftJoinAndSelect('o.device', 'device')
+        .leftJoinAndSelect('device.imeis', 'imei')
+        .leftJoinAndSelect('device.model', 'deviceModel')
+        .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
+        .whereInIds(pagedIds)
+        .orderBy('o.entry_date', 'DESC')
+        .getMany();
+
+      return {
+        data,
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      };
+    }
+
+    // ── Paginación estándar para el resto de filtros ───────────────────────────
     qb.skip(skip).take(limit);
 
     const [data, total] = await qb.getManyAndCount();

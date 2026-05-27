@@ -704,6 +704,12 @@ export class OrdersReportsService {
         startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
+        // ── Match base: órdenes donde el técnico realizó AL MENOS un procedimiento ──
+        const baseProcedureMatch = {
+            'company.id': companyId,
+            'findings.procedures.performedBy.id': userId,
+        };
+
         const [
             byStatus,
             byBranch,
@@ -711,19 +717,20 @@ export class OrdersReportsService {
             assignmentsByPeriod,
             ordersForCommission,
             employeeCommission,
+            totalResolvedByProcedure,
         ] = await Promise.all([
 
-            // ── Conteo por estado ─────────────────────────────────────────────────
+            // ── Conteo por estado (solo órdenes donde ejecutó procedimientos) ──────
             this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'technicians.id': userId } },
+                { $match: baseProcedureMatch },
                 { $group: { _id: '$currentStatus.name', count: { $sum: 1 } } },
                 { $project: { _id: 0, name: '$_id', count: 1 } },
                 { $sort: { count: -1 } },
             ]),
 
-            // ── Por sucursal: pendientes + finalizadas ────────────────────────────
+            // ── Por sucursal (solo órdenes donde ejecutó procedimientos) ────────────
             this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'technicians.id': userId } },
+                { $match: baseProcedureMatch },
                 {
                     $group: {
                         _id: '$branch.name',
@@ -740,13 +747,12 @@ export class OrdersReportsService {
                 { $sort: { total: -1 } },
             ]),
 
-            // ── Finalizaciones por período ────────────────────────────────────────
-            // Desanidamos statusHistory para filtrar por toStatus.id = 7 y changed_at
+            // ── Finalizaciones por período (ejecutó procedimiento + status 7 u 8) ───
             this.orderReplicaModel.aggregate([
                 {
                     $match: {
-                        'company.id': companyId,
-                        'technicians.id': userId,
+                        ...baseProcedureMatch,
+                        'currentStatus.id': { $in: RESOLVED_IDS },
                         'statusHistory.toStatus.id': FINALIZED_STATUS_ID,
                     },
                 },
@@ -770,7 +776,7 @@ export class OrdersReportsService {
                 { $project: { _id: 0, today: 1, week: 1, month: 1, allTime: 1 } },
             ]),
 
-            // ── Asignaciones por período (proxy: entry_date) ──────────────────────
+            // ── Asignaciones por período (estar asignado basta, sin importar procedimientos) ──
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'technicians.id': userId } },
                 {
@@ -796,7 +802,7 @@ export class OrdersReportsService {
                 { $project: { _id: 0, today: 1, week: 1, month: 1, allTime: 1, activePending: 1 } },
             ]),
 
-            // ── Órdenes candidatas a comisión ─────────────────────────────────────
+            // ── Órdenes candidatas a comisión ────────────────────────────────────────
             this.orderReplicaModel.find(
                 {
                     'company.id': companyId,
@@ -818,51 +824,44 @@ export class OrdersReportsService {
                 },
             ).lean(),
 
-            // ── Configuración de comisiones ───────────────────────────────────────
+            // ── Configuración de comisiones ───────────────────────────────────────────
             this.employeeCommissionModel.findOne({ employeeId: userId }).lean(),
+
+            // ── Total resueltas donde ejecutó al menos un procedimiento ───────────────
+            this.orderReplicaModel.countDocuments({
+                'company.id': companyId,
+                'currentStatus.id': { $in: RESOLVED_IDS },
+                'findings.procedures.performedBy.id': userId,
+            }),
         ]);
 
-        // ── Normalizar resultados de agregaciones de período ─────────────────────
         const finalizations = finalizationsByPeriod[0] ?? { today: 0, week: 0, month: 0, allTime: 0 };
         const assignments = assignmentsByPeriod[0] ?? { today: 0, week: 0, month: 0, allTime: 0, activePending: 0 };
 
-        // ── Calcular comisiones ───────────────────────────────────────────────────
         const commissions = employeeCommission?.commissions ?? [];
         const technicianHasCommissions = hasActiveCommissions(commissions);
         const commissionData = technicianHasCommissions
             ? calculateCommissions(userId, commissions, ordersForCommission as any)
             : null;
 
-        // ── Totales generales ─────────────────────────────────────────────────────
+        // totalAssigned basado en procedimientos (byStatus ya filtra por baseProcedureMatch)
         const totalAssigned = byStatus.reduce((s, r) => s + r.count, 0);
-        const totalResolved = byBranch.reduce((s, r) => s + r.resolved, 0);
 
         return {
-            // — KPIs principales —
             summary: {
                 totalAssigned,
-                totalResolved,
+                totalResolved: totalResolvedByProcedure,
                 activePending: assignments.activePending,
             },
-
-            // — Finalizaciones por período —
             finalizations,
-
-            // — Asignaciones por período —
             assignments: {
                 today: assignments.today,
                 week: assignments.week,
                 month: assignments.month,
                 allTime: assignments.allTime,
             },
-
-            // — Distribución por estado —
             byStatus,
-
-            // — Por sucursal —
             byBranch,
-
-            // — Comisiones —
             hasCommissions: technicianHasCommissions,
             commissions: commissionData
                 ? {
