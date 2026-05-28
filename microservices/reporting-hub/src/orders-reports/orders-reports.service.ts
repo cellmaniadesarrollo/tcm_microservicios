@@ -1015,7 +1015,8 @@ export class OrdersReportsService {
             },
             validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
         };
-
+        console.log(counts)
+        // ── Cálculos derivados ────────────────────────────────────────────────────
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
         const avgTicket = counts.global.delivered > 0 ? +(totalPaid / counts.global.delivered).toFixed(2) : 0;
