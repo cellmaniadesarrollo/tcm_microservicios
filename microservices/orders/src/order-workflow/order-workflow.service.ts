@@ -420,15 +420,15 @@ export class OrderWorkflowService {
       .orderBy('o.entry_date', 'DESC')
       .getMany();
 
-    if (search && search.trim() !== '') {
-      this.searchHistoryService.saveFromSearch({
-        companyId: user.companyId,
-        userId: user.userId,
-        searchTerm: search.trim(),
-        resultCount: total,
-        searchType: 'order',
-      });
-    }
+    // if (search && search.trim() !== '') {
+    //   this.searchHistoryService.saveFromSearch({
+    //     companyId: user.companyId,
+    //     userId: user.userId,
+    //     searchTerm: search.trim(),
+    //     resultCount: total,
+    //     searchType: 'order',
+    //   });
+    // }
 
     return {
       data,
