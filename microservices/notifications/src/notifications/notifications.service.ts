@@ -19,6 +19,9 @@ export class NotificationsService {
       readHistory: [],
       viewsCount: 0,
       createdAt: new Date(),
+      // ✅ Soporte para los nuevos campos
+      observations: createDto.observations || null,
+      scheduledFor: createDto.scheduledFor || null,
     });
     return await notification.save();
   }
@@ -36,7 +39,19 @@ export class NotificationsService {
     const userId = orderEvent.userId || orderEvent.changed_by;
     const newStatus = orderData.status || orderEvent.newValue?.status || 'INGRESADO';
     const action = orderEvent.action || 'created';
-    
+
+    // ✅ FIX: userId es la fuente primaria (es quien crea/modifica la orden)
+    const createdById = orderEvent.userId
+      || orderEvent.created_by_id
+      || orderEvent.createdById
+      || orderData.createdById
+      || null;
+
+    const createdByName = orderEvent.userName
+      || orderEvent.created_by
+      || orderData.createdBy
+      || 'Sistema';
+
     // Verificar si ya existe una notificación para esta orden
     let notification = await this.notificationModel.findOne({ 
       entityType: 'order', 
@@ -66,11 +81,16 @@ export class NotificationsService {
       `📅 **Fecha creación:** ${new Date(orderEvent.timestamp).toLocaleString()}`;
     
     if (!notification) {
-      // CREAR nueva notificación (primera vez)
+      // ✅ CREAR nueva notificación con soporte para scheduledFor y observations
+      const scheduledFor = orderEvent.scheduledFor || null;
+      const observations = orderEvent.observations || null;
+
       notification = new this.notificationModel({
         _id: new Types.UUID().toString(),
         userId: userId,
         companyId: orderEvent.company_id,
+        createdById: createdById,
+        createdByName: createdByName,
         title,
         message: baseMessage,
         type: action === 'created' ? 'success' : 'info',
@@ -86,7 +106,8 @@ export class NotificationsService {
           device,
           detalleIngreso,
           technicians,
-          createdBy: orderEvent.userName || orderEvent.created_by,
+          createdBy: createdByName,
+          createdById: createdById,
           createdAt: orderEvent.timestamp
         },
         metadata: {
@@ -104,6 +125,9 @@ export class NotificationsService {
         readHistory: [],
         viewsCount: 0,
         createdAt: new Date(),
+        // ✅ Nuevos campos
+        observations: observations,
+        scheduledFor: scheduledFor,
       });
       
       // Agregar estado inicial al historial
@@ -122,7 +146,6 @@ export class NotificationsService {
     const oldStatus = notification.currentStatus;
     
     if (oldStatus !== newStatus || action === 'updated') {
-      // Agregar al historial de estados
       const statusEntry: StatusHistoryEntry = {
         status: newStatus,
         changedBy: userId,
@@ -136,8 +159,13 @@ export class NotificationsService {
       notification.action = action;
       notification.newValues = { status: newStatus };
       notification.actionDescription = orderEvent.description || `Estado cambiado a ${newStatus}`;
+
+      // Rellenar createdById si estaba vacío (parche para docs anteriores)
+      if (!notification.createdById && createdById) {
+        notification.createdById = createdById;
+        notification.createdByName = createdByName;
+      }
       
-      // Actualizar el mensaje con el historial
       const statusHistoryText = notification.statusHistory
         .map(h => `  • ${new Date(h.changedAt).toLocaleString()} → ${h.status} (por ${h.changedByName})`)
         .join('\n');
@@ -151,12 +179,103 @@ export class NotificationsService {
     return notification;
   }
 
-  // Mantener método original para compatibilidad
-  async createFromOrderEvent(orderEvent: any) {
-    return this.createOrUpdateFromOrderEvent(orderEvent);
+  // ✅ NUEVO MÉTODO: Actualizar observaciones de una notificación
+  async updateObservations(id: string, observations: string) {
+    const notification = await this.notificationModel.findOneAndUpdate(
+      { _id: id },
+      { 
+        observations: observations,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+
+    return notification;
   }
 
-  // 🔹 OBTENER notificaciones de un usuario
+  // ✅ NUEVO MÉTODO: Reagendar una notificación
+  async rescheduleNotification(id: string, scheduledFor: Date, observations?: string) {
+    const updateData: any = {
+      scheduledFor: scheduledFor,
+      updatedAt: new Date()
+    };
+
+    if (observations) {
+      updateData.observations = observations;
+    }
+
+    const notification = await this.notificationModel.findOneAndUpdate(
+      { _id: id },
+      updateData,
+      { new: true }
+    );
+
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+
+    return notification;
+  }
+
+  // ✅ NUEVO MÉTODO: Obtener notificaciones pendientes por fecha programada
+  async getScheduledNotifications(currentDate: Date = new Date()) {
+    return await this.notificationModel.find({
+      scheduledFor: { $lte: currentDate },
+      read: false
+    }).sort({ scheduledFor: 1 });
+  }
+
+  // ✅ NUEVO MÉTODO: Obtener notificaciones futuras (programadas)
+  async getFutureNotifications(page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+    const currentDate = new Date();
+
+    const query = {
+      scheduledFor: { $gt: currentDate }
+    };
+
+    const [notifications, total] = await Promise.all([
+      this.notificationModel
+        .find(query)
+        .sort({ scheduledFor: 1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.notificationModel.countDocuments(query),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications,
+    };
+  }
+
+  // ✅ NUEVO MÉTODO: Cancelar programación (enviar inmediatamente)
+  async cancelScheduling(id: string) {
+    const notification = await this.notificationModel.findOneAndUpdate(
+      { _id: id },
+      { 
+        scheduledFor: null,
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+
+    return notification;
+  }
+
+  // 🔹 OBTENER notificaciones de un usuario (solo las que deben mostrarse)
   async getUserNotifications(
     userId: string, 
     page: number = 1, 
@@ -164,11 +283,20 @@ export class NotificationsService {
     onlyUnread: boolean = false
   ) {
     const skip = (page - 1) * limit;
+    const currentDate = new Date();
     
-    const query: any = { userId };
-    if (onlyUnread) {
-      query.read = false;
-    }
+    // ✅ Solo mostrar notificaciones que:
+    // 1. Son del usuario
+    // 2. No tienen fecha programada O la fecha programada ya pasó
+    const query: any = { 
+      userId,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
+    };
+    
+    if (onlyUnread) query.read = false;
     
     const [notifications, total] = await Promise.all([
       this.notificationModel
@@ -188,6 +316,62 @@ export class NotificationsService {
       notifications,
       unreadCount: await this.getUnreadCount(userId)
     };
+  }
+
+  // ✅ OBTENER notificaciones filtradas por el creador de la orden
+  async getNotificationsByCreator(
+    createdById: string,
+    page: number = 1,
+    limit: number = 20,
+    onlyUnread: boolean = false,
+    companyId?: string,
+  ) {
+    const skip = (page - 1) * limit;
+    const currentDate = new Date();
+
+    const query: any = { 
+      createdById,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
+    };
+    
+    if (onlyUnread) query.read = false;
+    if (companyId) query.companyId = companyId;
+
+    const [notifications, total, unreadCount] = await Promise.all([
+      this.notificationModel
+        .find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .exec(),
+      this.notificationModel.countDocuments(query),
+      this.notificationModel.countDocuments({ createdById, read: false }),
+    ]);
+
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications,
+      unreadCount,
+    };
+  }
+
+  // ✅ OBTENER contador de no leídas por creador
+  async getUnreadCountByCreator(createdById: string) {
+    const currentDate = new Date();
+    return this.notificationModel.countDocuments({ 
+      createdById, 
+      read: false,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
+    });
   }
 
   // 🔹 OBTENER órdenes estancadas (usando currentStatus)
@@ -215,7 +399,11 @@ export class NotificationsService {
       daysStuck: Math.floor((Date.now() - new Date(order.createdAt).getTime()) / (1000 * 60 * 60 * 24)),
       device: order.orderData?.device,
       technicians: order.orderData?.technicians,
-      statusHistory: order.statusHistory
+      statusHistory: order.statusHistory,
+      createdById: order.createdById,
+      createdByName: order.createdByName,
+      observations: order.observations, // ✅ Incluir observaciones
+      scheduledFor: order.scheduledFor, // ✅ Incluir fecha programada
     }));
     
     console.log(`📊 [getCurrentStuckOrders] Usuario: ${userId}, Estado: ${targetStatus}, Días: ${minDays}`);
@@ -231,9 +419,14 @@ export class NotificationsService {
 
   // 🔹 OBTENER contador de notificaciones NO LEÍDAS
   async getUnreadCount(userId: string) {
+    const currentDate = new Date();
     return await this.notificationModel.countDocuments({ 
       userId, 
-      read: false 
+      read: false,
+      $or: [
+        { scheduledFor: null },
+        { scheduledFor: { $lte: currentDate } }
+      ]
     });
   }
 
@@ -324,7 +517,11 @@ export class NotificationsService {
       currentStatus: notification.currentStatus,
       orderData: notification.orderData,
       lastViewedAt: notification.lastViewedAt,
-      createdAt: notification.createdAt
+      createdAt: notification.createdAt,
+      createdById: notification.createdById,
+      createdByName: notification.createdByName,
+      observations: notification.observations, // ✅ Incluir observaciones
+      scheduledFor: notification.scheduledFor, // ✅ Incluir fecha programada
     };
   }
 
@@ -353,6 +550,10 @@ export class NotificationsService {
       statusHistory: record.statusHistory,
       currentStatus: record.currentStatus,
       metadata: record.metadata,
+      createdById: record.createdById,
+      createdByName: record.createdByName,
+      observations: record.observations, // ✅ Incluir observaciones
+      scheduledFor: record.scheduledFor, // ✅ Incluir fecha programada
     }));
   }
 
@@ -363,6 +564,7 @@ export class NotificationsService {
     if (filters.entityId) query.entityId = filters.entityId;
     if (filters.action) query.action = filters.action;
     if (filters.userId) query.userId = filters.userId;
+    if (filters.createdById) query.createdById = filters.createdById;
     if (filters.startDate || filters.endDate) {
       query.createdAt = {};
       if (filters.startDate) query.createdAt.$gte = filters.startDate;

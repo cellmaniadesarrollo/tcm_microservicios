@@ -37,22 +37,22 @@ export class NotificationsService {
     );
   }
 
-async getCurrentStuckOrders(userId: string, status: string = 'INGRESADO', days: number = 3) {
-  console.log(`📤 [Gateway] Consultando órdenes estancadas - userId: ${userId}, status: ${status}, days: ${days}`);
-  try {
-    const result = await lastValueFrom(
-      this.notificationsClient.send(
-        { cmd: 'get_current_stuck_orders' },
-        { userId, status, days }
-      )
-    );
-    console.log(`✅ [Gateway] Encontradas: ${result.totalStuck} órdenes`);
-    return result;
-  } catch (error) {
-    console.error(`❌ [Gateway] Error:`, error);
-    throw error;
+  async getCurrentStuckOrders(userId: string, status: string = 'INGRESADO', days: number = 3) {
+    console.log(`📤 [Gateway] Consultando órdenes estancadas - userId: ${userId}, status: ${status}, days: ${days}`);
+    try {
+      const result = await lastValueFrom(
+        this.notificationsClient.send(
+          { cmd: 'get_current_stuck_orders' },
+          { userId, status, days }
+        )
+      );
+      console.log(`✅ [Gateway] Encontradas: ${result.totalStuck} órdenes`);
+      return result;
+    } catch (error) {
+      console.error(`❌ [Gateway] Error:`, error);
+      throw error;
+    }
   }
-}
 
   async getAuditHistory(entityType: string, entityId: string, companyId: string) {
     return await lastValueFrom(
@@ -77,6 +77,60 @@ async getCurrentStuckOrders(userId: string, status: string = 'INGRESADO', days: 
       this.notificationsClient.send(
         { cmd: 'track_access' },
         { notificationId, userId, actionData }
+      )
+    );
+  }
+
+    // ============================================
+  // ✅ NUEVOS MÉTODOS
+  // ============================================
+
+  async updateObservations(id: string, observations: string) {
+    console.log(`📤 [Gateway] updateObservations - id: ${id}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'update_observations' },
+        { id, observations }
+      )
+    );
+  }
+
+  async rescheduleNotification(id: string, scheduledFor: Date, observations?: string) {
+    console.log(`📤 [Gateway] rescheduleNotification - id: ${id}, scheduledFor: ${scheduledFor}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'reschedule_notification' },
+        { id, scheduledFor, observations }
+      )
+    );
+  }
+
+  async cancelScheduling(id: string) {
+    console.log(`📤 [Gateway] cancelScheduling - id: ${id}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'cancel_scheduling' },
+        { id }
+      )
+    );
+  }
+
+  async getScheduledNotifications(currentDate: Date) {
+    console.log(`📤 [Gateway] getScheduledNotifications - currentDate: ${currentDate}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_scheduled_notifications' },
+        { currentDate }
+      )
+    );
+  }
+
+  async getFutureNotifications(page: number = 1, limit: number = 20) {
+    console.log(`📤 [Gateway] getFutureNotifications - page: ${page}, limit: ${limit}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_future_notifications' },
+        { page, limit }
       )
     );
   }

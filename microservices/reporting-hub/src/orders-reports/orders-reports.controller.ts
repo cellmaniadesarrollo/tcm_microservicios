@@ -31,6 +31,7 @@ export class OrdersReportsController {
   }
 
   ) {
+
     return this.ordersReportsService.getOrdersList(data.user.companyId, data.data);
   }
 
