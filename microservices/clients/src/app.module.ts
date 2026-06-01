@@ -10,6 +10,7 @@ import { CompaniesModule } from './companies/companies.module';
 import { KafkaModule } from './kafka/kafka.module';
 import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
+import { PortalAuthModule } from './portal-auth/portal-auth.module';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -21,7 +22,7 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }), CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule, HealthModule,],
+    }), CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule, HealthModule, PortalAuthModule,],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],
 })
