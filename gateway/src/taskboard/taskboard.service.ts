@@ -1,114 +1,379 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
-import { ClientKafka, Transport, ClientProxyFactory } from '@nestjs/microservices';
+// gateway/src/taskboard/taskboard.service.ts
+import { Injectable, Inject } from '@nestjs/common';
+import { ClientProxy } from '@nestjs/microservices';
+import { lastValueFrom } from 'rxjs';
 
 @Injectable()
-export class TaskboardService implements OnModuleInit {
-  private client: ClientKafka;
+export class TaskboardService {
+  constructor(
+    @Inject('TASKBOARD_CLIENT')
+    private readonly taskboardClient: ClientProxy,
+    @Inject('USERS_CLIENT')
+    private readonly usersClient: ClientProxy,
+  ) {}
 
-  constructor() {
-    this.client = ClientProxyFactory.create({
-      transport: Transport.KAFKA,
-      options: {
-        client: {
-          brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092'],
-          clientId: 'gateway-taskboard',
-        },
-        consumer: {
-          groupId: 'gateway-taskboard-consumer',
-        },
-      },
-    }) as ClientKafka;
+  // ========== USERS (para buscar miembros) ==========
+  
+async getAllUsers() {
+  console.log('📤 [Gateway] Enviando a Users: getAllUsers - INICIO');
+  try {
+    console.log('📤 [Gateway] Enviando mensaje TCP...');
+    const result = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
+    console.log('✅ Respuesta recibida:', result?.length || 0, 'usuarios');
+    return result;
+  } catch (error) {
+    console.error('❌ Error en getAllUsers:', error);
+    return [];
+  }
+}
+
+async searchUsers(search: string) {
+  console.log(`📤 [Gateway] searchUsers - search: ${search}`);
+  try {
+    const users = await this.getAllUsers();
+    console.log(`📤 Usuarios obtenidos: ${users?.length || 0}`);
+    if (!search) return users;
+    const filtered = users.filter(user => 
+      (user.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (user.email || '').toLowerCase().includes(search.toLowerCase())
+    );
+    console.log(`✅ Filtrados: ${filtered.length}`);
+    return filtered;
+  } catch (error) {
+    console.error('Error en searchUsers:', error);
+    return [];
+  }
+}
+
+  // ========== ROLES ==========
+  
+  async getRoles() {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getRoles`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.roles.findAll' }, {}));
   }
 
-  async onModuleInit() {
-    await this.client.connect();
-    console.log('✅ Taskboard Kafka client connected');
+  async createRole(data: any) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: createRole - name: ${data.name}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.roles.create' }, data));
   }
 
   // ========== BOARDS ==========
+  
   async createBoard(data: any) {
-    return this.client.send('boards.create', data).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: createBoard - name: ${data.name}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.create' }, data));
   }
 
   async findAllBoards() {
-    return this.client.send('boards.findAll', {}).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findAllBoards`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.findAll' }, {}));
   }
 
   async findBoardsByUser(userId: string) {
-    return this.client.send('boards.findByUser', userId).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findBoardsByUser - userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.findByUser' }, userId));
   }
 
   async findOneBoard(id: string) {
-    return this.client.send('boards.findOne', id).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findOneBoard - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.findOne' }, id));
   }
 
   async updateBoard(id: string, data: any) {
-    return this.client.send('boards.update', { id, ...data }).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: updateBoard - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.update' }, { id, ...data }));
   }
 
   async removeBoard(id: string) {
-    return this.client.send('boards.remove', id).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: removeBoard - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.remove' }, id));
   }
 
-  async addMember(id: string, userId: string) {
-    return this.client.send('boards.addMember', { id, userId }).toPromise();
+  async addMember(boardId: string, userId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: addMember - boardId: ${boardId}, userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.addMember' }, { id: boardId, userId }));
   }
 
-  async removeMember(id: string, userId: string) {
-    return this.client.send('boards.removeMember', { id, userId }).toPromise();
+async removeMember(boardId: string, userId: string) {
+  console.log(`📤 [Gateway] Enviando a TaskBoard: removeMember - boardId: ${boardId}, userId: ${userId}`);
+  
+  try {
+    const result = await lastValueFrom(
+      this.taskboardClient.send({ cmd: 'boards.removeMember' }, { boardId, userId })
+    );
+    
+    console.log(`✅ [Gateway] Respuesta recibida:`, result);
+    
+    // Si el microservicio no devuelve nada, devolver un objeto por defecto
+    if (!result) {
+      return { success: true, message: 'Miembro eliminado correctamente' };
+    }
+    
+    return result;
+  } catch (error) {
+    console.error(`❌ [Gateway] Error en removeMember:`, error);
+    throw error;
+  }
+}
+
+  // ========== MIEMBROS (obtener datos del usuario) ==========
+  
+  async getUserById(userId: string) {
+    if (!userId) {
+      console.log(`⚠️ getUserById llamado con userId vacío`);
+      return null;
+    }
+    console.log(`📤 [Gateway] Enviando a Users: getUserById - userId: ${userId}`);
+    try {
+      const users = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
+      return users.find(user => user.id === userId) || null;
+    } catch (error) {
+      console.error(`Error fetching user ${userId}:`, (error as any).message);
+      return null;
+    }
+  }
+
+  async getBoardMembersWithDetails(boardId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getBoardMembersWithDetails - boardId: ${boardId}`);
+    try {
+      // ✅ Cambiar a boards.getMembersWithDetails
+      const members = await lastValueFrom(this.taskboardClient.send({ cmd: 'boards.getMembersWithDetails' }, boardId));
+      
+      return members;
+    } catch (error) {
+      console.error(`Error en getBoardMembersWithDetails:`, (error as any).message);
+      return [];
+    }
+  }
+
+  async updateMemberRole(boardId: string, userId: string, data: { roleName: string }) {
+    console.log(`📤 [Gateway] updateMemberRole - boardId: ${boardId}, userId: ${userId}, roleName: ${data.roleName}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.updateMemberRole' }, { boardId, userId, roleName: data.roleName }));
+  }
+
+  // ========== INVITACIONES ==========
+
+  async inviteMember(boardId: string, data: { userId: string; roleName: string; expiresInDays?: number }) {
+    console.log(`📤 [Gateway] inviteMember - boardId: ${boardId}, userId: ${data.userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.inviteMember' }, { boardId, ...data }));
+  }
+
+  async acceptInvitation(invitationId: string) {
+    console.log(`📤 [Gateway] acceptInvitation - invitationId: ${invitationId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.acceptInvitation' }, invitationId));
+  }
+
+  async getPendingInvitations(userId: string) {
+    console.log(`📤 [Gateway] getPendingInvitations - userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.getPendingInvitations' }, userId));
   }
 
   // ========== TASKS ==========
+  
   async createTask(data: any) {
-    return this.client.send('tasks.create', data).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: createTask - title: ${data.title}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.create' }, data));
   }
 
   async findAllTasks() {
-    return this.client.send('tasks.findAll', {}).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findAllTasks`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.findAll' }, {}));
   }
 
   async findTasksByBoard(boardId: string) {
-    return this.client.send('tasks.findByBoard', boardId).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findTasksByBoard - boardId: ${boardId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.findByBoard' }, boardId));
   }
 
   async findTasksByUser(userId: string) {
-    return this.client.send('tasks.findByUser', userId).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findTasksByUser - userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.findByUser' }, userId));
   }
 
   async findOneTask(id: string) {
-    return this.client.send('tasks.findOne', id).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findOneTask - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.findOne' }, id));
   }
 
   async updateTask(id: string, data: any) {
-    return this.client.send('tasks.update', { id, ...data }).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: updateTask - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.update' }, { id, updateTaskDto: data }));
   }
 
   async removeTask(id: string) {
-    return this.client.send('tasks.remove', id).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: removeTask - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.remove' }, id));
+  }
+
+  // ========== COMENTARIOS ==========
+
+  async getTaskComments(taskId: string) {
+    console.log(`📤 [Gateway] getTaskComments - taskId: ${taskId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.comments.findByTask' }, taskId));
+  }
+
+  async createComment(taskId: string, data: { content: string; userId: string; parentCommentId?: string }) {
+    console.log(`📤 [Gateway] createComment - taskId: ${taskId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.comments.create' }, { taskId, ...data }));
+  }
+
+  async updateComment(commentId: string, data: { content: string }) {
+    console.log(`📤 [Gateway] updateComment - commentId: ${commentId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.comments.update' }, { id: commentId, updateCommentDto: data }));
+  }
+
+  async deleteComment(commentId: string) {
+    console.log(`📤 [Gateway] deleteComment - commentId: ${commentId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.comments.delete' }, commentId));
+  }
+
+  // ========== SUBTAREAS ==========
+
+  async getTaskSubtasks(taskId: string) {
+    console.log(`📤 [Gateway] getTaskSubtasks - taskId: ${taskId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.subtasks.findByTask' }, taskId));
+  }
+
+  async createSubtask(taskId: string, data: { title: string; description?: string; assignedTo?: string; dueDate?: string }) {
+    console.log(`📤 [Gateway] createSubtask - taskId: ${taskId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.subtasks.create' }, { parentTaskId: taskId, ...data }));
+  }
+
+  async updateSubtask(subtaskId: string, data: any) {
+    console.log(`📤 [Gateway] updateSubtask - subtaskId: ${subtaskId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.subtasks.update' }, { id: subtaskId, updateSubTaskDto: data }));
+  }
+
+  async updateSubtaskStatus(subtaskId: string, status: string) {
+    console.log(`📤 [Gateway] updateSubtaskStatus - subtaskId: ${subtaskId}, status: ${status}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.subtasks.updateStatus' }, { id: subtaskId, status }));
+  }
+
+  async deleteSubtask(subtaskId: string) {
+    console.log(`📤 [Gateway] deleteSubtask - subtaskId: ${subtaskId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.subtasks.delete' }, subtaskId));
+  }
+
+  // ========== COLUMNAS ==========
+  
+  async getColumns(boardId: string) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.getColumns' }, boardId));
+  }
+
+  async createColumn(boardId: string, data: any) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.addColumn' }, { boardId, createColumnDto: data }));
+  }
+
+  async updateColumn(columnId: string, data: any) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.updateColumn' }, { columnId, updateColumnDto: data }));
+  }
+
+  async deleteColumn(columnId: string) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.removeColumn' }, columnId));
+  }
+
+  async setupDefaultColumns(boardId: string) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.setupDefaultColumns' }, boardId));
+  }
+
+  async reorderColumns(columnIds: string[]) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.reorderColumns' }, columnIds));
+  }
+
+  async moveTask(boardId: string, data: any) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.moveTask' }, { boardId, moveTaskDto: data }));
+  }
+
+  async addTaskToColumn(columnId: string, taskId: string) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.addTaskToColumn' }, { columnId, taskId }));
+  }
+
+  async removeTaskFromColumn(columnId: string, taskId: string) {
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.removeTaskFromColumn' }, { columnId, taskId }));
   }
 
   // ========== LABELS ==========
+  
   async createLabel(data: any) {
-    return this.client.send('labels.create', data).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: createLabel - name: ${data.name}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'labels.create' }, data));
   }
 
   async findAllLabels() {
-    return this.client.send('labels.findAll', {}).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findAllLabels`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'labels.findAll' }, {}));
   }
 
   async findLabelsByBoard(boardId: string) {
-    return this.client.send('labels.findByBoard', boardId).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findLabelsByBoard - boardId: ${boardId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'labels.findByBoard' }, boardId));
   }
 
   async findOneLabel(id: string) {
-    return this.client.send('labels.findOne', id).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: findOneLabel - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'labels.findOne' }, id));
   }
 
   async updateLabel(id: string, data: any) {
-    return this.client.send('labels.update', { id, ...data }).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: updateLabel - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'labels.update' }, { id, ...data }));
   }
 
   async removeLabel(id: string) {
-    return this.client.send('labels.remove', id).toPromise();
+    console.log(`📤 [Gateway] Enviando a TaskBoard: removeLabel - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'labels.remove' }, id));
+  }
+
+  // ========== COLABORADORES ==========
+  
+  async addCollaborator(taskId: string, userId: string, addedBy: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: addCollaborator - taskId: ${taskId}, userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.addCollaborator' }, { taskId, userId, addedBy }));
+  }
+
+  async getCollaborators(taskId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getCollaborators - taskId: ${taskId}`);
+    try {
+      const collaborators = await lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.getCollaborators' }, taskId));
+      
+      if (!collaborators || collaborators.length === 0) {
+        return [];
+      }
+      
+      // Enriquecer con datos del usuario
+      const collaboratorsWithDetails = await Promise.all(
+        collaborators.map(async (collaborator: any) => {
+          if (!collaborator.userId) {
+            return {
+              ...collaborator,
+              user: { id: collaborator.userId, name_user: 'Unknown', email_user: 'unknown' }
+            };
+          }
+          
+          try {
+            const user = await this.getUserById(collaborator.userId);
+            return {
+              ...collaborator,
+              user: user || { id: collaborator.userId, name_user: 'Unknown', email_user: 'unknown' }
+            };
+          } catch (error) {
+            return {
+              ...collaborator,
+              user: { id: collaborator.userId, name_user: 'Unknown', email_user: 'unknown' }
+            };
+          }
+        })
+      );
+      
+      return collaboratorsWithDetails;
+    } catch (error) {
+      console.error(`Error en getCollaborators:`, (error as any).message);
+      return [];
+    }
+  }
+
+  async removeCollaborator(taskId: string, userId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: removeCollaborator - taskId: ${taskId}, userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.removeCollaborator' }, { taskId, userId }));
   }
 }

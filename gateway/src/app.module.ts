@@ -13,8 +13,11 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { LegacyModule } from './legacy/legacy.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { TaskboardModule } from './taskboard/taskboard.module';  // ✅ Agregar import
+
 @Module({
-  imports: [UsersModule,
+  imports: [
+    UsersModule,
     ConfigModule.forRoot({
       isGlobal: true
     }),
@@ -25,10 +28,10 @@ import { NotificationsModule } from './notifications/notifications.module';
     SubscriptionsModule,
     LegacyModule,
     ReportsModule,
-    NotificationsModule
-     
+    NotificationsModule,
+    TaskboardModule,  // ✅ Agregar aquí
   ],
   controllers: [AppController],
-  providers: [AppService ]  
+  providers: [AppService],
 })
-export class AppModule { }
+export class AppModule { } 

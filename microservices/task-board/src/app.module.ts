@@ -28,6 +28,6 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
     LabelsModule,
   ],
   controllers: [AppController],
-  providers: [AppService, KafkaListenersOrchestrator],
-})
+  providers: [AppService],
+}) 
 export class AppModule {}

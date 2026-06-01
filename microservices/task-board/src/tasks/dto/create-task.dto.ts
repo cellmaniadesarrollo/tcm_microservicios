@@ -1,3 +1,4 @@
+// tasks/dto/create-task.dto.ts
 import { 
   IsString, 
   IsOptional, 
@@ -33,12 +34,11 @@ export class CreateTaskDto {
 
   @IsUUID()
   @IsOptional()
-  assignedTo?: string;
+  columnId?: string;  // ✅ NUEVO
 
-  @IsArray()
-  @IsUUID('4', { each: true })
+  @IsUUID()
   @IsOptional()
-  collaborators?: string[];
+  assignedTo?: string;
 
   @IsUUID()
   createdBy: string;
@@ -64,4 +64,16 @@ export class CreateTaskDto {
   @IsUUID()
   @IsOptional()
   parentTaskId?: string;
+
+  @IsString()
+  @IsOptional()
+  userName?: string;
+
+  @IsUUID()
+  @IsOptional()
+  companyId?: string;
+
+  @IsString()
+  @IsOptional()
+  columnName?: string;
 }

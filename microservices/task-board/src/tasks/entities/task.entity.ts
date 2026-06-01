@@ -1,10 +1,18 @@
+// tasks/entities/task.entity.ts
 import { 
   Entity, 
   Column, 
   PrimaryGeneratedColumn, 
   CreateDateColumn, 
-  UpdateDateColumn 
+  UpdateDateColumn,
+  OneToMany,
+  ManyToOne,
+  JoinColumn
 } from 'typeorm';
+import { TaskCollaborator } from './task-collaborator.entity';
+import { TaskComment } from './task-comment.entity';
+import { SubTask } from './subtask.entity';
+import { BoardColumn } from '../../boards/entities/board-column.entity';
 
 export enum TaskPriority {
   LOW = 'low',
@@ -31,28 +39,20 @@ export class Task {
   @Column({ type: 'text', nullable: true })
   description: string;
 
-  @Column({ 
-    type: 'enum', 
-    enum: TaskStatus, 
-    default: TaskStatus.TODO 
-  })
+  @Column({ type: 'enum', enum: TaskStatus, default: TaskStatus.TODO })
   status: TaskStatus;
 
-  @Column({ 
-    type: 'enum', 
-    enum: TaskPriority, 
-    default: TaskPriority.MEDIUM 
-  })
+  @Column({ type: 'enum', enum: TaskPriority, default: TaskPriority.MEDIUM })
   priority: TaskPriority;
 
   @Column({ name: 'board_id' })
   boardId: string;
 
+  @Column({ name: 'column_id', nullable: true, type: 'uuid' })
+  columnId: string | null;
+
   @Column({ name: 'assigned_to', nullable: true })
   assignedTo: string;
-
-  @Column({ type: 'simple-array', nullable: true })
-  collaborators: string[];
 
   @Column({ name: 'created_by' })
   createdBy: string;
@@ -94,4 +94,18 @@ export class Task {
 
   @Column({ name: 'completed_at', nullable: true })
   completedAt: Date;
+
+  // Relaciones
+  @OneToMany(() => TaskCollaborator, collaborator => collaborator.task)
+  collaborators: TaskCollaborator[];
+
+  @OneToMany(() => TaskComment, comment => comment.task)
+  comments: TaskComment[];
+
+  @OneToMany(() => SubTask, subtask => subtask.parentTask)
+  subtasks: SubTask[];
+
+  @ManyToOne(() => BoardColumn, column => column.tasks)
+  @JoinColumn({ name: 'column_id' })
+  column: BoardColumn;
 }

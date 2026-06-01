@@ -1,11 +1,14 @@
+// boards/entities/board.entity.ts
 import { 
   Entity, 
   Column, 
   PrimaryGeneratedColumn, 
   CreateDateColumn, 
   UpdateDateColumn,
-  OneToMany 
+  OneToMany
 } from 'typeorm';
+import { BoardMember } from './board-member.entity';
+import { BoardColumn } from './board-column.entity';
 
 export enum BoardVisibility {
   PRIVATE = 'private',
@@ -30,28 +33,14 @@ export class Board {
   @Column({ type: 'text', nullable: true })
   description: string;
 
-  @Column({ 
-    type: 'enum', 
-    enum: BoardVisibility, 
-    default: BoardVisibility.PRIVATE 
-  })
+  @Column({ type: 'enum', enum: BoardVisibility, default: BoardVisibility.PRIVATE })
   visibility: BoardVisibility;
 
-  @Column({ 
-    type: 'enum', 
-    enum: BoardStatus, 
-    default: BoardStatus.ACTIVE 
-  })
+  @Column({ type: 'enum', enum: BoardStatus, default: BoardStatus.ACTIVE })
   status: BoardStatus;
 
   @Column({ name: 'owner_id' })
   ownerId: string;
-
-  @Column({ type: 'simple-array', nullable: true })
-  members: string[];
-
-  @Column({ type: 'simple-array', nullable: true })
-  admins: string[];
 
   @Column({ name: 'company_id', nullable: true })
   companyId: string;
@@ -72,4 +61,11 @@ export class Board {
 
   @Column({ name: 'archived_at', nullable: true })
   archivedAt: Date;
+
+  // Relaciones
+  @OneToMany(() => BoardMember, member => member.board)
+  members: BoardMember[];
+
+  @OneToMany(() => BoardColumn, column => column.board)
+  columnsList: BoardColumn[];
 }

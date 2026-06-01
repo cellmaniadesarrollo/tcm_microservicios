@@ -1,50 +1,41 @@
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Body, 
-  Patch, 
-  Param, 
-  Delete, 
-  UsePipes, 
-  ValidationPipe 
-} from '@nestjs/common';
+// labels/labels.controller.ts
+import { Controller } from '@nestjs/common';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 import { LabelsService } from './labels.service';
 import { CreateLabelDto } from './dto/create-label.dto';
 import { UpdateLabelDto } from './dto/update-label.dto';
 
-@Controller('labels')
-@UsePipes(new ValidationPipe({ transform: true }))
+@Controller()
 export class LabelsController {
   constructor(private readonly labelsService: LabelsService) {}
 
-  @Post()
-  create(@Body() createLabelDto: CreateLabelDto) {
+  @MessagePattern({ cmd: 'labels.create' })
+  create(@Payload() createLabelDto: CreateLabelDto) {
     return this.labelsService.create(createLabelDto);
   }
 
-  @Get()
+  @MessagePattern({ cmd: 'labels.findAll' })
   findAll() {
     return this.labelsService.findAll();
   }
 
-  @Get('board/:boardId')
-  findByBoard(@Param('boardId') boardId: string) {
+  @MessagePattern({ cmd: 'labels.findByBoard' })
+  findByBoard(@Payload() boardId: string) {
     return this.labelsService.findByBoard(boardId);
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
+  @MessagePattern({ cmd: 'labels.findOne' })
+  findOne(@Payload() id: string) {
     return this.labelsService.findOne(id);
   }
 
-  @Patch(':id')
-  update(@Param('id') id: string, @Body() updateLabelDto: UpdateLabelDto) {
-    return this.labelsService.update(id, updateLabelDto);
+  @MessagePattern({ cmd: 'labels.update' })
+  update(@Payload() data: { id: string; updateLabelDto: UpdateLabelDto }) {
+    return this.labelsService.update(data.id, data.updateLabelDto);
   }
 
-  @Delete(':id')
-  remove(@Param('id') id: string) {
+  @MessagePattern({ cmd: 'labels.remove' })
+  remove(@Payload() id: string) {
     return this.labelsService.remove(id);
-  }
+  } 
 }

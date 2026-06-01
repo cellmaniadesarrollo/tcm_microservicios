@@ -1,20 +1,23 @@
-name: tcm-taskBoard
+name: tcm-task-board  # Cambiar nombre
 
 services:
   taskboard:
     build:
-      context: ../../microservices/task-taskBoard
+      context: ../../microservices/task-board  # <- Ruta correcta
       dockerfile: Dockerfile.dev
-    container_name: ms-taskBoard
+    container_name: ms-task-board  # <- Cambiar nombre del contenedor
     restart: always
+    ports:
+      - "3005:3000"  # Puerto para no conflictuar
     volumes:
-      - ../../microservices/task-taskBoard:/app
+      - ../../microservices/task-board:/app  # <- Ruta correcta
       - /app/node_modules
     command: ["npm", "run", "start:dev"]
     env_file: 
       - ../.env
     environment:
       - NODE_ENV=development
+      - PORT=3000
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - DB_HOST=${DB_HOST}
       - DB_PORT=${DB_PORT}
@@ -26,11 +29,11 @@ services:
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3001/health"]
-      interval: 30s
+      test: ["CMD", "node", "-e", "require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 40s
+      retries: 10
+      start_period: 30s
 
 networks:
   backend:

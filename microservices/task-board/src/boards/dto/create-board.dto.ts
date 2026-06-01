@@ -38,8 +38,8 @@ export class CreateBoardDto {
   admins?: string[];
 
   @IsUUID()
-  @IsOptional()
-  companyId?: string;
+  // @IsOptional()
+  companyId!: string;
 
   @IsObject()
   @IsOptional()
