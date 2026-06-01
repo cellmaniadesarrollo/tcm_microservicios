@@ -456,7 +456,9 @@ export class OrdersReportsService {
         if (dto.status?.length) filter['currentStatus.id'] = { $in: dto.status.map(Number) };
         if (dto.orderType?.length) filter['type.id'] = { $in: dto.orderType.map(Number) };
         if (dto.branch?.length) filter['branch.id'] = { $in: dto.branch };
-        if (dto.technician?.length) filter['technicians.id'] = { $in: dto.technician };
+        if (dto.technician?.length) {
+            filter['findings.procedures.performedBy.id'] = { $in: dto.technician };
+        }
         if (dto.receptionist?.length) filter['createdBy.id'] = { $in: dto.receptionist };
 
         const ingresoRange = this._resolveDateRange(dto.periodMode, dto.presetPeriod, dto.dateFrom, dto.dateTo);
@@ -484,24 +486,23 @@ export class OrdersReportsService {
         return filter;
     }
 
-    private _resolveDateRange(
-        mode?: 'preset' | 'custom',
-        preset?: string,
-        from?: string,
-        to?: string,
-    ): Record<string, Date> | null {
+    private _resolveDateRange(mode?, preset?, from?, to?): Record<string, Date> | null {
+        // GYE = UTC-5 → sumar 5h para inicio del día, día+1 4:59:59 UTC para fin
+        const gyeStart = (y: number, m: number, d: number) =>
+            new Date(Date.UTC(y, m - 1, d, 5, 0, 0, 0));
+        const gyeEnd = (y: number, m: number, d: number) =>
+            new Date(Date.UTC(y, m - 1, d + 1, 4, 59, 59, 999));
+        const parse = (s: string): [number, number, number] =>
+            s.split('-').map(Number) as [number, number, number];
+
         if (mode === 'preset' && preset) {
-            const [year, month] = preset.split('-').map(Number);
-            return { $gte: new Date(year, month - 1, 1), $lt: new Date(year, month, 1) };
+            const [y, m] = parse(preset);
+            return { $gte: gyeStart(y, m, 1), $lt: gyeStart(y, m + 1, 1) };
         }
         if (mode === 'custom' && (from || to)) {
             const range: Record<string, Date> = {};
-            if (from) range.$gte = new Date(from);
-            if (to) {
-                const end = new Date(to);
-                end.setHours(23, 59, 59, 999);
-                range.$lte = end;
-            }
+            if (from) { const [y, m, d] = parse(from); range.$gte = gyeStart(y, m, d); }
+            if (to) { const [y, m, d] = parse(to); range.$lte = gyeEnd(y, m, d); }
             return range;
         }
         return null;
