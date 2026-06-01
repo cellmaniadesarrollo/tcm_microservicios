@@ -41,7 +41,7 @@ export class OrderFindingsController {
     dto: UpdateOrderFindingGatewayDto;
     user: { userId: string; companyId: string; branchId: string };
   }) {
-    console.log('aqui')
+
     return this.orderFindingsService.updateFinding(data.findingId, data.dto, data.user);
   }
 

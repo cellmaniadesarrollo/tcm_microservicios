@@ -316,7 +316,16 @@ export class OrdersRelayService {
                     );
                 }
                 break;
-
+            // ── Técnicos ─────────────────────────────────────────────────────────────────
+            case 'technician_added':
+                await this.orderModel.findOneAndUpdate(
+                    { id: orderId },
+                    {
+                        $push: { technicians: payload.technician },
+                        $set: { updatedAt: ts },
+                    },
+                );
+                break;
             default:
                 console.warn(`⚠️ changed_scope desconocido: ${scope} | order: ${orderId}`);
         }

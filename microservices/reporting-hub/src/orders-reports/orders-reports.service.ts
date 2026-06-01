@@ -8,15 +8,30 @@ import { CompanyReplica, CompanyReplicaDocument } from '../companies/schemas/com
 import { UserEmployeeCache, UserEmployeeCacheDocument } from '../users-employees-events/schemas/user-employee-cache.schema';
 import { GetOrdersFilterDto } from './dto/order-filters-metadata.dto';
 import { OrderReplica, OrderReplicaDocument } from '../orders-relay/schemas/order-replica.schema';
-
 import { RpcException } from '@nestjs/microservices';
 import { OrdersFilterInternalDto } from '../orders-relay/schemas/order-filters-internal.dto';
-// Enum de claves válidas — agrega aquí cuando haya nuevas tarjetas
 import { DRILL_CARD_KEYS, DrillCardKey } from './constants/drill-cards.constants';
 import { OrderValidation, OrderValidationDocument } from '../order-validation/schemas/order-validation.schema';
 import { EmployeeCommission, EmployeeCommissionDocument } from '../users-employees-events/schemas/employee-commission.schema';
 import { calculateCommissions, hasActiveCommissions } from './helpers/commission.helper';
+
+// ─── Helpers externos ─────────────────────────────────────────────────────────
+import {
+    TZ,
+    _nowInTZ,
+    _midnightUTC,
+    _gyeDayStart,
+    _gyeDayEnd,
+    _dayBoundaries,
+    _currentWeekBoundaries,
+    _lastWeekBoundaries,
+    _monthBoundaries,
+} from './helpers/date-time.helpers';
+import { DAY_NAMES, buildWeekDays } from './helpers/dashboard-data.helpers';
+import { PENDING_STATUS_IDS, DELIVERED_STATUS_ID } from './helpers/cashier-dashboard.constants';
+
 type SortMode = 'entry_date' | 'finalized_at' | 'delivered_at' | 'last_paid_at';
+
 @Injectable()
 export class OrdersReportsService {
     constructor(
@@ -31,14 +46,20 @@ export class OrdersReportsService {
 
         @InjectModel(UserEmployeeCache.name)
         private userEmployeeCacheModel: Model<UserEmployeeCacheDocument>,
+
         @InjectModel(OrderReplica.name)
         private orderReplicaModel: Model<OrderReplicaDocument>,
-        @InjectModel(OrderValidation.name) private orderValidationModel: Model<OrderValidationDocument>,
+
+        @InjectModel(OrderValidation.name)
+        private orderValidationModel: Model<OrderValidationDocument>,
+
         @InjectModel(EmployeeCommission.name)
-        private readonly employeeCommissionModel: Model<EmployeeCommissionDocument>
+        private readonly employeeCommissionModel: Model<EmployeeCommissionDocument>,
     ) { }
 
-
+    // ─────────────────────────────────────────────────────────────────────────
+    // DRILL (tarjetas del dashboard)
+    // ─────────────────────────────────────────────────────────────────────────
 
     async getDashboardDrill(
         companyId: string,
@@ -47,12 +68,12 @@ export class OrdersReportsService {
         limit: number,
     ): Promise<{ data: any[]; total: number }> {
 
-        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
-        const { todayStart, todayEnd } = this._dayBoundaries();
+        const { todayStart, todayEnd } = _dayBoundaries();
 
         const weekStart = new Date(todayStart);
         weekStart.setDate(weekStart.getDate() - 6);
 
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
         const localNow = new Date(Date.now() + GYE_OFFSET_MS);
         const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
         const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
@@ -144,28 +165,16 @@ export class OrdersReportsService {
             } : {}),
         };
 
-        // ── SortMode por card ─────────────────────────────────────────────────────
         const SORT_MODE_MAP: Record<string, SortMode> = {
-            today_received: 'entry_date',
-            week_received: 'entry_date',
-            month_received: 'entry_date',
-            range_received: 'entry_date',
-
-            today_finished: 'finalized_at',
-            week_finished: 'finalized_at',
-            month_finished: 'finalized_at',
-            range_finished: 'finalized_at',
-
-            today_delivered: 'delivered_at',
-            week_delivered: 'delivered_at',
-            month_delivered: 'delivered_at',
-            range_delivered: 'delivered_at',
+            today_received: 'entry_date', week_received: 'entry_date',
+            month_received: 'entry_date', range_received: 'entry_date',
+            today_finished: 'finalized_at', week_finished: 'finalized_at',
+            month_finished: 'finalized_at', range_finished: 'finalized_at',
+            today_delivered: 'delivered_at', week_delivered: 'delivered_at',
+            month_delivered: 'delivered_at', range_delivered: 'delivered_at',
             global_delivered: 'delivered_at',
-
-            today_collected: 'last_paid_at',
-            week_collected: 'last_paid_at',
-            month_collected: 'last_paid_at',
-            range_collected: 'last_paid_at',
+            today_collected: 'last_paid_at', week_collected: 'last_paid_at',
+            month_collected: 'last_paid_at', range_collected: 'last_paid_at',
         };
 
         const sortMode: SortMode = SORT_MODE_MAP[resolvedCard] ?? 'entry_date';
@@ -188,7 +197,7 @@ export class OrdersReportsService {
             matchStage,
             page,
             limit,
-            sortMode === 'delivered_at' || isValidationCard, // includeValidation
+            sortMode === 'delivered_at' || isValidationCard,
             sortMode,
             postLookupMatch,
         );
@@ -214,73 +223,15 @@ export class OrdersReportsService {
             ? [{ $match: postLookupMatch }]
             : [];
 
-        // ── $addFields: calcula _sort_date según el modo ──────────────────────────
         const addFieldsStage: PipelineStage[] = (() => {
             switch (sortMode) {
                 case 'delivered_at':
-                    return [{
-                        $addFields: {
-                            _sort_date: {
-                                $max: {
-                                    $map: {
-                                        input: {
-                                            $filter: {
-                                                input: { $ifNull: ['$statusHistory', []] },
-                                                as: 'h',
-                                                cond: { $eq: ['$$h.toStatus.id', 8] },
-                                            },
-                                        },
-                                        as: 'h',
-                                        in: '$$h.changed_at',
-                                    },
-                                },
-                            },
-                        },
-                    }];
-
+                    return [{ $addFields: { _sort_date: { $max: { $map: { input: { $filter: { input: { $ifNull: ['$statusHistory', []] }, as: 'h', cond: { $eq: ['$$h.toStatus.id', 8] } } }, as: 'h', in: '$$h.changed_at' } } } } }];
                 case 'finalized_at':
-                    return [{
-                        $addFields: {
-                            _sort_date: {
-                                $max: {
-                                    $map: {
-                                        input: {
-                                            $filter: {
-                                                input: { $ifNull: ['$statusHistory', []] },
-                                                as: 'h',
-                                                cond: { $eq: ['$$h.toStatus.id', 7] },
-                                            },
-                                        },
-                                        as: 'h',
-                                        in: '$$h.changed_at',
-                                    },
-                                },
-                            },
-                        },
-                    }];
-
+                    return [{ $addFields: { _sort_date: { $max: { $map: { input: { $filter: { input: { $ifNull: ['$statusHistory', []] }, as: 'h', cond: { $eq: ['$$h.toStatus.id', 7] } } }, as: 'h', in: '$$h.changed_at' } } } } }];
                 case 'last_paid_at':
-                    return [{
-                        $addFields: {
-                            _sort_date: {
-                                $max: {
-                                    $map: {
-                                        input: {
-                                            $filter: {
-                                                input: { $ifNull: ['$payments', []] },
-                                                as: 'p',
-                                                cond: { $eq: ['$$p.flow_type', 'INGRESO'] },
-                                            },
-                                        },
-                                        as: 'p',
-                                        in: '$$p.paid_at',
-                                    },
-                                },
-                            },
-                        },
-                    }];
-
-                default: // 'entry_date' — no necesita $addFields
+                    return [{ $addFields: { _sort_date: { $max: { $map: { input: { $filter: { input: { $ifNull: ['$payments', []] }, as: 'p', cond: { $eq: ['$$p.flow_type', 'INGRESO'] } } }, as: 'p', in: '$$p.paid_at' } } } } }];
+                default:
                     return [];
             }
         })();
@@ -292,7 +243,6 @@ export class OrdersReportsService {
         const validationProjection = includeValidation
             ? { _validation: { $arrayElemAt: ['$_validation', 0] } }
             : {};
-
         const sortDateProjection = sortMode !== 'entry_date'
             ? { _sort_date: 1 }
             : {};
@@ -332,7 +282,6 @@ export class OrdersReportsService {
         const raw = result?.data ?? [];
 
         const data = raw.map((order): any => {
-
             const finalizedAt = sortMode === 'finalized_at'
                 ? (order._sort_date ?? null)
                 : order.statusHistory
@@ -380,23 +329,15 @@ export class OrdersReportsService {
                 : null;
 
             return {
-                id: order.id,
-                order_number: order.order_number,
-                revisadoAntes: order.revisadoAntes,
-                currentStatus: order.currentStatus,
-                type: order.type,
-                branch: order.branch,
-                customer: order.customer,
+                id: order.id, order_number: order.order_number,
+                revisadoAntes: order.revisadoAntes, currentStatus: order.currentStatus,
+                type: order.type, branch: order.branch, customer: order.customer,
                 device: order.device,
                 technicians: order.technicians?.map(t => ({ id: t.id, first_name: t.first_name, last_name: t.last_name })) ?? [],
-                entry_date: order.entry_date,
-                finalized_at: finalizedAt,
-                completed_at: completedAt,
+                entry_date: order.entry_date, finalized_at: finalizedAt, completed_at: completedAt,
                 estimated_price: order.estimated_price ?? null,
-                total_procedures_cost: totalProceduresCost,
-                total_paid: totalPaid,
-                findings_summary: findingsSummary,
-                has_active_warranty: hasActiveWarranty,
+                total_procedures_cost: totalProceduresCost, total_paid: totalPaid,
+                findings_summary: findingsSummary, has_active_warranty: hasActiveWarranty,
                 validation,
             };
         });
@@ -404,126 +345,70 @@ export class OrdersReportsService {
         return { data, total };
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // METADATA DE FILTROS
+    // ─────────────────────────────────────────────────────────────────────────
+
     async getOrderFiltersMetadata(companyId: string) {
         const [statuses, types, company, employees] = await Promise.all([
             this.orderStatusModel.find().select('id name').sort({ id: 1 }).lean(),
-
             this.orderTypeModel.find().select('id name').sort({ id: 1 }).lean(),
-
-            this.companyReplicaModel
-                .findOne({ id: companyId })
-                .select('branches')
-                .lean(),
-
-            this.userEmployeeCacheModel
-                .find({ companyId })
-                .select('id first_name last_name username groups')
-                .lean(),
+            this.companyReplicaModel.findOne({ id: companyId }).select('branches').lean(),
+            this.userEmployeeCacheModel.find({ companyId }).select('id first_name last_name username groups').lean(),
         ]);
 
         const branches = company?.branches || [];
-
-        // Filtrar técnicos y cajeros (ajusta los nombres exactos de tus grupos)
         const technicians = employees.filter(emp =>
-            emp.groups.some(group =>
-                ['TECHNICIANS', 'CSRSPER'].includes(group.group_name.toUpperCase())  // mejor usar toUpperCase()
-            )
+            emp.groups.some(g => ['TECHNICIANS', 'CSRSPER'].includes(g.group_name.toUpperCase()))
         );
-
         const cashiers = employees.filter(emp =>
-            emp.groups.some(group =>
-                ['CASHIERS'].includes(group.group_name.toUpperCase())
-            )
+            emp.groups.some(g => ['CASHIERS'].includes(g.group_name.toUpperCase()))
         );
 
         return {
-            orderStatuses: statuses.map(s => ({
-                id: s.id,
-                name: s.name,
-            })),
-
-            orderTypes: types.map(t => ({
-                id: t.id,
-                name: t.name,
-            })),
-
-            branches: branches.map(b => ({
-                id: b.id,
-                name: b.name,
-            })),
-
-            technicians: technicians.map(t => ({
-                id: t.id,
-                name: `${t.first_name} ${t.last_name}`.trim() || t.username,
-            })),
-
-            cashiers: cashiers.map(c => ({
-                id: c.id,
-                name: `${c.first_name} ${c.last_name}`.trim() || c.username,
-            })),
+            orderStatuses: statuses.map(s => ({ id: s.id, name: s.name })),
+            orderTypes: types.map(t => ({ id: t.id, name: t.name })),
+            branches: branches.map(b => ({ id: b.id, name: b.name })),
+            technicians: technicians.map(t => ({ id: t.id, name: `${t.first_name} ${t.last_name}`.trim() || t.username })),
+            cashiers: cashiers.map(c => ({ id: c.id, name: `${c.first_name} ${c.last_name}`.trim() || c.username })),
         };
     }
-    // ─── LA FUNCIÓN  ───────────────────────────────
-    // ─── Servicio ─────────────────────────────────────────────────────────────────
-    async getOrdersList(companyId: string, dto: GetOrdersFilterDto): Promise<{
-        data: any[];
-        total: number;
-    }> {
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // LISTA DE ÓRDENES
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async getOrdersList(companyId: string, dto: GetOrdersFilterDto): Promise<{ data: any[]; total: number }> {
         const filter = this.buildMongoFilter(companyId, dto);
 
         const [raw, total] = await Promise.all([
             this.orderReplicaModel
                 .find(filter)
-                .select({
-                    id: 1,
-                    order_number: 1,
-                    revisadoAntes: 1,
-                    currentStatus: 1,
-                    type: 1,
-                    branch: 1,
-                    customer: 1,
-                    device: 1,
-                    technicians: 1,
-                    entry_date: 1,
-                    estimated_price: 1,
-                    statusHistory: 1,
-                    findings: 1,
-                    payments: 1,
-                })
+                .select({ id: 1, order_number: 1, revisadoAntes: 1, currentStatus: 1, type: 1, branch: 1, customer: 1, device: 1, technicians: 1, entry_date: 1, estimated_price: 1, statusHistory: 1, findings: 1, payments: 1 })
                 .sort({ entry_date: -1 })
                 .lean(),
-
             this.orderReplicaModel.countDocuments(filter),
         ]);
 
         const now = new Date();
         const data = raw.map((order): any => {
-
-            // ── 1. Fecha trabajo finalizado (id = 7) ──────────────────
             const finalizedAt = order.statusHistory
                 ?.filter(h => h.toStatus?.id === 7)
                 .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
             [0]?.changed_at ?? null;
 
-            // ── 2. Fecha entregada (id = 8) ───────────────────────────
             const completedAt = order.statusHistory
                 ?.filter(h => h.toStatus?.id === 8)
                 .sort((a, b) => new Date(b.changed_at).getTime() - new Date(a.changed_at).getTime())
             [0]?.changed_at ?? null;
 
-            // ── 3. Costos de procedimientos ───────────────────────────
             const totalProceduresCost = order.findings?.reduce((sumF, finding) =>
                 sumF + (finding.procedures?.reduce((sumP, proc) =>
-                    sumP + (proc.is_active ? (proc.procedure_cost ?? 0) : 0),
-                    0) ?? 0),
-                0) ?? 0;
+                    sumP + (proc.is_active ? (proc.procedure_cost ?? 0) : 0), 0) ?? 0), 0) ?? 0;
 
-            // ── 4. Total pagado (solo INGRESO) ────────────────────────
             const totalPaid = order.payments?.reduce((sum, p) =>
-                sum + (p.flow_type === 'INGRESO' ? (p.amount ?? 0) : 0),
-                0) ?? 0;
+                sum + (p.flow_type === 'INGRESO' ? (p.amount ?? 0) : 0), 0) ?? 0;
 
-            // ── 5. Resumen de hallazgos ───────────────────────────────
             const activeFindings = order.findings?.filter(f => f.is_active) ?? [];
             const findingsSummary = {
                 total: activeFindings.length,
@@ -531,7 +416,6 @@ export class OrdersReportsService {
                 pending: activeFindings.filter(f => !f.is_resolved).length,
             };
 
-            // ── 6. Garantía activa ────────────────────────────────────
             const hasActiveWarranty = order.findings?.some(finding =>
                 finding.procedures?.some(proc => {
                     if (!proc.is_active || !proc.warranty_days || proc.warranty_days <= 0) return false;
@@ -542,7 +426,6 @@ export class OrdersReportsService {
                 }),
             ) ?? false;
 
-            // ── Mapeo limpio de device ────────────────────────────────
             const device = order.device ? {
                 model: order.device.model?.models_name,
                 brand: order.device.model?.brand_name,
@@ -550,73 +433,43 @@ export class OrdersReportsService {
             } : undefined;
 
             return {
-                id: order.id,
-                order_number: order.order_number,
-                revisadoAntes: order.revisadoAntes,
-                currentStatus: order.currentStatus,
+                id: order.id, order_number: order.order_number,
+                revisadoAntes: order.revisadoAntes, currentStatus: order.currentStatus,
                 type: order.type,
                 branch: { id: order.branch.id, name: order.branch.name },
                 customer: { id: order.customer.id, firstName: order.customer.firstName, lastName: order.customer.lastName },
                 device,
                 technicians: order.technicians?.map(t => ({ id: t.id, first_name: t.first_name, last_name: t.last_name })) ?? [],
-                entry_date: order.entry_date,
-                finalized_at: finalizedAt,   // ← nuevo
-                completed_at: completedAt,
+                entry_date: order.entry_date, finalized_at: finalizedAt, completed_at: completedAt,
                 estimated_price: order.estimated_price ?? null,
-                total_procedures_cost: totalProceduresCost,
-                total_paid: totalPaid,
-                findings_summary: findingsSummary,
-                has_active_warranty: hasActiveWarranty,
+                total_procedures_cost: totalProceduresCost, total_paid: totalPaid,
+                findings_summary: findingsSummary, has_active_warranty: hasActiveWarranty,
             };
         });
 
         return { data, total };
     }
-    // ─── Construcción del filtro Mongo desde el DTO del frontend ─────────────
 
     buildMongoFilter(companyId: string, dto: GetOrdersFilterDto): Record<string, any> {
-
         const filter: Record<string, any> = { 'company.id': companyId };
 
-        // ── Arrays de IDs → $in ──────────────────────────────────────────────────
-        if (dto.status?.length)
-            filter['currentStatus.id'] = { $in: dto.status.map(Number) };
+        if (dto.status?.length) filter['currentStatus.id'] = { $in: dto.status.map(Number) };
+        if (dto.orderType?.length) filter['type.id'] = { $in: dto.orderType.map(Number) };
+        if (dto.branch?.length) filter['branch.id'] = { $in: dto.branch };
+        if (dto.technician?.length) filter['technicians.id'] = { $in: dto.technician };
+        if (dto.receptionist?.length) filter['createdBy.id'] = { $in: dto.receptionist };
 
-        if (dto.orderType?.length)
-            filter['type.id'] = { $in: dto.orderType.map(Number) };
-
-        if (dto.branch?.length)
-            filter['branch.id'] = { $in: dto.branch };
-
-        if (dto.technician?.length)
-            filter['technicians.id'] = { $in: dto.technician };
-
-        if (dto.receptionist?.length)
-            filter['createdBy.id'] = { $in: dto.receptionist };
-
-        // ── Período de ingreso (entry_date) ──────────────────────────────────────
-        const ingresoRange = this.resolveDateRange(
-            dto.periodMode, dto.presetPeriod, dto.dateFrom, dto.dateTo
-        );
+        const ingresoRange = this._resolveDateRange(dto.periodMode, dto.presetPeriod, dto.dateFrom, dto.dateTo);
         if (ingresoRange) filter['entry_date'] = ingresoRange;
 
-        // ── Período de finalización (statusHistory → toStatus.id = 7) ────────────
-        const endRange = this.resolveDateRange(
-            dto.endPeriodMode, dto.endPresetPeriod, dto.endDateFrom, dto.endDateTo
-        );
+        const endRange = this._resolveDateRange(dto.endPeriodMode, dto.endPresetPeriod, dto.endDateFrom, dto.endDateTo);
         if (endRange) {
-            filter['statusHistory'] = {
-                $elemMatch: { 'toStatus.id': 7, changed_at: endRange },
-            };
+            filter['statusHistory'] = { $elemMatch: { 'toStatus.id': 7, changed_at: endRange } };
         }
 
-        // ── Período de entrega (statusHistory → toStatus.id = 8) ─────────────────
-        const deliveryRange = this.resolveDateRange(
-            dto.deliveryPeriodMode, dto.deliveryPresetPeriod, dto.deliveryDateFrom, dto.deliveryDateTo
-        );
+        const deliveryRange = this._resolveDateRange(dto.deliveryPeriodMode, dto.deliveryPresetPeriod, dto.deliveryDateFrom, dto.deliveryDateTo);
         if (deliveryRange) {
             if (filter['statusHistory']) {
-                // Ambos filtros activos → $all con dos $elemMatch sobre el mismo campo
                 filter['statusHistory'] = {
                     $all: [
                         { $elemMatch: filter['statusHistory'].$elemMatch },
@@ -624,31 +477,23 @@ export class OrdersReportsService {
                     ],
                 };
             } else {
-                filter['statusHistory'] = {
-                    $elemMatch: { 'toStatus.id': 8, changed_at: deliveryRange },
-                };
+                filter['statusHistory'] = { $elemMatch: { 'toStatus.id': 8, changed_at: deliveryRange } };
             }
         }
 
         return filter;
     }
 
-    // ── Helper compartido: mode + preset/custom → objeto $gte/$lt ────────────────
-    private resolveDateRange(
+    private _resolveDateRange(
         mode?: 'preset' | 'custom',
         preset?: string,
         from?: string,
         to?: string,
     ): Record<string, Date> | null {
-
         if (mode === 'preset' && preset) {
             const [year, month] = preset.split('-').map(Number);
-            return {
-                $gte: new Date(year, month - 1, 1),
-                $lt: new Date(year, month, 1),     // primer día del mes siguiente
-            };
+            return { $gte: new Date(year, month - 1, 1), $lt: new Date(year, month, 1) };
         }
-
         if (mode === 'custom' && (from || to)) {
             const range: Record<string, Date> = {};
             if (from) range.$gte = new Date(from);
@@ -659,79 +504,123 @@ export class OrdersReportsService {
             }
             return range;
         }
-
         return null;
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DETALLE DE ORDEN
+    // ─────────────────────────────────────────────────────────────────────────
+
     async getOrderDetail(companyId: string, orderId: number) {
         const order = await this.orderReplicaModel
-            .findOne({
-                id: orderId,
-                'company.id': companyId,
-            })
+            .findOne({ id: orderId, 'company.id': companyId })
             .lean();
 
         if (!order) throw new RpcException({ statusCode: 404, message: 'Orden no encontrada' });
-
         return order;
     }
 
-
-    // orders-reports.service.ts  — agregar método
+    // ─────────────────────────────────────────────────────────────────────────
+    // DASHBOARD (entry point)
+    // ─────────────────────────────────────────────────────────────────────────
 
     async getDashboard(companyId: string, userId: string, groups: string[]): Promise<any> {
-        console.log(userId)
+
         const isAdmin = groups.some(g => ['COMPANY_ADMIN', 'ADMINS', 'IFE'].includes(g));
         const isTechnician = groups.some(g => ['TECHNICIANS', 'CSRSPER'].includes(g));
         const isCashier = groups.includes('CASHIERS');
 
         const [technician, cashier, admin] = await Promise.all([
-            isTechnician ? this.getTechnicianDashboard(companyId, userId) : Promise.resolve(undefined),
-            isCashier ? this.getCashierDashboard(companyId, userId) : Promise.resolve(undefined),
-            isAdmin ? this.getAdminDashboard(companyId) : Promise.resolve(undefined),
+            isTechnician ? this._getTechnicianDashboard(companyId, userId) : Promise.resolve(undefined),
+            isCashier ? this._getCashierDashboard(companyId, userId) : Promise.resolve(undefined),
+            isAdmin ? this._getAdminDashboard(companyId) : Promise.resolve(undefined),
         ]);
 
         return { groups, technician, cashier, admin };
     }
 
-    // ── TECHNICIAN ────────────────────────────────────────────────────────────────
-    private async getTechnicianDashboard(companyId: string, userId: string): Promise<any> {
-        const RESOLVED_IDS = [7, 8]; // TRABAJO_FINALIZADO, ENTREGADA
-        const FINALIZED_STATUS_ID = 7;    // TRABAJO_FINALIZADO — punto de corte para comisiones
+    // ─────────────────────────────────────────────────────────────────────────
+    // DASHBOARD TÉCNICO
+    // ─────────────────────────────────────────────────────────────────────────
 
-        const [byStatus, byBranch, ordersForCommission, employeeCommission] = await Promise.all([
+    private async _getTechnicianDashboard(companyId: string, userId: string): Promise<any> {
+        const RESOLVED_IDS = [7, 8];
+        const FINALIZED_STATUS_ID = 7;
 
-            // ── Conteo por estado ─────────────────────────────────────────────────
+        const now = new Date();
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfWeek = new Date(startOfToday);
+        startOfWeek.setDate(startOfToday.getDate() - startOfToday.getDay());
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+        const baseProcedureMatch = {
+            'company.id': companyId,
+            'findings.procedures.performedBy.id': userId,
+        };
+
+        const [
+            byStatus,
+            byBranch,
+            finalizationsByPeriod,
+            assignmentsByPeriod,
+            ordersForCommission,
+            employeeCommission,
+            totalResolvedByProcedure,
+        ] = await Promise.all([
             this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'technicians.id': userId } },
+                { $match: baseProcedureMatch },
                 { $group: { _id: '$currentStatus.name', count: { $sum: 1 } } },
                 { $project: { _id: 0, name: '$_id', count: 1 } },
                 { $sort: { count: -1 } },
             ]),
-
-            // ── Conteo por sucursal con resolved ─────────────────────────────────
             this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'technicians.id': userId } },
+                { $match: baseProcedureMatch },
                 {
                     $group: {
                         _id: '$branch.name',
                         total: { $sum: 1 },
-                        resolved: {
-                            $sum: {
-                                $cond: [{ $in: ['$currentStatus.id', RESOLVED_IDS] }, 1, 0],
-                            },
-                        },
+                        resolved: { $sum: { $cond: [{ $in: ['$currentStatus.id', RESOLVED_IDS] }, 1, 0] } },
+                        pending: { $sum: { $cond: [{ $not: { $in: ['$currentStatus.id', RESOLVED_IDS] } }, 1, 0] } },
                     },
                 },
-                { $project: { _id: 0, name: '$_id', total: 1, resolved: 1 } },
+                { $project: { _id: 0, name: '$_id', total: 1, resolved: 1, pending: 1 } },
                 { $sort: { total: -1 } },
             ]),
-
-            // ── Órdenes candidatas a comisión ─────────────────────────────────────
-            // Condiciones en la query:
-            //   1. El técnico está asignado
-            //   2. La orden tiene al menos un evento TRABAJO_FINALIZADO en el historial
-            //   3. El técnico hizo al menos un procedimiento con costo
-            // Proyección mínima: solo los campos que usa calculateCommissions
+            this.orderReplicaModel.aggregate([
+                {
+                    $match: {
+                        ...baseProcedureMatch,
+                        'currentStatus.id': { $in: RESOLVED_IDS },
+                        'statusHistory.toStatus.id': FINALIZED_STATUS_ID,
+                    },
+                },
+                { $unwind: '$statusHistory' },
+                { $match: { 'statusHistory.toStatus.id': FINALIZED_STATUS_ID } },
+                {
+                    $group: {
+                        _id: null,
+                        today: { $sum: { $cond: [{ $gte: ['$statusHistory.changed_at', startOfToday] }, 1, 0] } },
+                        week: { $sum: { $cond: [{ $gte: ['$statusHistory.changed_at', startOfWeek] }, 1, 0] } },
+                        month: { $sum: { $cond: [{ $gte: ['$statusHistory.changed_at', startOfMonth] }, 1, 0] } },
+                        allTime: { $sum: 1 },
+                    },
+                },
+                { $project: { _id: 0, today: 1, week: 1, month: 1, allTime: 1 } },
+            ]),
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'technicians.id': userId } },
+                {
+                    $group: {
+                        _id: null,
+                        today: { $sum: { $cond: [{ $gte: ['$entry_date', startOfToday] }, 1, 0] } },
+                        week: { $sum: { $cond: [{ $gte: ['$entry_date', startOfWeek] }, 1, 0] } },
+                        month: { $sum: { $cond: [{ $gte: ['$entry_date', startOfMonth] }, 1, 0] } },
+                        allTime: { $sum: 1 },
+                        activePending: { $sum: { $cond: [{ $not: { $in: ['$currentStatus.id', RESOLVED_IDS] } }, 1, 0] } },
+                    },
+                },
+                { $project: { _id: 0, today: 1, week: 1, month: 1, allTime: 1, activePending: 1 } },
+            ]),
             this.orderReplicaModel.find(
                 {
                     'company.id': companyId,
@@ -741,230 +630,225 @@ export class OrdersReportsService {
                     'findings.procedures.procedure_cost': { $gt: 0 },
                 },
                 {
-                    id: 1,
-                    order_number: 1,
-                    'device.type': 1,
-                    // Solo procedimientos del técnico con costo (filtro fino en el helper)
-                    'findings.procedures.id': 1,
-                    'findings.procedures.description': 1,
-                    'findings.procedures.procedure_cost': 1,
-                    'findings.procedures.performedBy': 1,
-                    // Historial: solo los eventos TRABAJO_FINALIZADO
-                    // (traemos todo y filtramos en el helper para mantener la lógica allí)
-                    'statusHistory.toStatus': 1,
-                    'statusHistory.changed_at': 1,
+                    id: 1, order_number: 1, 'device.type': 1,
+                    'findings.procedures.id': 1, 'findings.procedures.description': 1,
+                    'findings.procedures.procedure_cost': 1, 'findings.procedures.performedBy': 1,
+                    'statusHistory.toStatus': 1, 'statusHistory.changed_at': 1,
                 },
             ).lean(),
-
-            // ── Configuración de comisiones del técnico ───────────────────────────
-            this.employeeCommissionModel
-                .findOne({ employeeId: userId })
-                .lean(),
+            this.employeeCommissionModel.findOne({ employeeId: userId }).lean(),
+            this.orderReplicaModel.countDocuments({
+                'company.id': companyId,
+                'currentStatus.id': { $in: RESOLVED_IDS },
+                'findings.procedures.performedBy.id': userId,
+            }),
         ]);
 
-        // ── Calcular comisiones ───────────────────────────────────────────────────
+        const finalizations = finalizationsByPeriod[0] ?? { today: 0, week: 0, month: 0, allTime: 0 };
+        const assignments = assignmentsByPeriod[0] ?? { today: 0, week: 0, month: 0, allTime: 0, activePending: 0 };
+
         const commissions = employeeCommission?.commissions ?? [];
         const technicianHasCommissions = hasActiveCommissions(commissions);
-
         const commissionData = technicianHasCommissions
             ? calculateCommissions(userId, commissions, ordersForCommission as any)
             : null;
 
-        // ── Totales de órdenes ────────────────────────────────────────────────────
         const totalAssigned = byStatus.reduce((s, r) => s + r.count, 0);
-        const totalResolved = byBranch.reduce((s, r) => s + r.resolved, 0);
 
         return {
-            // — Órdenes —
-            totalAssigned,
-            totalResolved,
-            totalPending: totalAssigned - totalResolved,
+            summary: {
+                totalAssigned,
+                totalResolved: totalResolvedByProcedure,
+                activePending: assignments.activePending,
+            },
+            finalizations,
+            assignments: { today: assignments.today, week: assignments.week, month: assignments.month, allTime: assignments.allTime },
             byStatus,
             byBranch,
-
-            // — Comisiones —
             hasCommissions: technicianHasCommissions,
             commissions: commissionData
                 ? {
-                    today: {
-                        total: commissionData.today.totalAmount,
-                        entries: commissionData.today.entries,
-                    },
-                    week: {
-                        total: commissionData.week.totalAmount,
-                        entries: commissionData.week.entries,
-                    },
-                    month: {
-                        total: commissionData.month.totalAmount,
-                        entries: commissionData.month.entries,
-                    },
-                    allTime: {
-                        total: commissionData.allTime.totalAmount,
-                        entries: commissionData.allTime.entries,
-                    },
+                    today: { total: commissionData.today.totalAmount, entries: commissionData.today.entries },
+                    week: { total: commissionData.week.totalAmount, entries: commissionData.week.entries },
+                    month: { total: commissionData.month.totalAmount, entries: commissionData.month.entries },
+                    allTime: { total: commissionData.allTime.totalAmount, entries: commissionData.allTime.entries },
                 }
                 : null,
         };
     }
 
-    // ── CASHIERS ──────────────────────────────────────────────────────────────────
-    // En getDashboard, pasar userId al cashier
-    private async getCashierDashboard(companyId: string, userId: string): Promise<any> {
-        const { todayStart, todayEnd } = this._dayBoundaries();
-        const { lastMondayUTC, lastSundayUTC, lastMondayLocal } = this._lastWeekBoundaries();
+    // ─────────────────────────────────────────────────────────────────────────
+    // DASHBOARD CAJERO
+    // ─────────────────────────────────────────────────────────────────────────
 
-        const [todayData, lastWeekData] = await Promise.all([
+    private async _getCashierDashboard(companyId: string, userId: string): Promise<any> {
+        const { todayStart, todayEnd } = _dayBoundaries();
+        const { currentMondayUTC, currentSundayUTC, currentMondayLocal } = _currentWeekBoundaries();
+        const { monthStart, monthEnd } = _monthBoundaries();
 
-            // Hoy
+        const weeks = Array.from({ length: 4 }, (_, i) => {
+            const offsetDays = (3 - i) * 7;
+            const monday = new Date(currentMondayUTC);
+            monday.setUTCDate(monday.getUTCDate() - offsetDays);
+            const sunday = new Date(monday);
+            sunday.setUTCDate(monday.getUTCDate() + 7);
+            const mondayLocal = new Date(currentMondayLocal);
+            mondayLocal.setDate(mondayLocal.getDate() - offsetDays);
+            return { monday, sunday, mondayLocal };
+        });
+
+        const [
+            todayData, thisWeekData, thisMonthData, totalData,
+            pendingNow, lastWeekData,
+            week0Data, week1Data, week2Data, week3Data,
+        ] = await Promise.all([
+
+            // HOY
             this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'createdBy.id': userId, entry_date: { $gte: todayStart, $lt: todayEnd } } },
                 {
-                    $match: {
-                        'company.id': companyId,
-                        'createdBy.id': userId,
-                        entry_date: { $gte: todayStart, $lt: todayEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        ingresadas: { $sum: 1 },
-                        entregadas: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
-                        },
+                    $facet: {
+                        orders: [{ $group: { _id: null, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }],
+                        payments: [{ $unwind: '$payments' }, { $match: { 'payments.paid_at': { $gte: todayStart, $lt: todayEnd } } }, { $group: { _id: null, cobros: { $sum: '$payments.amount' } } }],
                     },
                 },
             ]),
 
-            // Semana anterior día a día
+            // ESTA SEMANA (día a día)
             this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'createdBy.id': userId, entry_date: { $gte: currentMondayUTC, $lt: currentSundayUTC } } },
                 {
-                    $match: {
-                        'company.id': companyId,
-                        'createdBy.id': userId,
-                        entry_date: { $gte: lastMondayUTC, $lt: lastSundayUTC },
+                    $facet: {
+                        orders: [{ $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: TZ } }, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }, { $sort: { _id: 1 } }],
+                        payments: [{ $unwind: '$payments' }, { $match: { 'payments.paid_at': { $gte: currentMondayUTC, $lt: currentSundayUTC } } }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$payments.paid_at', timezone: TZ } }, cobros: { $sum: '$payments.amount' } } }],
+                        totals: [{ $group: { _id: null, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }],
                     },
                 },
+            ]),
+
+            // ESTE MES
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'createdBy.id': userId, entry_date: { $gte: monthStart, $lt: monthEnd } } },
                 {
-                    $group: {
-                        _id: {
-                            $dateToString: {
-                                format: '%Y-%m-%d',
-                                date: '$entry_date',
-                                timezone: 'America/Guayaquil',
-                            },
-                        },
-                        ingresadas: { $sum: 1 },
-                        entregadas: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
-                        },
+                    $facet: {
+                        totals: [{ $group: { _id: null, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }],
+                        cobros: [{ $unwind: '$payments' }, { $match: { 'payments.paid_at': { $gte: monthStart, $lt: monthEnd } } }, { $group: { _id: null, cobros: { $sum: '$payments.amount' } } }],
                     },
                 },
+            ]),
+
+            // TOTAL HISTÓRICO
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'createdBy.id': userId } },
+                {
+                    $facet: {
+                        totals: [{ $group: { _id: null, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }],
+                        cobros: [{ $unwind: '$payments' }, { $group: { _id: null, cobros: { $sum: '$payments.amount' } } }],
+                    },
+                },
+            ]),
+
+            // PENDIENTES ACTUALES
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'createdBy.id': userId, 'currentStatus.id': { $in: PENDING_STATUS_IDS } } },
+                { $group: { _id: '$currentStatus.id', count: { $sum: 1 }, statusName: { $first: '$currentStatus.name' } } },
                 { $sort: { _id: 1 } },
             ]),
+
+            // SEMANA ANTERIOR (detalle día a día)
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'createdBy.id': userId, entry_date: { $gte: weeks[2].monday, $lt: weeks[2].sunday } } },
+                {
+                    $facet: {
+                        orders: [{ $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: TZ } }, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }, { $sort: { _id: 1 } }],
+                        payments: [{ $unwind: '$payments' }, { $match: { 'payments.paid_at': { $gte: weeks[2].monday, $lt: weeks[2].sunday } } }, { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$payments.paid_at', timezone: TZ } }, cobros: { $sum: '$payments.amount' } } }],
+                    },
+                },
+            ]),
+
+            // ÚLTIMAS 4 SEMANAS (para gráfica)
+            ...weeks.map(({ monday, sunday }) =>
+                this.orderReplicaModel.aggregate([
+                    { $match: { 'company.id': companyId, 'createdBy.id': userId, entry_date: { $gte: monday, $lt: sunday } } },
+                    {
+                        $facet: {
+                            orders: [{ $group: { _id: null, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }],
+                            cobros: [{ $unwind: '$payments' }, { $match: { 'payments.paid_at': { $gte: monday, $lt: sunday } } }, { $group: { _id: null, cobros: { $sum: '$payments.amount' } } }],
+                        },
+                    },
+                ])
+            ),
         ]);
 
-        const DAY_NAMES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        const byDay = Array.from({ length: 7 }, (_, i) => {
-            const d = new Date(lastMondayLocal);
-            d.setDate(lastMondayLocal.getDate() + i);
-            const key = d.toISOString().split('T')[0];
-            const found = lastWeekData.find((r: any) => r._id === key);
+        // ── Normalización ─────────────────────────────────────────────────────
+        const todayFacet = todayData[0] ?? { orders: [], payments: [] };
+        const today = { ingresadas: todayFacet.orders[0]?.ingresadas ?? 0, entregadas: todayFacet.orders[0]?.entregadas ?? 0, cobros: todayFacet.payments[0]?.cobros ?? 0 };
+
+        const thisWeekFacet = thisWeekData[0] ?? { orders: [], payments: [], totals: [] };
+        const thisWeekMergedByDay = thisWeekFacet.orders.map((o: any) => {
+            const pDay = thisWeekFacet.payments.find((p: any) => p._id === o._id);
+            return { ...o, cobros: pDay?.cobros ?? 0 };
+        });
+        thisWeekFacet.payments.forEach((p: any) => {
+            if (!thisWeekMergedByDay.find((d: any) => d._id === p._id))
+                thisWeekMergedByDay.push({ _id: p._id, ingresadas: 0, entregadas: 0, cobros: p.cobros });
+        });
+        const thisWeekByDay = buildWeekDays(currentMondayLocal, thisWeekMergedByDay);
+        const thisWeek = { ingresadas: thisWeekFacet.totals[0]?.ingresadas ?? 0, entregadas: thisWeekFacet.totals[0]?.entregadas ?? 0, cobros: thisWeekFacet.payments.reduce((s: number, p: any) => s + p.cobros, 0), byDay: thisWeekByDay };
+
+        const thisMonthFacet = thisMonthData[0] ?? { totals: [], cobros: [] };
+        const thisMonth = { ingresadas: thisMonthFacet.totals[0]?.ingresadas ?? 0, entregadas: thisMonthFacet.totals[0]?.entregadas ?? 0, cobros: thisMonthFacet.cobros[0]?.cobros ?? 0 };
+
+        const totalFacet = totalData[0] ?? { totals: [], cobros: [] };
+        const total = { ingresadas: totalFacet.totals[0]?.ingresadas ?? 0, entregadas: totalFacet.totals[0]?.entregadas ?? 0, cobros: totalFacet.cobros[0]?.cobros ?? 0 };
+
+        const pendingTotal = pendingNow.reduce((s: number, g: any) => s + g.count, 0);
+        const pendingByStatus = pendingNow.map((g: any) => ({ statusId: g._id, statusName: g.statusName, count: g.count }));
+
+        const lastWeekFacet = lastWeekData[0] ?? { orders: [], payments: [] };
+        const lastWeekMergedByDay = lastWeekFacet.orders.map((o: any) => {
+            const pDay = lastWeekFacet.payments.find((p: any) => p._id === o._id);
+            return { ...o, cobros: pDay?.cobros ?? 0 };
+        });
+        lastWeekFacet.payments.forEach((p: any) => {
+            if (!lastWeekMergedByDay.find((d: any) => d._id === p._id))
+                lastWeekMergedByDay.push({ _id: p._id, ingresadas: 0, entregadas: 0, cobros: p.cobros });
+        });
+        const lastWeekByDay = buildWeekDays(weeks[2].mondayLocal, lastWeekMergedByDay);
+        const lastWeek = { ingresadas: lastWeekByDay.reduce((s, d) => s + d.ingresadas, 0), entregadas: lastWeekByDay.reduce((s, d) => s + d.entregadas, 0), cobros: lastWeekByDay.reduce((s, d) => s + d.cobros, 0), byDay: lastWeekByDay };
+
+        const rawWeeks = [week0Data, week1Data, week2Data, week3Data];
+        const last4Weeks = rawWeeks.map((wd, i) => {
+            const facet = wd[0] ?? { orders: [], cobros: [] };
+            const monday = weeks[i].monday;
+            const sunday = new Date(weeks[i].sunday);
+            sunday.setUTCDate(sunday.getUTCDate() - 1);
             return {
-                date: key,
-                dayName: DAY_NAMES[d.getDay()],
-                ingresadas: found?.ingresadas ?? 0,
-                entregadas: found?.entregadas ?? 0,
+                weekLabel: `${monday.toISOString().split('T')[0]} / ${sunday.toISOString().split('T')[0]}`,
+                ingresadas: facet.orders[0]?.ingresadas ?? 0,
+                entregadas: facet.orders[0]?.entregadas ?? 0,
+                cobros: facet.cobros[0]?.cobros ?? 0,
             };
         });
 
-        return {
-            today: {
-                ingresadas: todayData[0]?.ingresadas ?? 0,
-                entregadas: todayData[0]?.entregadas ?? 0,
-            },
-            lastWeek: {
-                ingresadas: byDay.reduce((s, d) => s + d.ingresadas, 0),
-                entregadas: byDay.reduce((s, d) => s + d.entregadas, 0),
-                byDay,
-            },
-        };
+        return { today, thisWeek, thisMonth, total, pending: { total: pendingTotal, byStatus: pendingByStatus }, lastWeek, last4Weeks };
     }
 
-    // ── ADMIN / OWNER / IFE ───────────────────────────────────────────────────────
-    // ── Utilidad: límite de "día" con corte a las 03:00 Guayaquil ────────────────
-    private _dayBoundaries(): { todayStart: Date; todayEnd: Date } {
-        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000; // UTC-5 → -18 000 000 ms
+    // ─────────────────────────────────────────────────────────────────────────
+    // HELPER DE PERÍODO (stats para admin)
+    // ─────────────────────────────────────────────────────────────────────────
 
-        const nowUTC = new Date();
-        // ✅ local = UTC + offset  (offset es negativo → resta 5 h)
-        const nowLocal = new Date(nowUTC.getTime() + GYE_OFFSET_MS);
-
-        const cutHour = 3;
-        const base = new Date(nowLocal);
-        if (nowLocal.getHours() < cutHour) {
-            base.setDate(base.getDate() - 1);
-        }
-        base.setHours(cutHour, 0, 0, 0); // base está en hora local GYE
-
-        // ✅ UTC = local - offset  (offset negativo → suma 5 h)
-        const todayStart = new Date(base.getTime() - GYE_OFFSET_MS);
-        const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-        return { todayStart, todayEnd };
-    }
-    private _lastWeekBoundaries(): { lastMondayUTC: Date; lastSundayUTC: Date; lastMondayLocal: Date } {
-        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
-        const CUT_HOUR = 3;
-
-        const nowLocal = new Date(new Date().getTime() + GYE_OFFSET_MS);
-
-        const baseLocal = new Date(nowLocal);
-        if (nowLocal.getHours() < CUT_HOUR) baseLocal.setDate(baseLocal.getDate() - 1);
-        baseLocal.setHours(CUT_HOUR, 0, 0, 0);
-
-        const dow = baseLocal.getDay() === 0 ? 7 : baseLocal.getDay(); // 1=Lun … 7=Dom
-        const lastMondayLocal = new Date(baseLocal);
-        lastMondayLocal.setDate(baseLocal.getDate() - dow - 6);
-
-        const lastSundayLocal = new Date(lastMondayLocal);
-        lastSundayLocal.setDate(lastMondayLocal.getDate() + 7);
-
-        return {
-            lastMondayUTC: new Date(lastMondayLocal.getTime() - GYE_OFFSET_MS),
-            lastSundayUTC: new Date(lastSundayLocal.getTime() - GYE_OFFSET_MS),
-            lastMondayLocal, // necesario para generar las keys del byDay
-        };
-    }
-    // ── Estadísticas de un período: órdenes ingresadas + cobros registrados ───────
     private async _periodStats(companyId: string, from: Date, to: Date) {
         const [orders, payments] = await Promise.all([
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, entry_date: { $gte: from, $lt: to } } },
-                {
-                    $group: {
-                        _id: null,
-                        received: { $sum: 1 },
-                        finished: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } },
-                        delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
-                    },
-                },
+                { $group: { _id: null, received: { $sum: 1 }, finished: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } }, delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } } } },
             ]),
-            // Cobros cuya fecha de pago cae dentro del período
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 { $unwind: '$payments' },
-                {
-                    $match: {
-                        'payments.flow_type': 'INGRESO',
-                        'payments.paid_at': { $gte: from, $lt: to },
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        collected: { $sum: '$payments.amount' },
-                        paymentsCount: { $sum: 1 },
-                    },
-                },
+                { $match: { 'payments.flow_type': 'INGRESO', 'payments.paid_at': { $gte: from, $lt: to } } },
+                { $group: { _id: null, collected: { $sum: '$payments.amount' }, paymentsCount: { $sum: 1 } } },
             ]),
         ]);
 
@@ -976,28 +860,13 @@ export class OrdersReportsService {
             paymentsCount: payments[0]?.paymentsCount ?? 0,
         };
     }
-    /**
-     * 'YYYY-MM-DD' → inicio del día en hora GYE
-     * 03:00 GYE == 08:00 UTC
-     */
-    private _gyeDayStart(dateStr: string): Date {
-        const [y, m, d] = dateStr.split('-').map(Number);
-        return new Date(Date.UTC(y, m - 1, d, 8, 0, 0, 0));
-    }
 
-    /**
-     * 'YYYY-MM-DD' → inicio del día SIGUIENTE en hora GYE
-     * Así el día `to` queda completamente incluido en el rango
-     */
-    private _gyeDayEnd(dateStr: string): Date {
-        const start = this._gyeDayStart(dateStr);
-        return new Date(start.getTime() + 24 * 60 * 60 * 1000);
-    }
+    // ─────────────────────────────────────────────────────────────────────────
+    // DASHBOARD ADMIN
+    // ─────────────────────────────────────────────────────────────────────────
 
-    // ── Dashboard principal ───────────────────────────────────────────────────────
-    private async getAdminDashboard(companyId: string): Promise<any> {
-
-        const { todayStart, todayEnd } = this._dayBoundaries();
+    private async _getAdminDashboard(companyId: string): Promise<any> {
+        const { todayStart, todayEnd } = _dayBoundaries();
 
         const weekStart = new Date(todayStart);
         weekStart.setDate(weekStart.getDate() - 6);
@@ -1011,885 +880,130 @@ export class OrdersReportsService {
         const now = new Date();
 
         const [
-            byStatus,
-            financeData,
-            byBranch,
-            byTechnician,
-            weeklyTrend,
+            byStatus, financeData, byBranch, byTechnician, weeklyTrend,
             [statsDay, statsWeek, statsMonth],
-            hourlyToday,
-            byDeviceBrand,
-            byOrderType,
-            paymentMethods,
-            resolutionTime,
-            drillCounts,
-            validationCounts,
+            hourlyToday, byDeviceBrand, byOrderType, paymentMethods,
+            resolutionTime, drillCounts, validationCounts,
         ] = await Promise.all([
 
-            // ── Por estado (global) ───────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
-                {
-                    $group: {
-                        _id: { id: '$currentStatus.id', name: '$currentStatus.name' },
-                        count: { $sum: 1 },
-                    },
-                },
+                { $group: { _id: { id: '$currentStatus.id', name: '$currentStatus.name' }, count: { $sum: 1 } } },
                 { $project: { _id: 0, id: '$_id.id', name: '$_id.name', count: 1 } },
                 { $sort: { id: 1 } },
             ]),
 
-            // ── Finanzas globales ─────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 { $unwind: { path: '$findings', preserveNullAndEmptyArrays: true } },
                 { $unwind: { path: '$findings.procedures', preserveNullAndEmptyArrays: true } },
-                {
-                    $group: {
-                        _id: null,
-                        totalProceduresCost: {
-                            $sum: {
-                                $cond: [
-                                    { $eq: ['$findings.procedures.is_active', true] },
-                                    { $ifNull: ['$findings.procedures.procedure_cost', 0] },
-                                    0,
-                                ],
-                            },
-                        },
-                    },
-                },
+                { $group: { _id: null, totalProceduresCost: { $sum: { $cond: [{ $eq: ['$findings.procedures.is_active', true] }, { $ifNull: ['$findings.procedures.procedure_cost', 0] }, 0] } } } },
             ]),
 
-            // ── Por sucursal ──────────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
-                {
-                    $group: {
-                        _id: { id: '$branch.id', name: '$branch.name' },
-                        total: { $sum: 1 },
-                        delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
-                        revenue: {
-                            $sum: {
-                                $reduce: {
-                                    input: '$payments', initialValue: 0,
-                                    in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] },
-                                },
-                            },
-                        },
-                    },
-                },
+                { $group: { _id: { id: '$branch.id', name: '$branch.name' }, total: { $sum: 1 }, delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
                 { $project: { _id: 0, branchId: '$_id.id', branchName: '$_id.name', total: 1, delivered: 1, revenue: 1 } },
                 { $sort: { total: -1 } },
             ]),
 
-            // ── Top 10 técnicos ───────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'technicians.0': { $exists: true } } },
                 { $unwind: '$technicians' },
-                {
-                    $group: {
-                        _id: '$technicians.id',
-                        name: { $first: { $concat: ['$technicians.first_name', ' ', '$technicians.last_name'] } },
-                        total: { $sum: 1 },
-                        resolved: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } },
-                    },
-                },
+                { $group: { _id: '$technicians.id', name: { $first: { $concat: ['$technicians.first_name', ' ', '$technicians.last_name'] } }, total: { $sum: 1 }, resolved: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } } } },
                 { $project: { _id: 0, techId: '$_id', name: 1, total: 1, resolved: 1 } },
-                { $sort: { total: -1 } },
-                { $limit: 10 },
+                { $sort: { total: -1 } }, { $limit: 10 },
             ]),
 
-            // ── Tendencia 4 semanas ───────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, entry_date: { $gte: since4w } } },
-                {
-                    $group: {
-                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' } },
-                        ingresadas: { $sum: 1 },
-                        entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
-                        revenue: {
-                            $sum: {
-                                $reduce: {
-                                    input: '$payments', initialValue: 0,
-                                    in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] },
-                                },
-                            },
-                        },
-                    },
-                },
+                { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' } }, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
                 { $project: { _id: 0, date: '$_id', ingresadas: 1, entregadas: 1, revenue: 1 } },
                 { $sort: { date: 1 } },
             ]),
 
-            // ── Estadísticas por período: hoy / semana / mes ──────────────────────
             Promise.all([
                 this._periodStats(companyId, todayStart, todayEnd),
                 this._periodStats(companyId, weekStart, todayEnd),
                 this._periodStats(companyId, monthStart, now),
             ]),
 
-            // ── Distribución horaria de HOY ───────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, entry_date: { $gte: todayStart, $lt: todayEnd } } },
-                {
-                    $group: {
-                        _id: { $hour: { date: '$entry_date', timezone: 'America/Guayaquil' } },
-                        count: { $sum: 1 },
-                        revenue: {
-                            $sum: {
-                                $reduce: {
-                                    input: '$payments', initialValue: 0,
-                                    in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] },
-                                },
-                            },
-                        },
-                    },
-                },
+                { $group: { _id: { $hour: { date: '$entry_date', timezone: 'America/Guayaquil' } }, count: { $sum: 1 }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
                 { $project: { _id: 0, hour: '$_id', count: 1, revenue: 1 } },
                 { $sort: { hour: 1 } },
             ]),
 
-            // ── Top 8 marcas de dispositivo ───────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'device.model.brand_name': { $exists: true, $ne: null } } },
-                {
-                    $group: {
-                        _id: { id: '$device.model.brand_id', name: '$device.model.brand_name' },
-                        total: { $sum: 1 },
-                    },
-                },
+                { $group: { _id: { id: '$device.model.brand_id', name: '$device.model.brand_name' }, total: { $sum: 1 } } },
                 { $project: { _id: 0, brandId: '$_id.id', brandName: '$_id.name', total: 1 } },
-                { $sort: { total: -1 } },
-                { $limit: 8 },
+                { $sort: { total: -1 } }, { $limit: 8 },
             ]),
 
-            // ── Por tipo de orden ─────────────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
-                {
-                    $group: {
-                        _id: { id: '$type.id', name: '$type.name' },
-                        count: { $sum: 1 },
-                    },
-                },
+                { $group: { _id: { id: '$type.id', name: '$type.name' }, count: { $sum: 1 } } },
                 { $project: { _id: 0, typeId: '$_id.id', typeName: '$_id.name', count: 1 } },
                 { $sort: { count: -1 } },
             ]),
 
-            // ── Métodos de pago (INGRESO) ─────────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 { $unwind: '$payments' },
                 { $match: { 'payments.flow_type': 'INGRESO' } },
-                {
-                    $group: {
-                        _id: { id: '$payments.payment_method_id', name: '$payments.payment_method_name' },
-                        total: { $sum: '$payments.amount' },
-                        count: { $sum: 1 },
-                    },
-                },
+                { $group: { _id: { id: '$payments.payment_method_id', name: '$payments.payment_method_name' }, total: { $sum: '$payments.amount' }, count: { $sum: 1 } } },
                 { $project: { _id: 0, methodId: '$_id.id', methodName: '$_id.name', total: 1, count: 1 } },
                 { $sort: { total: -1 } },
             ]),
 
-            // ── Tiempo promedio de resolución ─────────────────────────────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'currentStatus.id': { $in: [7, 8] } } },
                 { $unwind: '$statusHistory' },
                 { $match: { 'statusHistory.toStatus.id': { $in: [7, 8] } } },
-                {
-                    $group: {
-                        _id: '$_id',
-                        entry_date: { $first: '$entry_date' },
-                        resolved_at: { $max: '$statusHistory.changed_at' },
-                    },
-                },
-                {
-                    $project: {
-                        diffDays: { $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000] },
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        avgDays: { $avg: '$diffDays' },
-                        minDays: { $min: '$diffDays' },
-                        maxDays: { $max: '$diffDays' },
-                    },
-                },
+                { $group: { _id: '$_id', entry_date: { $first: '$entry_date' }, resolved_at: { $max: '$statusHistory.changed_at' } } },
+                { $project: { diffDays: { $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000] } } },
+                { $group: { _id: null, avgDays: { $avg: '$diffDays' }, minDays: { $min: '$diffDays' }, maxDays: { $max: '$diffDays' } } },
                 { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
             ]),
 
-            // ── Conteos de tarjetas drill (1 sola query con $facet) ───────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 {
                     $facet: {
-
-                        // ── Hoy ──────────────────────────────────────────────────
-                        today_received: [
-                            { $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } },
-                            { $count: 'n' },
-                        ],
-                        today_finished: [
-                            {
-                                $match: {
-                                    'currentStatus.id': { $in: [7, 8] },
-                                    statusHistory: {
-                                        $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-                        today_delivered: [
-                            {
-                                $match: {
-                                    statusHistory: {
-                                        $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-                        today_collected: [
-                            {
-                                $match: {
-                                    payments: {
-                                        $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-
-                        // ── Semana ────────────────────────────────────────────────
-                        week_received: [
-                            { $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } },
-                            { $count: 'n' },
-                        ],
-                        week_finished: [
-                            {
-                                $match: {
-                                    'currentStatus.id': { $in: [7, 8] },
-                                    statusHistory: {
-                                        $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-                        week_delivered: [
-                            {
-                                $match: {
-                                    statusHistory: {
-                                        $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-                        week_collected: [
-                            {
-                                $match: {
-                                    payments: {
-                                        $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-
-                        // ── Mes ───────────────────────────────────────────────────
-                        month_received: [
-                            { $match: { entry_date: { $gte: monthStart, $lte: now } } },
-                            { $count: 'n' },
-                        ],
-                        month_finished: [
-                            {
-                                $match: {
-                                    'currentStatus.id': { $in: [7, 8] },
-                                    statusHistory: {
-                                        $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-                        month_delivered: [
-                            {
-                                $match: {
-                                    statusHistory: {
-                                        $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-                        month_collected: [
-                            {
-                                $match: {
-                                    payments: {
-                                        $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
+                        today_received: [{ $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } }, { $count: 'n' }],
+                        today_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        today_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        today_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        week_received: [{ $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } }, { $count: 'n' }],
+                        week_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        week_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        week_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        month_received: [{ $match: { entry_date: { $gte: monthStart, $lte: now } } }, { $count: 'n' }],
+                        month_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
+                        month_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
+                        month_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
                     },
                 },
             ]),
-            // ── Validaciones de órdenes entregadas ───────────────────────────────────
+
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, 'currentStatus.id': 8 } },
-                {
-                    $lookup: {
-                        from: 'order_validations',
-                        localField: 'id',
-                        foreignField: 'order_id',
-                        as: 'validation',
-                    },
-                },
+                { $lookup: { from: 'order_validations', localField: 'id', foreignField: 'order_id', as: 'validation' } },
                 { $unwind: { path: '$validation', preserveNullAndEmptyArrays: true } },
-                {
-                    $group: {
-                        _id: null,
-                        checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } },
-                        unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } },
-                    },
-                },
+                { $group: { _id: null, checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } }, unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } } } },
                 { $project: { _id: 0, checked: 1, unchecked: 1 } },
             ]),
-
         ]);
 
-        // ── Helper para leer el $facet ────────────────────────────────────────────
         const c = (key: string): number => drillCounts[0]?.[key]?.[0]?.n ?? 0;
-
-        // ── Globales derivados de byStatus (sin query extra) ──────────────────────
-        const statusMap: Record<number, number> = Object.fromEntries(
-            byStatus.map((s: any) => [s.id, s.count])
-        );
+        const statusMap: Record<number, number> = Object.fromEntries(byStatus.map((s: any) => [s.id, s.count]));
 
         const counts = {
-            today: {
-                received: c('today_received'),
-                finished: c('today_finished'),
-                delivered: c('today_delivered'),
-                collected: c('today_collected'),
-            },
-            week: {
-                received: c('week_received'),
-                finished: c('week_finished'),
-                delivered: c('week_delivered'),
-                collected: c('week_collected'),
-            },
-            month: {
-                received: c('month_received'),
-                finished: c('month_finished'),
-                delivered: c('month_delivered'),
-                collected: c('month_collected'),
-            },
-            global: {
-                all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
-                pending: statusMap[1] ?? 0,   // INGRESADO
-                in_progress: statusMap[6] ?? 0,   // EN_REPARACION
-                waiting_approval: statusMap[4] ?? 0,   // EN_ESPERA_APROBACION
-                waiting_parts: statusMap[5] ?? 0,   // EN_BUSQUEDA_REPUESTO
-                finished: statusMap[7] ?? 0,   // TRABAJO_FINALIZADO
-                delivered: statusMap[8] ?? 0,   // ENTREGADA
-            },
-            validations: {
-                checked: validationCounts[0]?.checked ?? 0,
-                unchecked: validationCounts[0]?.unchecked ?? 0,
-            },
-        };
-
-        // ── Cálculos derivados ────────────────────────────────────────────────────
-        const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
-        const totalCost = financeData[0]?.totalProceduresCost ?? 0;
-        const avgTicket = counts.global.delivered > 0
-            ? +(totalPaid / counts.global.delivered).toFixed(2)
-            : 0;
-
-        return {
-            periods: { today: statsDay, week: statsWeek, month: statsMonth },
-            counts,
-            totals: {
-                all: counts.global.all,
-                active: counts.global.all - counts.global.delivered,
-                delivered: counts.global.delivered,
-                finished: counts.global.finished,
-            },
-            byStatus,
-            finance: {
-                totalProceduresCost: totalCost,
-                totalPaid,
-                totalPending: totalCost - totalPaid,
-                avgTicket,
-            },
-            byBranch,
-            byTechnician,
-            byOrderType,
-            byDeviceBrand,
-            paymentMethods,
-            weeklyTrend,
-            hourlyToday,
-            resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
-            validations: {
-                checked: validationCounts[0]?.checked ?? 0,
-                unchecked: validationCounts[0]?.unchecked ?? 0,
-            },
-        };
-    }
-
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // DASHBOARD CON RANGO CUSTOM
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    async getAdminDashboardRange(
-        companyId: string,
-        from: string,       // 'YYYY-MM-DD'
-        to: string,         // 'YYYY-MM-DD'
-    ): Promise<any> {
-
-        // ── Límites UTC con corte 03:00 GYE ──────────────────────────────────────
-        const rangeStart = this._gyeDayStart(from);   // from  03:00 GYE → UTC
-        const rangeEnd = this._gyeDayEnd(to);        // to+1d 03:00 GYE → UTC
-
-        // ── Todas las queries en paralelo ─────────────────────────────────────────
-        const [
-            byStatus,
-            financeData,
-            byBranch,
-            byTechnician,
-            weeklyTrend,
-            periodStats,
-            hourlyRange,
-            byDeviceBrand,
-            byOrderType,
-            paymentMethods,
-            resolutionTime,
-            rangeCounts,
-            validationCounts,
-        ] = await Promise.all([
-
-            // ── Por estado (órdenes ingresadas en el rango) ───────────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: { id: '$currentStatus.id', name: '$currentStatus.name' },
-                        count: { $sum: 1 },
-                    },
-                },
-                { $project: { _id: 0, id: '$_id.id', name: '$_id.name', count: 1 } },
-                { $sort: { id: 1 } },
-            ]),
-
-            // ── Finanzas (órdenes ingresadas en el rango) ─────────────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                { $unwind: { path: '$findings', preserveNullAndEmptyArrays: true } },
-                { $unwind: { path: '$findings.procedures', preserveNullAndEmptyArrays: true } },
-                {
-                    $group: {
-                        _id: null,
-                        totalProceduresCost: {
-                            $sum: {
-                                $cond: [
-                                    { $eq: ['$findings.procedures.is_active', true] },
-                                    { $ifNull: ['$findings.procedures.procedure_cost', 0] },
-                                    0,
-                                ],
-                            },
-                        },
-                    },
-                },
-            ]),
-
-            // ── Por sucursal (rango) ──────────────────────────────────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: { id: '$branch.id', name: '$branch.name' },
-                        total: { $sum: 1 },
-                        delivered: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
-                        },
-                        revenue: {
-                            $sum: {
-                                $reduce: {
-                                    input: '$payments', initialValue: 0,
-                                    in: {
-                                        $add: [
-                                            '$$value',
-                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] },
-                                        ],
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        branchId: '$_id.id', branchName: '$_id.name',
-                        total: 1, delivered: 1, revenue: 1,
-                    },
-                },
-                { $sort: { total: -1 } },
-            ]),
-
-            // ── Top 10 técnicos (rango) ───────────────────────────────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                        'technicians.0': { $exists: true },
-                    },
-                },
-                { $unwind: '$technicians' },
-                {
-                    $group: {
-                        _id: '$technicians.id',
-                        name: {
-                            $first: {
-                                $concat: ['$technicians.first_name', ' ', '$technicians.last_name'],
-                            },
-                        },
-                        total: { $sum: 1 },
-                        resolved: {
-                            $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] },
-                        },
-                    },
-                },
-                { $project: { _id: 0, techId: '$_id', name: 1, total: 1, resolved: 1 } },
-                { $sort: { total: -1 } },
-                { $limit: 10 },
-            ]),
-
-            // ── Tendencia diaria del rango (reemplaza weeklyTrend) ────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: {
-                            $dateToString: {
-                                format: '%Y-%m-%d',
-                                date: '$entry_date',
-                                timezone: 'America/Guayaquil',
-                            },
-                        },
-                        ingresadas: { $sum: 1 },
-                        entregadas: {
-                            $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] },
-                        },
-                        revenue: {
-                            $sum: {
-                                $reduce: {
-                                    input: '$payments', initialValue: 0,
-                                    in: {
-                                        $add: [
-                                            '$$value',
-                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] },
-                                        ],
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                { $project: { _id: 0, date: '$_id', ingresadas: 1, entregadas: 1, revenue: 1 } },
-                { $sort: { date: 1 } },
-            ]),
-
-            // ── Estadísticas del período (cobrado + pagos) ────────────────────────
-            // Reutiliza el helper existente con los límites del rango
-            this._periodStats(companyId, rangeStart, rangeEnd),
-
-            // ── Distribución horaria del rango ────────────────────────────────────
-            // Para rangos cortos (1-3 días) es muy útil; para rangos largos sirve
-            // para ver qué horas son más activas en promedio
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: {
-                            $hour: { date: '$entry_date', timezone: 'America/Guayaquil' },
-                        },
-                        count: { $sum: 1 },
-                        revenue: {
-                            $sum: {
-                                $reduce: {
-                                    input: '$payments', initialValue: 0,
-                                    in: {
-                                        $add: [
-                                            '$$value',
-                                            { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] },
-                                        ],
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-                { $project: { _id: 0, hour: '$_id', count: 1, revenue: 1 } },
-                { $sort: { hour: 1 } },
-            ]),
-
-            // ── Top 8 marcas (rango) ──────────────────────────────────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                        'device.model.brand_name': { $exists: true, $ne: null },
-                    },
-                },
-                {
-                    $group: {
-                        _id: { id: '$device.model.brand_id', name: '$device.model.brand_name' },
-                        total: { $sum: 1 },
-                    },
-                },
-                { $project: { _id: 0, brandId: '$_id.id', brandName: '$_id.name', total: 1 } },
-                { $sort: { total: -1 } },
-                { $limit: 8 },
-            ]),
-
-            // ── Por tipo de orden (rango) ─────────────────────────────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: { id: '$type.id', name: '$type.name' },
-                        count: { $sum: 1 },
-                    },
-                },
-                { $project: { _id: 0, typeId: '$_id.id', typeName: '$_id.name', count: 1 } },
-                { $sort: { count: -1 } },
-            ]),
-
-            // ── Métodos de pago (pagos realizados en el rango) ────────────────────
-            // Nota: filtra por paid_at, no por entry_date, para capturar cobros
-            // de órdenes antiguas pagadas dentro del rango
-            this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId } },
-                { $unwind: '$payments' },
-                {
-                    $match: {
-                        'payments.flow_type': 'INGRESO',
-                        'payments.paid_at': { $gte: rangeStart, $lt: rangeEnd },
-                    },
-                },
-                {
-                    $group: {
-                        _id: {
-                            id: '$payments.payment_method_id',
-                            name: '$payments.payment_method_name',
-                        },
-                        total: { $sum: '$payments.amount' },
-                        count: { $sum: 1 },
-                    },
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        methodId: '$_id.id', methodName: '$_id.name',
-                        total: 1, count: 1,
-                    },
-                },
-                { $sort: { total: -1 } },
-            ]),
-
-            // ── Tiempo promedio de resolución (órdenes del rango) ─────────────────
-            this.orderReplicaModel.aggregate([
-                {
-                    $match: {
-                        'company.id': companyId,
-                        entry_date: { $gte: rangeStart, $lt: rangeEnd },
-                        'currentStatus.id': { $in: [7, 8] },
-                    },
-                },
-                { $unwind: '$statusHistory' },
-                { $match: { 'statusHistory.toStatus.id': { $in: [7, 8] } } },
-                {
-                    $group: {
-                        _id: '$_id',
-                        entry_date: { $first: '$entry_date' },
-                        resolved_at: { $max: '$statusHistory.changed_at' },
-                    },
-                },
-                {
-                    $project: {
-                        diffDays: {
-                            $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000],
-                        },
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        avgDays: { $avg: '$diffDays' },
-                        minDays: { $min: '$diffDays' },
-                        maxDays: { $max: '$diffDays' },
-                    },
-                },
-                {
-                    $project: {
-                        _id: 0,
-                        avgDays: { $round: ['$avgDays', 1] },
-                        minDays: { $round: ['$minDays', 1] },
-                        maxDays: { $round: ['$maxDays', 1] },
-                    },
-                },
-            ]),
-
-            // ── Conteos del rango ($facet = 1 sola round-trip) ───────────────────
-            this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId } },
-                {
-                    $facet: {
-
-                        // Ingresadas: entry_date dentro del rango
-                        range_received: [
-                            { $match: { entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
-                            { $count: 'n' },
-                        ],
-
-                        // Terminadas: alcanzaron estado 7 dentro del rango
-                        range_finished: [
-                            {
-                                $match: {
-                                    'currentStatus.id': { $in: [7, 8] },
-                                    statusHistory: {
-                                        $elemMatch: {
-                                            'toStatus.id': 7,
-                                            changed_at: { $gte: rangeStart, $lt: rangeEnd },
-                                        },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-
-                        // Entregadas: alcanzaron estado 8 dentro del rango
-                        range_delivered: [
-                            {
-                                $match: {
-                                    statusHistory: {
-                                        $elemMatch: {
-                                            'toStatus.id': 8,
-                                            changed_at: { $gte: rangeStart, $lt: rangeEnd },
-                                        },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-
-                        // Cobros: tiene al menos 1 pago INGRESO en el rango
-                        range_payments_count: [
-                            {
-                                $match: {
-                                    payments: {
-                                        $elemMatch: {
-                                            flow_type: 'INGRESO',
-                                            paid_at: { $gte: rangeStart, $lt: rangeEnd },
-                                        },
-                                    },
-                                },
-                            },
-                            { $count: 'n' },
-                        ],
-
-                    },
-                },
-            ]),
-            // ── Validaciones de órdenes entregadas ───────────────────────────────────
-            // ── Validaciones de órdenes entregadas ───────────────────────────────────
-            this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'currentStatus.id': 8 } },
-                {
-                    $lookup: {
-                        from: 'order_validations',
-                        localField: 'id',
-                        foreignField: 'order_id',
-                        as: 'validation',
-                    },
-                },
-                { $unwind: { path: '$validation', preserveNullAndEmptyArrays: true } },
-                {
-                    $group: {
-                        _id: null,
-                        checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } },
-                        unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } },
-                    },
-                },
-                { $project: { _id: 0, checked: 1, unchecked: 1 } },
-            ]),
-
-        ]);
-
-        // ── Helper para leer el $facet ────────────────────────────────────────────
-        const c = (key: string): number => rangeCounts[0]?.[key]?.[0]?.n ?? 0;
-
-        // ── Globales derivados de byStatus ────────────────────────────────────────
-        const statusMap: Record<number, number> = Object.fromEntries(
-            byStatus.map((s: any) => [s.id, s.count])
-        );
-
-        // ── Finanzas del rango ────────────────────────────────────────────────────
-        const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
-        const totalCost = financeData[0]?.totalProceduresCost ?? 0;
-        const rangeDelivered = c('range_delivered');
-        const avgTicket = rangeDelivered > 0
-            ? +(totalPaid / rangeDelivered).toFixed(2)
-            : 0;
-
-        const counts = {
-            range: {
-                received: c('range_received'),
-                finished: c('range_finished'),
-                delivered: rangeDelivered,
-                collected: c('range_payments_count'),
-            },
-            // global sigue siendo útil para los KPI de estado actual
+            today: { received: c('today_received'), finished: c('today_finished'), delivered: c('today_delivered'), collected: c('today_collected') },
+            week: { received: c('week_received'), finished: c('week_finished'), delivered: c('week_delivered'), collected: c('week_collected') },
+            month: { received: c('month_received'), finished: c('month_finished'), delivered: c('month_delivered'), collected: c('month_collected') },
             global: {
                 all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
                 pending: statusMap[1] ?? 0,
@@ -1899,38 +1013,166 @@ export class OrdersReportsService {
                 finished: statusMap[7] ?? 0,
                 delivered: statusMap[8] ?? 0,
             },
+            validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
+        };
+        console.log(counts)
+        // ── Cálculos derivados ────────────────────────────────────────────────────
+        const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
+        const totalCost = financeData[0]?.totalProceduresCost ?? 0;
+        const avgTicket = counts.global.delivered > 0 ? +(totalPaid / counts.global.delivered).toFixed(2) : 0;
+
+        return {
+            periods: { today: statsDay, week: statsWeek, month: statsMonth },
+            counts,
+            totals: { all: counts.global.all, active: counts.global.all - counts.global.delivered, delivered: counts.global.delivered, finished: counts.global.finished },
+            byStatus, finance: { totalProceduresCost: totalCost, totalPaid, totalPending: totalCost - totalPaid, avgTicket },
+            byBranch, byTechnician, byOrderType, byDeviceBrand, paymentMethods,
+            weeklyTrend, hourlyToday,
+            resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
+            validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // DASHBOARD ADMIN — RANGO CUSTOM
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async getAdminDashboardRange(companyId: string, from: string, to: string): Promise<any> {
+        const rangeStart = _gyeDayStart(from);
+        const rangeEnd = _gyeDayEnd(to);
+
+        const [
+            byStatus, financeData, byBranch, byTechnician, weeklyTrend,
+            periodStats, hourlyRange, byDeviceBrand, byOrderType, paymentMethods,
+            resolutionTime, rangeCounts, validationCounts,
+        ] = await Promise.all([
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                { $group: { _id: { id: '$currentStatus.id', name: '$currentStatus.name' }, count: { $sum: 1 } } },
+                { $project: { _id: 0, id: '$_id.id', name: '$_id.name', count: 1 } },
+                { $sort: { id: 1 } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                { $unwind: { path: '$findings', preserveNullAndEmptyArrays: true } },
+                { $unwind: { path: '$findings.procedures', preserveNullAndEmptyArrays: true } },
+                { $group: { _id: null, totalProceduresCost: { $sum: { $cond: [{ $eq: ['$findings.procedures.is_active', true] }, { $ifNull: ['$findings.procedures.procedure_cost', 0] }, 0] } } } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                { $group: { _id: { id: '$branch.id', name: '$branch.name' }, total: { $sum: 1 }, delivered: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
+                { $project: { _id: 0, branchId: '$_id.id', branchName: '$_id.name', total: 1, delivered: 1, revenue: 1 } },
+                { $sort: { total: -1 } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd }, 'technicians.0': { $exists: true } } },
+                { $unwind: '$technicians' },
+                { $group: { _id: '$technicians.id', name: { $first: { $concat: ['$technicians.first_name', ' ', '$technicians.last_name'] } }, total: { $sum: 1 }, resolved: { $sum: { $cond: [{ $in: ['$currentStatus.id', [7, 8]] }, 1, 0] } } } },
+                { $project: { _id: 0, techId: '$_id', name: 1, total: 1, resolved: 1 } },
+                { $sort: { total: -1 } }, { $limit: 10 },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' } }, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
+                { $project: { _id: 0, date: '$_id', ingresadas: 1, entregadas: 1, revenue: 1 } },
+                { $sort: { date: 1 } },
+            ]),
+
+            this._periodStats(companyId, rangeStart, rangeEnd),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                { $group: { _id: { $hour: { date: '$entry_date', timezone: 'America/Guayaquil' } }, count: { $sum: 1 }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
+                { $project: { _id: 0, hour: '$_id', count: 1, revenue: 1 } },
+                { $sort: { hour: 1 } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd }, 'device.model.brand_name': { $exists: true, $ne: null } } },
+                { $group: { _id: { id: '$device.model.brand_id', name: '$device.model.brand_name' }, total: { $sum: 1 } } },
+                { $project: { _id: 0, brandId: '$_id.id', brandName: '$_id.name', total: 1 } },
+                { $sort: { total: -1 } }, { $limit: 8 },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                { $group: { _id: { id: '$type.id', name: '$type.name' }, count: { $sum: 1 } } },
+                { $project: { _id: 0, typeId: '$_id.id', typeName: '$_id.name', count: 1 } },
+                { $sort: { count: -1 } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $unwind: '$payments' },
+                { $match: { 'payments.flow_type': 'INGRESO', 'payments.paid_at': { $gte: rangeStart, $lt: rangeEnd } } },
+                { $group: { _id: { id: '$payments.payment_method_id', name: '$payments.payment_method_name' }, total: { $sum: '$payments.amount' }, count: { $sum: 1 } } },
+                { $project: { _id: 0, methodId: '$_id.id', methodName: '$_id.name', total: 1, count: 1 } },
+                { $sort: { total: -1 } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, entry_date: { $gte: rangeStart, $lt: rangeEnd }, 'currentStatus.id': { $in: [7, 8] } } },
+                { $unwind: '$statusHistory' },
+                { $match: { 'statusHistory.toStatus.id': { $in: [7, 8] } } },
+                { $group: { _id: '$_id', entry_date: { $first: '$entry_date' }, resolved_at: { $max: '$statusHistory.changed_at' } } },
+                { $project: { diffDays: { $divide: [{ $subtract: ['$resolved_at', '$entry_date'] }, 86_400_000] } } },
+                { $group: { _id: null, avgDays: { $avg: '$diffDays' }, minDays: { $min: '$diffDays' }, maxDays: { $max: '$diffDays' } } },
+                { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                {
+                    $facet: {
+                        range_received: [{ $match: { entry_date: { $gte: rangeStart, $lt: rangeEnd } } }, { $count: 'n' }],
+                        range_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: rangeStart, $lt: rangeEnd } } } } }, { $count: 'n' }],
+                        range_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: rangeStart, $lt: rangeEnd } } } } }, { $count: 'n' }],
+                        range_payments_count: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: rangeStart, $lt: rangeEnd } } } } }, { $count: 'n' }],
+                    },
+                },
+            ]),
+
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId, 'currentStatus.id': 8 } },
+                { $lookup: { from: 'order_validations', localField: 'id', foreignField: 'order_id', as: 'validation' } },
+                { $unwind: { path: '$validation', preserveNullAndEmptyArrays: true } },
+                { $group: { _id: null, checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } }, unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } } } },
+                { $project: { _id: 0, checked: 1, unchecked: 1 } },
+            ]),
+        ]);
+
+        const c = (key: string): number => rangeCounts[0]?.[key]?.[0]?.n ?? 0;
+        const statusMap: Record<number, number> = Object.fromEntries(byStatus.map((s: any) => [s.id, s.count]));
+
+        const rangeDelivered = c('range_delivered');
+        const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
+        const totalCost = financeData[0]?.totalProceduresCost ?? 0;
+        const avgTicket = rangeDelivered > 0 ? +(totalPaid / rangeDelivered).toFixed(2) : 0;
+
+        const counts = {
+            range: { received: c('range_received'), finished: c('range_finished'), delivered: rangeDelivered, collected: c('range_payments_count') },
+            global: {
+                all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
+                pending: statusMap[1] ?? 0, in_progress: statusMap[6] ?? 0,
+                waiting_approval: statusMap[4] ?? 0, waiting_parts: statusMap[5] ?? 0,
+                finished: statusMap[7] ?? 0, delivered: statusMap[8] ?? 0,
+            },
         };
 
         return {
-            // ── Mismos nombres que el dashboard normal → frontend no cambia ───────
             periods: { range: periodStats },
-            counts,
-            byStatus,
-            finance: {
-                totalProceduresCost: totalCost,
-                totalPaid,
-                totalPending: totalCost - totalPaid,
-                avgTicket,
-            },
-            byBranch,
-            byTechnician,
-            byOrderType,
-            byDeviceBrand,
-            paymentMethods,
-            weeklyTrend: weeklyTrend,      // tendencia diaria del rango
-            hourlyToday: hourlyRange,       // mismo nombre → chart funciona igual
+            counts, byStatus,
+            finance: { totalProceduresCost: totalCost, totalPaid, totalPending: totalCost - totalPaid, avgTicket },
+            byBranch, byTechnician, byOrderType, byDeviceBrand, paymentMethods,
+            weeklyTrend, hourlyToday: hourlyRange,
             resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
-            // Metadata útil para mostrar en el frontend
-            meta: {
-                from,
-                to,
-                rangeStart: rangeStart.toISOString(),
-                rangeEnd: rangeEnd.toISOString(),
-            },
-            validations: {
-                checked: validationCounts[0]?.checked ?? 0,
-                unchecked: validationCounts[0]?.unchecked ?? 0,
-            },
+            meta: { from, to, rangeStart: rangeStart.toISOString(), rangeEnd: rangeEnd.toISOString() },
+            validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
         };
     }
 }
