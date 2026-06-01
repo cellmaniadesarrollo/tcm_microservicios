@@ -486,25 +486,50 @@ export class OrdersReportsService {
         return filter;
     }
 
-    private _resolveDateRange(mode?, preset?, from?, to?): Record<string, Date> | null {
-        // GYE = UTC-5 → sumar 5h para inicio del día, día+1 4:59:59 UTC para fin
+    private _resolveDateRange(
+        mode?: 'preset' | 'custom',
+        preset?: string,
+        from?: string,
+        to?: string,
+    ): Record<string, Date> | null {
         const gyeStart = (y: number, m: number, d: number) =>
             new Date(Date.UTC(y, m - 1, d, 5, 0, 0, 0));
         const gyeEnd = (y: number, m: number, d: number) =>
             new Date(Date.UTC(y, m - 1, d + 1, 4, 59, 59, 999));
-        const parse = (s: string): [number, number, number] =>
-            s.split('-').map(Number) as [number, number, number];
 
         if (mode === 'preset' && preset) {
-            const [y, m] = parse(preset);
-            return { $gte: gyeStart(y, m, 1), $lt: gyeStart(y, m + 1, 1) };
+            const [y, m] = preset.split('-').map(Number);
+            return {
+                $gte: gyeStart(y, m, 1),
+                $lt: gyeStart(y, m + 1, 1),
+            };
         }
+
         if (mode === 'custom' && (from || to)) {
             const range: Record<string, Date> = {};
-            if (from) { const [y, m, d] = parse(from); range.$gte = gyeStart(y, m, d); }
-            if (to) { const [y, m, d] = parse(to); range.$lte = gyeEnd(y, m, d); }
-            return range;
+
+            if (from) {
+                const d = new Date(from);
+                if (!isNaN(d.getTime())) range.$gte = d;  // ya viene con TZ del frontend
+            }
+            if (to) {
+                const d = new Date(to);
+                if (!isNaN(d.getTime())) {
+                    // Si viene con hora (ISO completo), usar directo
+                    // Si viene solo fecha YYYY-MM-DD, ajustar al fin del día GYE
+                    const hasTime = to.includes('T');
+                    if (hasTime) {
+                        range.$lte = d;
+                    } else {
+                        const [y, m, day] = to.split('-').map(Number);
+                        range.$lte = gyeEnd(y, m, day);
+                    }
+                }
+            }
+
+            return Object.keys(range).length ? range : null;
         }
+
         return null;
     }
 
