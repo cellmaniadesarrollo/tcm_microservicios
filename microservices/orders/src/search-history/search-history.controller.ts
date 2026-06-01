@@ -16,4 +16,20 @@ export class SearchHistoryController {
             companyId: payload.user.companyId,
         });
     }
+
+    @MessagePattern({ cmd: 'save_search_history' })
+    saveSearchHistory(
+        @Payload() payload: {
+            user: { userId: string; companyId: string };
+            data: any;
+        },
+    ) {
+        return this.searchHistoryService.saveFromSearch({
+            companyId: payload.user.companyId,
+            userId: payload.user.userId,
+            searchTerm: payload.data.searchTerm,
+            resultCount: payload.data.resultCount,
+            searchType: payload.data.searchType ?? 'order',
+        });
+    }
 }

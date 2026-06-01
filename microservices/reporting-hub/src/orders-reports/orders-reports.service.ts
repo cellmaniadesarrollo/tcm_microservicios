@@ -456,7 +456,9 @@ export class OrdersReportsService {
         if (dto.status?.length) filter['currentStatus.id'] = { $in: dto.status.map(Number) };
         if (dto.orderType?.length) filter['type.id'] = { $in: dto.orderType.map(Number) };
         if (dto.branch?.length) filter['branch.id'] = { $in: dto.branch };
-        if (dto.technician?.length) filter['technicians.id'] = { $in: dto.technician };
+        if (dto.technician?.length) {
+            filter['findings.procedures.performedBy.id'] = { $in: dto.technician };
+        }
         if (dto.receptionist?.length) filter['createdBy.id'] = { $in: dto.receptionist };
 
         const ingresoRange = this._resolveDateRange(dto.periodMode, dto.presetPeriod, dto.dateFrom, dto.dateTo);
@@ -490,20 +492,44 @@ export class OrdersReportsService {
         from?: string,
         to?: string,
     ): Record<string, Date> | null {
+        const gyeStart = (y: number, m: number, d: number) =>
+            new Date(Date.UTC(y, m - 1, d, 5, 0, 0, 0));
+        const gyeEnd = (y: number, m: number, d: number) =>
+            new Date(Date.UTC(y, m - 1, d + 1, 4, 59, 59, 999));
+
         if (mode === 'preset' && preset) {
-            const [year, month] = preset.split('-').map(Number);
-            return { $gte: new Date(year, month - 1, 1), $lt: new Date(year, month, 1) };
+            const [y, m] = preset.split('-').map(Number);
+            return {
+                $gte: gyeStart(y, m, 1),
+                $lt: gyeStart(y, m + 1, 1),
+            };
         }
+
         if (mode === 'custom' && (from || to)) {
             const range: Record<string, Date> = {};
-            if (from) range.$gte = new Date(from);
-            if (to) {
-                const end = new Date(to);
-                end.setHours(23, 59, 59, 999);
-                range.$lte = end;
+
+            if (from) {
+                const d = new Date(from);
+                if (!isNaN(d.getTime())) range.$gte = d;  // ya viene con TZ del frontend
             }
-            return range;
+            if (to) {
+                const d = new Date(to);
+                if (!isNaN(d.getTime())) {
+                    // Si viene con hora (ISO completo), usar directo
+                    // Si viene solo fecha YYYY-MM-DD, ajustar al fin del día GYE
+                    const hasTime = to.includes('T');
+                    if (hasTime) {
+                        range.$lte = d;
+                    } else {
+                        const [y, m, day] = to.split('-').map(Number);
+                        range.$lte = gyeEnd(y, m, day);
+                    }
+                }
+            }
+
+            return Object.keys(range).length ? range : null;
         }
+
         return null;
     }
 
