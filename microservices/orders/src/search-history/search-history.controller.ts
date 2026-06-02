@@ -24,7 +24,7 @@ export class SearchHistoryController {
             dto: any;
         },
     ) {
-        console.log(payload)
+
         const { user, dto } = payload;
         return this.searchHistoryService.saveFromSearch({
             companyId: user.companyId,
@@ -32,6 +32,17 @@ export class SearchHistoryController {
             searchTerm: dto.searchTerm,
             resultCount: dto.resultCount,
             searchType: dto.searchType ?? 'order',
+        });
+    }
+
+    @MessagePattern({ cmd: 'delete_search_history' })
+    deleteSearchHistory(
+        @Payload() payload: { user: { userId: string; companyId: string }; data: { searchTerm: string } },
+    ) {
+        return this.searchHistoryService.deleteByTerm({
+            userId: payload.user.userId,
+            companyId: payload.user.companyId,
+            searchTerm: payload.data.searchTerm,
         });
     }
 }

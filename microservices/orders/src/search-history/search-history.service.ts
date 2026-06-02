@@ -40,7 +40,7 @@ export class SearchHistoryService {
         searchType?: string;
     }): Promise<void> {
         const { companyId, userId, searchTerm, resultCount, searchType = 'order' } = params;
-        console.log(params)
+
         // ── No guardar escaneos QR ───────────────────────────────────────────────
         if (IS_UUID.test(searchTerm.trim())) return;
 
@@ -179,5 +179,15 @@ export class SearchHistoryService {
         return rows
             .sort((a, b) => b.searchedAt.getTime() - a.searchedAt.getTime())
             .map(({ searchTerm, groupName }) => ({ searchTerm, groupName }));
+    }
+
+    async deleteByTerm(params: {
+        userId: string;
+        companyId: string;
+        searchTerm: string;
+    }): Promise<{ deleted: boolean }> {
+        const { userId, companyId, searchTerm } = params;
+        await this.repo.delete({ companyId, userId, searchTerm });
+        return { deleted: true };
     }
 }
