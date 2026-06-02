@@ -40,7 +40,7 @@ export class SearchHistoryService {
         searchType?: string;
     }): Promise<void> {
         const { companyId, userId, searchTerm, resultCount, searchType = 'order' } = params;
-
+        console.log(params)
         // ── No guardar escaneos QR ───────────────────────────────────────────────
         if (IS_UUID.test(searchTerm.trim())) return;
 
