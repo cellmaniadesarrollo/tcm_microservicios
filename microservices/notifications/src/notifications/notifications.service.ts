@@ -614,4 +614,28 @@ export class NotificationsService {
     const types: Record<string, any> = { created: 'success', updated: 'info', status_changed: 'warning', viewed: 'info' };
     return types[action] || 'info';
   }
+
+  async createBoardInvitationNotification(
+    userId: string,
+    boardName: string,
+    invitedBy: string,
+    invitationId: string
+  ): Promise<any> {
+    const notification = {
+      userId,
+      title: 'Invitación a Tablero',
+      message: `${invitedBy} te ha invitado al tablero "${boardName}"`,
+      type: 'board_invitation',
+      entityType: 'board_invitation',
+      entityId: invitationId,
+      actionUrl: `/taskboard/invitations/${invitationId}`,
+      metadata: {
+        invitationId,
+        boardName,
+        invitedBy
+      }
+    };
+    
+    return this.create(notification);
+  }
 }
