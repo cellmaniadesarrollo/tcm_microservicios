@@ -385,7 +385,7 @@ services:
   # TASK BOARD MICROSERVICE
   # ─────────────────────────────────────────
 
-  taskboard:
+  task-board:
     build:
       context: ../microservices/task-board
       dockerfile: Dockerfile  # Usar Dockerfile de producción (no .dev)
