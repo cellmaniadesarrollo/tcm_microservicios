@@ -21,15 +21,17 @@ export class SearchHistoryController {
     saveSearchHistory(
         @Payload() payload: {
             user: { userId: string; companyId: string };
-            data: any;
+            dto: any;
         },
     ) {
+        console.log(payload)
+        const { user, dto } = payload;
         return this.searchHistoryService.saveFromSearch({
-            companyId: payload.user.companyId,
-            userId: payload.user.userId,
-            searchTerm: payload.data.searchTerm,
-            resultCount: payload.data.resultCount,
-            searchType: payload.data.searchType ?? 'order',
+            companyId: user.companyId,
+            userId: user.userId,
+            searchTerm: dto.searchTerm,
+            resultCount: dto.resultCount,
+            searchType: dto.searchType ?? 'order',
         });
     }
 }
