@@ -65,7 +65,8 @@ export interface CommissionEntry {
     commissionRate: number;
     commissionValueType: string;   // 'percentage' | 'fixed'
     commissionAmount: number;
-    finalizedAt: Date;
+    referenceDate: Date;           // fecha del evento que activó la comisión
+    referenceDateLabel: string;    // 'Fecha finalización' | 'Fecha entrega'
 }
 
 export interface CommissionSummary {
@@ -261,21 +262,25 @@ export function calculateCommissions(
 
         for (const order of orders) {
 
-            // ── Fecha de referencia: primer evento TRABAJO_FINALIZADO ─────────
-            const finalizedEvent = (order.statusHistory ?? [])
-                .filter((h: any) => h.toStatus?.id === ORDER_STATUS.TRABAJO_FINALIZADO)
-                .sort((a: any, b: any) =>
-                    new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime()
-                )[0];
-
-            if (!finalizedEvent) continue;
-            const finalizedAt = new Date(finalizedEvent.changed_at);
-
             const deviceTypeName = order.device?.type?.name ?? '';
             const branchName = order.branch?.name ?? '';
 
+            // ── Utilidad: primer evento de un status dado ─────────────────────
+            const firstEventOf = (statusId: number): Date | null => {
+                const event = (order.statusHistory ?? [])
+                    .filter((h: any) => h.toStatus?.id === statusId)
+                    .sort((a: any, b: any) =>
+                        new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime()
+                    )[0];
+                return event ? new Date(event.changed_at) : null;
+            };
+
             // ── device_category: una entry por procedimiento del técnico ──────
+            //    fecha de referencia: primer evento TRABAJO_FINALIZADO (7)
             if (commissionType === 'device_category') {
+                const referenceDate = firstEventOf(ORDER_STATUS.TRABAJO_FINALIZADO);
+                if (!referenceDate) continue;
+
                 for (const finding of order.findings ?? []) {
                     for (const procedure of finding.procedures ?? []) {
                         if (procedure.performedBy?.id !== userId) continue;
@@ -300,7 +305,8 @@ export function calculateCommissions(
                                 commissionRate: commission.value,
                                 commissionValueType: commission.valueType,
                                 commissionAmount: Math.round(commissionAmount * 100) / 100,
-                                finalizedAt,
+                                referenceDate,
+                                referenceDateLabel: 'Fecha finalización',
                             });
                         }
                     }
@@ -308,11 +314,10 @@ export function calculateCommissions(
             }
 
             // ── branch_all_delivered: una entry por orden ─────────────────────
+            //    fecha de referencia: primer evento ENTREGADA (8)
             else if (commissionType === 'branch_all_delivered') {
-                // Verificar que la orden llegó a ENTREGADA
-                const wasDelivered = (order.statusHistory ?? [])
-                    .some((h: any) => h.toStatus?.id === ORDER_STATUS.ENTREGADA);
-                if (!wasDelivered) continue;
+                const referenceDate = firstEventOf(ORDER_STATUS.ENTREGADA);
+                if (!referenceDate) continue;
 
                 // Acumular costo total de la orden (para valueType percentage)
                 let totalProcedureCost = 0;
@@ -340,7 +345,8 @@ export function calculateCommissions(
                         commissionRate: commission.value,
                         commissionValueType: commission.valueType,
                         commissionAmount: Math.round(commissionAmount * 100) / 100,
-                        finalizedAt,
+                        referenceDate,
+                        referenceDateLabel: 'Fecha entrega',
                     });
                 }
             }
