@@ -20,8 +20,11 @@
 //  • valueType === 'fixed'     → amount = value
 //
 //  ── commissionType === 'branch_all_delivered' ────────────────────────────────
-//  • Filtro DB : company.id + branch.name + statusHistory.toStatus.id === 8
-//                (ENTREGADA) dentro del período. Sin filtro de técnico.
+//  • Filtro DB : company.id + branch.name + type.id === 1 (SERVICIO_TECNICO)
+//                + statusHistory.toStatus.id === 8 (ENTREGADA) dentro del período.
+//                Sin filtro de técnico.
+//  • Condición helper: al menos un procedimiento con was_solved === true
+//                      (flag BRANCH_ALL_DELIVERED_REQUIRE_ALL_SOLVED para modo estricto)
 //  • Se aplica UNA VEZ POR ORDEN (procedureId = 0).
 //  • valueType === 'fixed'     → amount = value
 //  • valueType === 'percentage'→ amount = suma(todos los procedure_cost) * (value/100)
@@ -41,6 +44,22 @@ export const ORDER_STATUS = {
     TRABAJO_FINALIZADO: 7,
     ENTREGADA: 8,
 } as const;
+
+export const ORDER_TYPE = {
+    SERVICIO_TECNICO: 1,
+    PERSONALIZADO: 2,
+    PARA_REPUESTOS: 3,
+} as const;
+
+// ── Flags de comportamiento ───────────────────────────────────────────────────
+
+/**
+ * branch_all_delivered: condición sobre procedimientos con solución.
+ *
+ * false → al menos UN procedimiento debe tener was_solved === true (actual)
+ * true  → TODOS los procedimientos deben tener was_solved === true (futuro)
+ */
+const BRANCH_ALL_DELIVERED_REQUIRE_ALL_SOLVED = false;
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -208,6 +227,7 @@ export function buildCommissionQueries(
                     filter: {
                         'company.id': companyId,
                         'branch.name': commission.targetId,
+                        'type.id': ORDER_TYPE.SERVICIO_TECNICO,
                         statusHistory: {
                             $elemMatch: {
                                 'toStatus.id': ORDER_STATUS.ENTREGADA,
@@ -215,7 +235,10 @@ export function buildCommissionQueries(
                             },
                         },
                     },
-                    projection: BASE_PROJECTION,
+                    projection: {
+                        ...BASE_PROJECTION,
+                        'findings.procedures.was_solved': 1,
+                    },
                 });
             }
 
@@ -319,13 +342,20 @@ export function calculateCommissions(
                 const referenceDate = firstEventOf(ORDER_STATUS.ENTREGADA);
                 if (!referenceDate) continue;
 
-                // Acumular costo total de la orden (para valueType percentage)
-                let totalProcedureCost = 0;
-                for (const finding of order.findings ?? []) {
-                    for (const procedure of finding.procedures ?? []) {
-                        totalProcedureCost += procedure.procedure_cost ?? 0;
-                    }
-                }
+                // ── Validar condición de was_solved ───────────────────────────
+                const allProcedures = (order.findings ?? [])
+                    .flatMap((f: any) => f.procedures ?? []);
+
+                const solvedCheck = BRANCH_ALL_DELIVERED_REQUIRE_ALL_SOLVED
+                    ? allProcedures.length > 0 && allProcedures.every((p: any) => p.was_solved === true)
+                    : allProcedures.some((p: any) => p.was_solved === true);
+
+                if (!solvedCheck) continue;
+
+                // ── Acumular costo total de la orden (para valueType percentage)
+                const totalProcedureCost = allProcedures.reduce(
+                    (sum: number, p: any) => sum + (p.procedure_cost ?? 0), 0
+                );
 
                 let commissionAmount = 0;
                 if (commission.valueType === 'fixed') {
