@@ -781,6 +781,22 @@ export class OrdersController {
       ),
     );
   }
+  @Delete('delete-history')
+  async deleteHistory(
+    @Body() dto: { searchTerm: string },
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'delete_search_history' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          data: { searchTerm: dto.searchTerm },
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
 
 }
 // Type guard (fuera o dentro de la clase)

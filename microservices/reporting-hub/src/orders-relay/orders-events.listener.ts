@@ -42,6 +42,7 @@ export class OrdersEventsListener {
         payload: any;
         updatedAt: string;
     }) {
+
         const { order_id, changed_scope, payload, updatedAt } = data;
         console.log(`🧾 [order.updated] scope: ${changed_scope} | order: ${order_id}`);
         await this.ordersRelayService.applyUpdate(order_id, changed_scope, payload, updatedAt);

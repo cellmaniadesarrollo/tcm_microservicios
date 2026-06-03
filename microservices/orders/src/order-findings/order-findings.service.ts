@@ -17,6 +17,7 @@ import { OrderWorkflowService } from '../order-workflow/order-workflow.service';
 import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
+import { resolveUserSnapshot } from './helpers/user-snapshot.helper';
 
 @Injectable()
 export class OrderFindingsService {
@@ -40,7 +41,7 @@ export class OrderFindingsService {
     private readonly notificationsService: NotificationsService,
     private readonly orderWorkflow: OrderWorkflowService,
     private readonly userCacheService: UsersEmployeesEventsService,
-    private readonly broadcastService: BroadcastService
+    private readonly broadcastService: BroadcastService,
   ) { }
 
   // ─── Helper privado para emitir notificaciones ────────────────────────────
@@ -86,20 +87,23 @@ export class OrderFindingsService {
     });
 
     await this.orderFindingRepository.save(finding);
+
+    const reportedBy = await resolveUserSnapshot(user.userId, this.userEmployeeCacheRepository);
+
     await this.broadcastService.publishOrderUpdated(order.id, 'finding_added', {
       finding: {
         id: finding.id,
         description: finding.description,
         is_active: finding.is_active,
         is_resolved: finding.is_resolved,
-        reportedBy: { id: user.userId },
+        reportedBy,
         procedures: [],
         attachments: [],
         createdAt: finding.createdAt,
         updatedAt: finding.updatedAt,
       },
     });
-    // 🔔 Notificación — usando el helper
+
     await this.emitNotification(
       order.id,
       user.companyId,
@@ -114,6 +118,7 @@ export class OrderFindingsService {
       user.userId,
       'finding_created',
     );
+
     return {
       success: true,
       message: 'Hallazgo registrado correctamente',
@@ -150,10 +155,13 @@ export class OrderFindingsService {
 
     await this.procedureRepository.save(procedure);
 
-    // Auto-asignación de técnico
     const orderId = finding.order_id;
     const technicianId = user.userId;
 
+    // ── Resolver snapshot una sola vez, se reutiliza abajo ──
+    const performedBy = await resolveUserSnapshot(technicianId, this.userEmployeeCacheRepository);
+
+    // ── Auto-asignación de técnico ──
     const yaEstaAsignado = await this.orderRepository
       .createQueryBuilder('o')
       .innerJoin('o.technicians', 't')
@@ -168,27 +176,13 @@ export class OrderFindingsService {
         .of(orderId)
         .add(technicianId);
 
-      // ── Emitir el evento con el snapshot del técnico ──
-      const technician = await this.userEmployeeCacheRepository.findOne({
-        where: { id: technicianId },
+      await this.broadcastService.publishOrderUpdated(orderId, 'technician_added', {
+        technician: performedBy, // ← reutilizamos el snapshot ya resuelto
       });
-
-      if (technician) {
-        await this.broadcastService.publishOrderUpdated(orderId, 'technician_added', {
-          technician: {
-            id: technician.id,
-            username: technician.username,
-            first_name: technician.first_name,
-            last_name: technician.last_name,
-            dni: technician.dni ?? null,
-            email: technician.email,
-            phone: technician.phone ?? null,
-          },
-        });
-      }
 
       console.log(`✅ Técnico ${technicianId} asignado automáticamente a la orden ${orderId}`);
     }
+
     await this.broadcastService.publishOrderUpdated(orderId, 'procedure_added', {
       finding_id: finding.id,
       procedure: {
@@ -203,13 +197,13 @@ export class OrderFindingsService {
         was_solved: procedure.was_solved,
         requires_followup: procedure.requires_followup,
         followup_notes: procedure.followup_notes,
-        performedBy: { id: user.userId },
+        performedBy, // ← snapshot completo
         attachments: [],
         createdAt: procedure.createdAt,
         updatedAt: procedure.updatedAt,
       },
     });
-    // 🔔 Notificación — usando el helper
+
     await this.emitNotification(
       orderId,
       user.companyId,
@@ -224,6 +218,7 @@ export class OrderFindingsService {
       user.userId,
       'procedure_created',
     );
+
     return {
       success: true,
       message: 'Procedimiento guardado correctamente',
@@ -257,6 +252,7 @@ export class OrderFindingsService {
 
     Object.assign(finding, dto);
     const saved = await this.orderFindingRepository.save(finding);
+
     await this.broadcastService.publishOrderUpdated(finding.order_id, 'finding_updated', {
       finding_id: saved.id,
       description: saved.description,
@@ -264,7 +260,7 @@ export class OrderFindingsService {
       is_resolved: saved.is_resolved,
       updatedAt: saved.updatedAt,
     });
-    // 🔔 Notificación
+
     await this.emitNotification(
       finding.order_id,
       user.companyId,
@@ -304,6 +300,7 @@ export class OrderFindingsService {
 
     Object.assign(procedure, dto);
     const saved = await this.procedureRepository.save(procedure);
+
     await this.broadcastService.publishOrderUpdated(
       procedure.finding.order_id,
       'procedure_updated',
@@ -323,7 +320,7 @@ export class OrderFindingsService {
         updatedAt: saved.updatedAt,
       },
     );
-    // 🔔 Notificación — detecta si el cliente acaba de aprobar
+
     const event = dto.client_approved === true ? 'procedure_approved' : 'procedure_updated';
     const message =
       dto.client_approved === true
@@ -365,10 +362,11 @@ export class OrderFindingsService {
 
     finding.is_active = false;
     await this.orderFindingRepository.save(finding);
+
     await this.broadcastService.publishOrderUpdated(finding.order_id, 'finding_deleted', {
       finding_id: finding.id,
     });
-    // 🔔 Notificación
+
     await this.emitNotification(
       finding.order_id,
       user.companyId,
@@ -407,6 +405,7 @@ export class OrderFindingsService {
 
     procedure.is_active = false;
     await this.procedureRepository.save(procedure);
+
     await this.broadcastService.publishOrderUpdated(
       procedure.finding.order_id,
       'procedure_deleted',
@@ -415,7 +414,7 @@ export class OrderFindingsService {
         procedure_id: procedure.id,
       },
     );
-    // 🔔 Notificación
+
     await this.emitNotification(
       procedure.finding.order_id,
       user.companyId,
@@ -442,7 +441,7 @@ export class OrderFindingsService {
         relations: ['order'],
       });
       isValidEntity = !!finding;
-      orderId = finding?.order_id;                  // ← capturamos el orderId
+      orderId = finding?.order_id;
     } else if (dto.entityType === 'PROCEDURE') {
       const procedure = await this.procedureRepository.findOne({
         where: {
@@ -452,7 +451,7 @@ export class OrderFindingsService {
         relations: ['finding', 'finding.order'],
       });
       isValidEntity = !!procedure;
-      orderId = procedure?.finding?.order_id;       // ← capturamos el orderId
+      orderId = procedure?.finding?.order_id;
     }
 
     if (!isValidEntity) {
@@ -484,7 +483,6 @@ export class OrderFindingsService {
       uploaded.push(saved);
     }
 
-    // 🔔 Notificación (una sola vez, después de subir todos los archivos)
     if (orderId) {
       await this.broadcastService.publishOrderUpdated(orderId, 'attachment_added', {
         entity_type: dto.entityType,
@@ -540,7 +538,7 @@ export class OrderFindingsService {
       if (!finding || finding.order.company_id !== user.companyId) {
         throw new RpcException(new NotFoundException('Acceso denegado'));
       }
-      orderId = finding.order_id;                   // ← capturamos el orderId
+      orderId = finding.order_id;
     } else if (attachment.entity_type === AttachmentEntityType.PROCEDURE) {
       const procedure = await this.procedureRepository.findOne({
         where: { id: attachment.entity_id },
@@ -549,7 +547,7 @@ export class OrderFindingsService {
       if (!procedure || procedure.finding.order.company_id !== user.companyId) {
         throw new RpcException(new NotFoundException('Acceso denegado'));
       }
-      orderId = procedure.finding.order_id;         // ← capturamos el orderId
+      orderId = procedure.finding.order_id;
     } else {
       throw new RpcException(new BadRequestException('Tipo de entidad inválido'));
     }
@@ -557,7 +555,6 @@ export class OrderFindingsService {
     attachment.is_active = false;
     await this.attachmentRepository.save(attachment);
 
-    // 🔔 Notificación
     if (orderId) {
       await this.broadcastService.publishOrderUpdated(orderId, 'attachment_deleted', {
         entity_type: attachment.entity_type,

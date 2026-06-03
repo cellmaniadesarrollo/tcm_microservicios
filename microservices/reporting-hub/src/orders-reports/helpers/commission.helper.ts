@@ -8,11 +8,19 @@
 //    con toStatus.id === 7 (TRABAJO_FINALIZADO).
 //  • La fecha de referencia es changed_at del PRIMER evento toStatus.id === 7
 //    en statusHistory, interpretada en zona horaria America/Guayaquil (UTC-5).
-//  • commissionType === 'device_category' → targetId === order.device.type.name
-//  • La comisión aplica SOLO al procedure_cost de procedimientos donde
-//    performedBy.id === userId (el técnico que realizó el trabajo).
+//
+//  ── commissionType === 'device_category' ────────────────────────────────────
+//  • targetId === order.device.type.name
+//  • Se aplica POR PROCEDIMIENTO donde performedBy.id === userId y cost > 0.
 //  • valueType === 'percentage' → amount = procedure_cost * (value / 100)
-//  • valueType === 'fixed'     → amount = value  (si el procedimiento tiene costo > 0)
+//  • valueType === 'fixed'     → amount = value
+//
+//  ── commissionType === 'branch' ─────────────────────────────────────────────
+//  • targetId === order.branch.name
+//  • Se aplica UNA VEZ POR ORDEN como una entry especial (procedureId = 0).
+//  • Condición: el técnico realizó al menos un procedimiento en la orden.
+//  • valueType === 'fixed'     → amount = value  (ej: $1 por orden)
+//  • valueType === 'percentage'→ amount = suma(procedure_cost técnico) * (value/100)
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { OrderReplica } from "../../orders-relay/schemas/order-replica.schema";
@@ -21,21 +29,21 @@ import { Commission } from "../../users-employees-events/schemas/employee-commis
 // ── Constantes ────────────────────────────────────────────────────────────────
 
 const TIMEZONE = 'America/Guayaquil'; // UTC-5, sin DST
-const FINALIZED_STATUS_ID = 7;                  // TRABAJO_FINALIZADO
+const FINALIZED_STATUS_ID = 7;        // TRABAJO_FINALIZADO
 
-// ── Tipos de retorno ──────────────────────────────────────────────────────────
+// ── Tipos de retorno (estructura original sin cambios) ────────────────────────
 
 export interface CommissionEntry {
     orderId: number;
     orderNumber: number;
     deviceTypeName: string;
-    procedureId: number;
-    procedureDescription: string;
+    procedureId: number;           // 0 = entry de comisión por sucursal
+    procedureDescription: string;  // 'Comisión por sucursal: <nombre>' cuando es branch
     procedureCost: number;
-    commissionRate: number;       // valor configurado (% o monto fijo)
-    commissionValueType: string;       // 'percentage' | 'fixed'
-    commissionAmount: number;       // monto calculado final
-    finalizedAt: Date;         // changed_at del evento TRABAJO_FINALIZADO
+    commissionRate: number;        // valor configurado (% o monto fijo)
+    commissionValueType: string;   // 'percentage' | 'fixed'
+    commissionAmount: number;      // monto calculado final
+    finalizedAt: Date;             // changed_at del evento TRABAJO_FINALIZADO
 }
 
 export interface CommissionSummary {
@@ -76,19 +84,15 @@ function guePartsOf(utcDate: Date): {
 
     return {
         year: parseInt(get('year'), 10),
-        month: parseInt(get('month'), 10),   // 1-12
+        month: parseInt(get('month'), 10), // 1-12
         day: parseInt(get('day'), 10),
         weekday: weekdayMap[get('weekday')] ?? 0,
     };
 }
 
 /**
- * Devuelve el inicio de la semana (lunes) y del día, mes y año actual
+ * Devuelve el inicio del día, semana (lunes) y mes actuales
  * expresados como fechas UTC que delimitan rangos de consulta.
- *
- * Estrategia: tomamos los componentes locales de "hoy en Guayaquil"
- * y construimos el límite inferior sumando/restando días, luego lo
- * convertimos a UTC restando el offset fijo de -5 h.
  *
  * UTC = localTime + 5h  (porque GYE = UTC-5)
  */
@@ -97,23 +101,20 @@ function gueRanges(now: Date): {
     weekStart: Date;
     monthStart: Date;
 } {
-    const GYE_OFFSET_MS = 5 * 60 * 60 * 1000; // UTC-5 → sumar 5 h para pasar a UTC
+    const GYE_OFFSET_MS = 5 * 60 * 60 * 1000;
 
     const { year, month, day, weekday } = guePartsOf(now);
 
-    // Inicio del día local → medianoche GYE → UTC
     const localMidnight = (y: number, m: number, d: number): Date =>
         new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0) + GYE_OFFSET_MS);
 
     const todayStart = localMidnight(year, month, day);
 
-    // Lunes de la semana actual
     const daysToMonday = weekday === 0 ? 6 : weekday - 1;
     const mondayDate = new Date(Date.UTC(year, month - 1, day - daysToMonday));
     const { year: wy, month: wm, day: wd } = guePartsOf(mondayDate);
     const weekStart = localMidnight(wy, wm, wd);
 
-    // Primer día del mes
     const monthStart = localMidnight(year, month, 1);
 
     return { todayStart, weekStart, monthStart };
@@ -134,13 +135,17 @@ export function calculateCommissions(
     orders: OrderReplica[],
 ): CommissionPeriodSummary {
 
-    // Solo reglas activas de tipo device_category
-    const activeCommissions = commissions.filter(c => c.active && c.commissionType === 'device_category');
+    // ── Índices por tipo ──────────────────────────────────────────────────────
+    const deviceCommissionMap = new Map<string, Commission>(); // clave: DEVICE_TYPE_NAME
+    const branchCommissionMap = new Map<string, Commission>(); // clave: BRANCH_NAME
 
-    // Índice: DEVICE_TYPE_NAME (uppercase) → Commission
-    const commissionMap = new Map<string, Commission>();
-    for (const c of activeCommissions) {
-        commissionMap.set(c.targetId.toUpperCase(), c);
+    for (const c of commissions) {
+        if (!c.active) continue;
+        if (c.commissionType === 'device_category') {
+            deviceCommissionMap.set(c.targetId.toUpperCase(), c);
+        } else if (c.commissionType === 'branch') {
+            branchCommissionMap.set(c.targetId.toUpperCase(), c);
+        }
     }
 
     const now = new Date();
@@ -155,46 +160,95 @@ export function calculateCommissions(
             .filter(h => h.toStatus?.id === FINALIZED_STATUS_ID)
             .sort((a, b) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime())[0];
 
-        if (!finalizedEvent) continue; // nunca llegó a TRABAJO_FINALIZADO → ignorar
+        if (!finalizedEvent) continue;
 
         const finalizedAt = new Date(finalizedEvent.changed_at);
+        console.log(order)
+        // ── 2. Resolver reglas aplicables ─────────────────────────────────────
+        const deviceTypeName = order.device?.type?.name;
+        const branchName = order.branch?.name;
 
-        // ── 2. Tiene que coincidir la categoría del dispositivo ───────────────
-        const deviceTypeName = order.device?.type?.name?.toUpperCase();
-        if (!deviceTypeName) continue;
+        const deviceCommission = deviceTypeName
+            ? deviceCommissionMap.get(deviceTypeName.toUpperCase())
+            : undefined;
 
-        const commission = commissionMap.get(deviceTypeName);
-        if (!commission) continue;
+        const branchCommission = branchName
+            ? branchCommissionMap.get(branchName.toUpperCase())
+            : undefined;
 
-        // ── 3. Recorrer procedimientos del técnico con costo ──────────────────
+        if (!deviceCommission && !branchCommission) continue;
+
+        // ── 3. Recorrer procedimientos del técnico ────────────────────────────
+        let technicianPerformedAny = false;
+        let totalProcedureCostForBranch = 0;
+
         for (const finding of order.findings ?? []) {
             for (const procedure of finding.procedures ?? []) {
 
                 if (procedure.performedBy?.id !== userId) continue;
 
-                const procedureCost = procedure.procedure_cost ?? 0;
-                if (procedureCost <= 0) continue;
+                technicianPerformedAny = true;
 
-                let commissionAmount = 0;
-                if (commission.valueType === 'percentage') {
-                    commissionAmount = procedureCost * (commission.value / 100);
-                } else if (commission.valueType === 'fixed') {
-                    commissionAmount = commission.value;
+                const procedureCost = procedure.procedure_cost ?? 0;
+
+                // Acumular costo para comisión branch de tipo percentage
+                if (procedureCost > 0) {
+                    totalProcedureCostForBranch += procedureCost;
                 }
 
-                if (commissionAmount <= 0) continue;
+                // ── Entry por procedimiento (device_category) ─────────────────
+                if (deviceCommission && procedureCost > 0) {
+                    let commissionAmount = 0;
 
+                    if (deviceCommission.valueType === 'percentage') {
+                        commissionAmount = procedureCost * (deviceCommission.value / 100);
+                    } else if (deviceCommission.valueType === 'fixed') {
+                        commissionAmount = deviceCommission.value;
+                    }
+
+                    if (commissionAmount > 0) {
+                        allEntries.push({
+                            orderId: order.id,
+                            orderNumber: order.order_number,
+                            deviceTypeName: deviceTypeName ?? '',
+                            procedureId: procedure.id,
+                            procedureDescription: procedure.description,
+                            procedureCost,
+                            commissionRate: deviceCommission.value,
+                            commissionValueType: deviceCommission.valueType,
+                            commissionAmount: Math.round(commissionAmount * 100) / 100,
+                            finalizedAt,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Si el técnico no realizó ningún procedimiento, ignorar la orden
+        if (!technicianPerformedAny) continue;
+
+        // ── 4. Entry por sucursal (una por orden) ─────────────────────────────
+        if (branchCommission) {
+            let commissionAmount = 0;
+
+            if (branchCommission.valueType === 'fixed') {
+                commissionAmount = branchCommission.value;
+            } else if (branchCommission.valueType === 'percentage') {
+                commissionAmount = totalProcedureCostForBranch * (branchCommission.value / 100);
+            }
+
+            if (commissionAmount > 0) {
                 allEntries.push({
                     orderId: order.id,
                     orderNumber: order.order_number,
-                    deviceTypeName: order.device!.type!.name,
-                    procedureId: procedure.id,
-                    procedureDescription: procedure.description,
-                    procedureCost,
-                    commissionRate: commission.value,
-                    commissionValueType: commission.valueType,
+                    deviceTypeName: deviceTypeName ?? '',
+                    procedureId: 0,                                          // sentinel: comisión por sucursal
+                    procedureDescription: `Comisión por sucursal: ${branchName}`,
+                    procedureCost: totalProcedureCostForBranch,
+                    commissionRate: branchCommission.value,
+                    commissionValueType: branchCommission.valueType,
                     commissionAmount: Math.round(commissionAmount * 100) / 100,
-                    finalizedAt,          // fecha de TRABAJO_FINALIZADO en GYE
+                    finalizedAt,
                 });
             }
         }
