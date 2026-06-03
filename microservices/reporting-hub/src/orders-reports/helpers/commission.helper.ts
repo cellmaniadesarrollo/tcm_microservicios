@@ -51,6 +51,9 @@ export const ORDER_TYPE = {
     PARA_REPUESTOS: 3,
 } as const;
 
+/** Monto mínimo de la suma de procedimientos para aplicar branch_all_delivered */
+export const BRANCH_ALL_DELIVERED_MIN_PROCEDURE_COST = 5;
+
 // ── Flags de comportamiento ───────────────────────────────────────────────────
 
 /**
@@ -356,6 +359,8 @@ export function calculateCommissions(
                 const totalProcedureCost = allProcedures.reduce(
                     (sum: number, p: any) => sum + (p.procedure_cost ?? 0), 0
                 );
+
+                if (totalProcedureCost < BRANCH_ALL_DELIVERED_MIN_PROCEDURE_COST) continue;
 
                 let commissionAmount = 0;
                 if (commission.valueType === 'fixed') {
