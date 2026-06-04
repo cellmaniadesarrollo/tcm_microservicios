@@ -1,5 +1,6 @@
 // gateway/src/taskboard/taskboard.controller.ts
-import { Controller, Post, Body, Get, Param, Patch, Delete, Query } from '@nestjs/common';
+import { Controller, Post, Body, Get, Param, Patch, Delete, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { TaskboardService } from './taskboard.service';
 
 @Controller('taskboard')
@@ -146,6 +147,71 @@ export class TaskboardController {
   @Delete('tasks/:id')
   removeTask(@Param('id') id: string) {
     return this.taskboardService.removeTask(id);
+  }
+
+  // ========== IMÁGENES (AGREGAR AQUÍ) ==========
+  
+  @Post('tasks/:taskId/images')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadImage(
+    @Param('taskId') taskId: string,
+    @UploadedFile() file: any, 
+    @Body('taskDetailId') taskDetailId?: string
+  ) {
+    console.log('🔥🔥🔥 CONTROLLER uploadImage llamado 🔥🔥🔥');
+    console.log('taskId:', taskId);
+    console.log('file:', file ? 'RECIBIDO' : 'NO RECIBIDO');
+    console.log('file.originalname:', file?.originalname);
+    console.log('file.size:', file?.size);
+    
+    // Por ahora, devolver mock
+    return {
+      success: true,
+      message: 'Prueba - imagen recibida',
+      data: { taskId, fileName: file?.originalname }
+    };
+  }
+
+  @Post('tasks/:taskId/images/base64')
+  async uploadImageBase64(
+    @Param('taskId') taskId: string,
+    @Body() body: { file: string; originalName: string; mimeType: string; taskDetailId?: string }
+  ) {
+    console.log('🔥 Recibida imagen base64 para tarea:', taskId);
+    console.log('  - originalName:', body.originalName);
+    console.log('  - mimeType:', body.mimeType);
+    console.log('  - base64 length:', body.file.length);
+    
+    return this.taskboardService.uploadImageBase64(taskId, body);
+  }
+
+  @Get('tasks/:taskId/images')
+  async getTaskImages(@Param('taskId') taskId: string) {
+    return this.taskboardService.getTaskImages(taskId);
+  }
+
+  @Get('tasks/:taskId/images/detail/:taskDetailId')
+  async getTaskDetailImages(
+    @Param('taskId') taskId: string,
+    @Param('taskDetailId') taskDetailId: string
+  ) {
+    return this.taskboardService.getTaskDetailImages(taskId, taskDetailId);
+  }
+
+  @Get('tasks/:taskId/images/:imageId/url')
+  async getImageUrl(
+    @Param('taskId') taskId: string,
+    @Param('imageId') imageId: string
+  ) {
+    return this.taskboardService.getImageUrl(taskId, imageId);
+  }
+
+  @Delete('tasks/:taskId/images/:imageId')
+  async deleteImage(
+    @Param('taskId') taskId: string,
+    @Param('imageId') imageId: string
+  ) {
+    return this.taskboardService.deleteImage(taskId, imageId);
   }
 
   // ========== COMENTARIOS ==========
