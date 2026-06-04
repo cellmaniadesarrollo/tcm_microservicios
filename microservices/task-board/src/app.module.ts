@@ -8,6 +8,8 @@ import { LabelsModule } from './labels/labels.module';
 import { KafkaModule } from './kafka/kafka.module';
 import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
+import { AwsS3Module } from './aws-s3/aws-s3.module';
+import { ImagesModule } from './images/images.module';
 
 @Module({
   imports: [
@@ -26,6 +28,8 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
     BoardsModule,
     TasksModule,
     LabelsModule,
+    AwsS3Module,
+    ImagesModule
   ],
   controllers: [AppController],
   providers: [AppService],
