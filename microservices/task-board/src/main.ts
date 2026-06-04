@@ -2,20 +2,30 @@
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
+import { ValidationPipe } from '@nestjs/common';
 
 async function bootstrap() {
-  const app = await NestFactory.createMicroservice<MicroserviceOptions>(
-    AppModule,
-    {
-      transport: Transport.TCP,
-      options: {
-        host: '0.0.0.0',
-        port: 3000,
-      },
+  // Servidor HTTP (REST) para imágenes
+  const app = await NestFactory.create(AppModule);
+  app.enableCors();
+  app.useGlobalPipes(new ValidationPipe());
+  
+  // Servidor TCP (para comunicación con gateway)
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.TCP,
+    options: {
+      host: '0.0.0.0',
+      port: 3000,  // TCP en puerto 3000
     },
-  );
-
-  await app.listen();
-  console.log('🚀 TaskBoard TCP microservice running on port 3000');
+  });
+  
+  await app.startAllMicroservices();
+  
+  // HTTP en puerto 3001 (diferente)
+  const httpPort = 3001;
+  await app.listen(httpPort, '0.0.0.0');
+  
+  console.log(`✅ HTTP server on port ${httpPort}`);
+  console.log(`✅ TCP microservice on port 3000`);
 }
 bootstrap();

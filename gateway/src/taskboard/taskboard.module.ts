@@ -1,11 +1,13 @@
 // gateway/src/taskboard/taskboard.module.ts
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { HttpModule } from '@nestjs/axios';  // ← AGREGAR
 import { TaskboardController } from './taskboard.controller';
 import { TaskboardService } from './taskboard.service';
 
 @Module({
   imports: [
+    HttpModule,  // ← AGREGAR
     ClientsModule.register([
       {
         name: 'TASKBOARD_CLIENT',
@@ -16,7 +18,7 @@ import { TaskboardService } from './taskboard.service';
         },
       },
       {
-        name: 'USERS_CLIENT',  // ✅ Nuevo cliente para usuarios
+        name: 'USERS_CLIENT',
         transport: Transport.TCP,
         options: {
           host: 'ms-users',
@@ -24,7 +26,7 @@ import { TaskboardService } from './taskboard.service';
         },
       },
       {
-        name: 'NOTIFICATIONS_CLIENT',  // ✅ Agregar cliente de notificaciones
+        name: 'NOTIFICATIONS_CLIENT',
         transport: Transport.TCP,
         options: {
           host: 'ms-notifications', 

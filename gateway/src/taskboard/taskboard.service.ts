@@ -1,49 +1,50 @@
-// gateway/src/taskboard/taskboard.service.ts
 import { Injectable, Inject } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
+import { HttpService } from '@nestjs/axios';
+import axios from 'axios';
 import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class TaskboardService {
+  private taskboardHttpUrl = 'http://ms-task-board:3001';
+
   constructor(
     @Inject('TASKBOARD_CLIENT')
     private readonly taskboardClient: ClientProxy,
     @Inject('USERS_CLIENT')
     private readonly usersClient: ClientProxy,
+    private readonly httpService: HttpService,
   ) {}
 
   // ========== USERS (para buscar miembros) ==========
   
-async getAllUsers() {
-  console.log('📤 [Gateway] Enviando a Users: getAllUsers - INICIO');
-  try {
-    console.log('📤 [Gateway] Enviando mensaje TCP...');
-    const result = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
-    console.log('✅ Respuesta recibida:', result?.length || 0, 'usuarios');
-    return result;
-  } catch (error) {
-    console.error('❌ Error en getAllUsers:', error);
-    return [];
+  async getAllUsers() {
+    console.log('📤 [Gateway] Enviando a Users: getAllUsers - INICIO');
+    try {
+      const result = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
+      console.log('✅ Respuesta recibida:', result?.length || 0, 'usuarios');
+      return result;
+    } catch (error) {
+      console.error('❌ Error en getAllUsers:', error);
+      return [];
+    }
   }
-}
 
-async searchUsers(search: string) {
-  console.log(`📤 [Gateway] searchUsers - search: ${search}`);
-  try {
-    const users = await this.getAllUsers();
-    console.log(`📤 Usuarios obtenidos: ${users?.length || 0}`);
-    if (!search) return users;
-    const filtered = users.filter(user => 
-      (user.name || '').toLowerCase().includes(search.toLowerCase()) ||
-      (user.email || '').toLowerCase().includes(search.toLowerCase())
-    );
-    console.log(`✅ Filtrados: ${filtered.length}`);
-    return filtered;
-  } catch (error) {
-    console.error('Error en searchUsers:', error);
-    return [];
+  async searchUsers(search: string) {
+    console.log(`📤 [Gateway] searchUsers - search: ${search}`);
+    try {
+      const users = await this.getAllUsers();
+      if (!search) return users;
+      const filtered = users.filter(user => 
+        (user.name || '').toLowerCase().includes(search.toLowerCase()) ||
+        (user.email || '').toLowerCase().includes(search.toLowerCase())
+      );
+      return filtered;
+    } catch (error) {
+      console.error('Error en searchUsers:', error);
+      return [];
+    }
   }
-}
 
   // ========== ROLES ==========
   
@@ -94,36 +95,28 @@ async searchUsers(search: string) {
     return lastValueFrom(this.taskboardClient.send({ cmd: 'boards.addMember' }, { id: boardId, userId }));
   }
 
-async removeMember(boardId: string, userId: string) {
-  console.log(`📤 [Gateway] Enviando a TaskBoard: removeMember - boardId: ${boardId}, userId: ${userId}`);
-  
-  try {
-    const result = await lastValueFrom(
-      this.taskboardClient.send({ cmd: 'boards.removeMember' }, { boardId, userId })
-    );
-    
-    console.log(`✅ [Gateway] Respuesta recibida:`, result);
-    
-    // Si el microservicio no devuelve nada, devolver un objeto por defecto
-    if (!result) {
-      return { success: true, message: 'Miembro eliminado correctamente' };
+  async removeMember(boardId: string, userId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: removeMember - boardId: ${boardId}, userId: ${userId}`);
+    try {
+      const result = await lastValueFrom(
+        this.taskboardClient.send({ cmd: 'boards.removeMember' }, { boardId, userId })
+      );
+      if (!result) {
+        return { success: true, message: 'Miembro eliminado correctamente' };
+      }
+      return result;
+    } catch (error) {
+      console.error(`❌ [Gateway] Error en removeMember:`, error);
+      throw error;
     }
-    
-    return result;
-  } catch (error) {
-    console.error(`❌ [Gateway] Error en removeMember:`, error);
-    throw error;
   }
-}
 
   // ========== MIEMBROS (obtener datos del usuario) ==========
   
   async getUserById(userId: string) {
     if (!userId) {
-      console.log(`⚠️ getUserById llamado con userId vacío`);
       return null;
     }
-    console.log(`📤 [Gateway] Enviando a Users: getUserById - userId: ${userId}`);
     try {
       const users = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
       return users.find(user => user.id === userId) || null;
@@ -136,9 +129,7 @@ async removeMember(boardId: string, userId: string) {
   async getBoardMembersWithDetails(boardId: string) {
     console.log(`📤 [Gateway] Enviando a TaskBoard: getBoardMembersWithDetails - boardId: ${boardId}`);
     try {
-      // ✅ Cambiar a boards.getMembersWithDetails
       const members = await lastValueFrom(this.taskboardClient.send({ cmd: 'boards.getMembersWithDetails' }, boardId));
-      
       return members;
     } catch (error) {
       console.error(`Error en getBoardMembersWithDetails:`, (error as any).message);
@@ -335,12 +326,9 @@ async removeMember(boardId: string, userId: string) {
     console.log(`📤 [Gateway] Enviando a TaskBoard: getCollaborators - taskId: ${taskId}`);
     try {
       const collaborators = await lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.getCollaborators' }, taskId));
-      
       if (!collaborators || collaborators.length === 0) {
         return [];
       }
-      
-      // Enriquecer con datos del usuario
       const collaboratorsWithDetails = await Promise.all(
         collaborators.map(async (collaborator: any) => {
           if (!collaborator.userId) {
@@ -349,7 +337,6 @@ async removeMember(boardId: string, userId: string) {
               user: { id: collaborator.userId, name_user: 'Unknown', email_user: 'unknown' }
             };
           }
-          
           try {
             const user = await this.getUserById(collaborator.userId);
             return {
@@ -364,7 +351,6 @@ async removeMember(boardId: string, userId: string) {
           }
         })
       );
-      
       return collaboratorsWithDetails;
     } catch (error) {
       console.error(`Error en getCollaborators:`, (error as any).message);
@@ -375,5 +361,105 @@ async removeMember(boardId: string, userId: string) {
   async removeCollaborator(taskId: string, userId: string) {
     console.log(`📤 [Gateway] Enviando a TaskBoard: removeCollaborator - taskId: ${taskId}, userId: ${userId}`);
     return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.removeCollaborator' }, { taskId, userId }));
+  }
+
+  // ========== IMÁGENES (USANDO HTTP) ==========
+
+  async uploadImage(taskId: string, file: any, taskDetailId?: string) {
+    console.log(`📤 [Gateway] uploadImage - INICIO`);
+    console.log(`  - taskId: ${taskId}`);
+    console.log(`  - file existe: ${!!file}`);
+    
+    if (!file) {
+      console.error('❌ No se recibió ningún archivo');
+      throw new Error('No file uploaded');
+    }
+    
+    console.log(`  - fileName: ${file.originalname}`);
+    console.log(`  - fileSize: ${file.size}`);
+    console.log(`  - mimeType: ${file.mimetype}`);
+    
+    // Por ahora, devolver un mock para probar
+    return {
+      success: true,
+      data: {
+        id: 'mock-id',
+        originalName: file.originalname,
+        size: file.size,
+        mimeType: file.mimetype,
+      }
+    };
+  }
+
+  async uploadImageBase64(taskId: string, data: { file: string; originalName: string; mimeType: string; taskDetailId?: string }) {
+    console.log(`📤 [Gateway] uploadImageBase64 - taskId: ${taskId}`);
+    
+    try {
+      const response = await axios.post(
+        `${this.taskboardHttpUrl}/tasks/${taskId}/images/base64`,
+        {
+          file: data.file,
+          originalName: data.originalName,
+          mimeType: data.mimeType,
+          taskDetailId: data.taskDetailId
+        }
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en uploadImageBase64:', error.message);
+      throw error;
+    }
+  }
+
+  async getTaskImages(taskId: string) {
+    console.log(`📤 [Gateway] getTaskImages via HTTP - taskId: ${taskId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getTaskImages:', error.message);
+      throw error;
+    }
+  }
+
+  async getTaskDetailImages(taskId: string, taskDetailId: string) {
+    console.log(`📤 [Gateway] getTaskDetailImages via HTTP - taskId: ${taskId}, taskDetailId: ${taskDetailId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images/detail/${taskDetailId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getTaskDetailImages:', error.message);
+      throw error;
+    }
+  }
+
+  async getImageUrl(taskId: string, imageId: string) {
+    console.log(`📤 [Gateway] getImageUrl via HTTP - taskId: ${taskId}, imageId: ${imageId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images/${imageId}/url`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getImageUrl:', error.message);
+      throw error;
+    }
+  }
+
+  async deleteImage(taskId: string, imageId: string) {
+    console.log(`📤 [Gateway] deleteImage via HTTP - taskId: ${taskId}, imageId: ${imageId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.delete(`${this.taskboardHttpUrl}/tasks/${taskId}/images/${imageId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en deleteImage:', error.message);
+      throw error;
+    }
   }
 }
