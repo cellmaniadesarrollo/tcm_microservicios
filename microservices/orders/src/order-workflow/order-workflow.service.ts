@@ -1378,7 +1378,8 @@ export class OrderWorkflowService {
   async getLastOrdersByDevice(
     deviceId: number,
     user: { companyId: string },
-  ): Promise<Order[]> {
+  ): Promise<{ orders: any[]; deviceHasActiveWarranty: boolean }> {
+
     const device = await this.deviceRepo.findOne({
       where: { device_id: deviceId, company_id: user.companyId },
     });
@@ -1389,15 +1390,60 @@ export class OrderWorkflowService {
       );
     }
 
-    return this.orderRepo.find({
-      where: {
-        device_id: deviceId,
-        company_id: user.companyId,
-      },
-      relations: ['currentStatus', 'priority', 'type', 'technicians'],
-      order: { createdAt: 'DESC' },
-      take: 5,
+    const orders = await this.orderRepo
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+      .leftJoinAndSelect('order.priority', 'priority')
+      .leftJoinAndSelect('order.type', 'type')
+      .leftJoinAndSelect('order.technicians', 'technicians')
+      .leftJoinAndSelect('order.delivery', 'delivery')
+      .leftJoinAndSelect('order.findings', 'findings', 'findings.is_active = true')
+      .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = true')
+      .where('order.device_id = :deviceId', { deviceId })
+      .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+      .orderBy('order.createdAt', 'DESC')
+      .take(5)
+      .getMany();
+
+    const now = new Date();
+
+    const mappedOrders = orders.map((order) => {
+      const deliveredAt = order.delivery?.delivered_at ?? null;
+      let hasActiveWarranty = false;
+      let warrantyExpiresAt: Date | null = null;
+      let maxWarrantyDays = 0;
+
+      if (deliveredAt) {
+        for (const finding of order.findings ?? []) {
+          for (const procedure of finding.procedures ?? []) {
+            if (procedure.was_solved && procedure.warranty_days > 0) {
+              const expiresAt = new Date(deliveredAt);
+              expiresAt.setDate(expiresAt.getDate() + procedure.warranty_days);
+
+              if (expiresAt > now && procedure.warranty_days > maxWarrantyDays) {
+                hasActiveWarranty = true;
+                maxWarrantyDays = procedure.warranty_days;
+                warrantyExpiresAt = expiresAt;
+              }
+            }
+          }
+        }
+      }
+
+      return {
+        ...order,
+        hasActiveWarranty,
+        warrantyExpiresAt,
+        warrantyDaysRemaining: warrantyExpiresAt
+          ? Math.ceil((warrantyExpiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
+          : null,
+      };
     });
+
+    return {
+      orders: mappedOrders,
+      deviceHasActiveWarranty: mappedOrders.some((o) => o.hasActiveWarranty),
+    };
   }
   async getOrderPublicData(publicId: string) {
     try {

@@ -393,7 +393,14 @@ export class OrdersReportsService {
         const [raw, total] = await Promise.all([
             this.orderReplicaModel
                 .find(filter)
-                .select({ id: 1, order_number: 1, revisadoAntes: 1, currentStatus: 1, type: 1, branch: 1, customer: 1, device: 1, technicians: 1, entry_date: 1, estimated_price: 1, statusHistory: 1, findings: 1, payments: 1 })
+                .select({
+                    id: 1, order_number: 1,
+                    previous_order_id: 1, revisadoAntes: 1,
+                    currentStatus: 1, type: 1, branch: 1,
+                    customer: 1, device: 1, technicians: 1,
+                    entry_date: 1, estimated_price: 1,
+                    statusHistory: 1, findings: 1, payments: 1
+                })
                 .sort({ entry_date: -1 })
                 .lean(),
             this.orderReplicaModel.countDocuments(filter),
@@ -418,13 +425,6 @@ export class OrdersReportsService {
             const totalPaid = order.payments?.reduce((sum, p) =>
                 sum + (p.flow_type === 'INGRESO' ? (p.amount ?? 0) : 0), 0) ?? 0;
 
-            const activeFindings = order.findings?.filter(f => f.is_active) ?? [];
-            const findingsSummary = {
-                total: activeFindings.length,
-                resolved: activeFindings.filter(f => f.is_resolved).length,
-                pending: activeFindings.filter(f => !f.is_resolved).length,
-            };
-
             const hasActiveWarranty = order.findings?.some(finding =>
                 finding.procedures?.some(proc => {
                     if (!proc.is_active || !proc.warranty_days || proc.warranty_days <= 0) return false;
@@ -441,6 +441,14 @@ export class OrdersReportsService {
                 type: order.device.type?.name,
             } : undefined;
 
+            const findings = order.findings?.map(f => ({
+                id: f.id,
+                description: f.description,
+                is_active: f.is_active,
+                is_resolved: f.is_resolved,
+                procedures: f.procedures ?? [],
+            })) ?? [];
+
             return {
                 id: order.id, order_number: order.order_number,
                 revisadoAntes: order.revisadoAntes, currentStatus: order.currentStatus,
@@ -452,7 +460,7 @@ export class OrdersReportsService {
                 entry_date: order.entry_date, finalized_at: finalizedAt, completed_at: completedAt,
                 estimated_price: order.estimated_price ?? null,
                 total_procedures_cost: totalProceduresCost, total_paid: totalPaid,
-                findings_summary: findingsSummary, has_active_warranty: hasActiveWarranty,
+                findings, has_active_warranty: hasActiveWarranty,
             };
         });
 
