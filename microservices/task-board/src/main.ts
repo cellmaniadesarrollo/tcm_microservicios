@@ -1,12 +1,17 @@
-// task-board/src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { json, urlencoded } from 'express';  // ← AGREGAR
 
 async function bootstrap() {
   // Servidor HTTP (REST) para imágenes
   const app = await NestFactory.create(AppModule);
+  
+  // ✅ AUMENTAR LÍMITE DE TAMAÑO PARA IMÁGENES BASE64
+  app.use(json({ limit: '50mb' }));
+  app.use(urlencoded({ extended: true, limit: '50mb' }));
+  
   app.enableCors();
   app.useGlobalPipes(new ValidationPipe());
   
