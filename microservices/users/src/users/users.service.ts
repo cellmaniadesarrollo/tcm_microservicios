@@ -146,45 +146,68 @@ export class UsersService {
 
 
   async validateUser(loginUserDto: LoginUserDto): Promise<LoginResponseDto> {
-    const { username, password, latitude, longitude } = loginUserDto;
+    try {
+      const { username, password, latitude, longitude } = loginUserDto;
 
-    const user =
-      await this.userQueryService.findByNameWithPasswordAndRelations(username);
+      // 1. Buscar usuario
+      const user = await this.userQueryService.findByNameWithPasswordAndRelations(username);
 
-    if (!user) {
+      if (!user) {
+        throw new UnauthorizedException('Usuario no encontrado o inactivo');
+      }
+
+      // 2. Validar Contraseña
+      const passwordMatches = await bcrypt.compare(password, user.password_user);
+
+      if (!passwordMatches) {
+        throw new UnauthorizedException('Contraseña incorrecta');
+      }
+
+      // 3. Resolver Sucursal
+      const branch = await this.resolveBranch(
+        user.company.id,
+        latitude || 0,   // -2.7395
+        longitude || 0,  // -78.9847
+      );
+
+      // 4. Retornar Respuesta Exitosa
+      return {
+        id: user.id,
+        name: user.name_user,
+        email: user.email_user,
+        groups: user.userGroups.map(ug => ({
+          id: ug.group.id,
+          name: ug.group.name,
+        })),
+        company: {
+          id: user.company.id,
+          name: user.company.name,
+        },
+        branch,
+      };
+
+    } catch (error: any) { // Opción rápida: cambiar a 'any' si tu linter lo permite.
+      console.log(error)
+      // O LA OPCIÓN SEGURA (Manteniendo 'unknown'):
+      if (error instanceof RpcException) {
+        throw error;
+      }
+
+      // Comprobamos si el error tiene la estructura de una excepción de NestJS
+      if (error && typeof error === 'object' && 'status' in error && 'getResponse' in error) {
+        const nestError = error as { getResponse: () => any };
+        throw new RpcException(nestError.getResponse());
+      }
+
+      // Si es un error nativo de JavaScript (ej: Error de sintaxis, base de datos)
+      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+
       throw new RpcException(
-        new UnauthorizedException('Usuario no encontrado o inactivo'),
+        new InternalServerErrorException(
+          `Error interno en la autenticación: ${errorMessage}`
+        ).getResponse()
       );
     }
-
-    const passwordMatches = await bcrypt.compare(password, user.password_user);
-
-    if (!passwordMatches) {
-      throw new RpcException(
-        new UnauthorizedException('Contraseña incorrecta'),
-      );
-    }
-
-    const branch = await this.resolveBranch(
-      user.company.id,
-      latitude || 0,   // -2.7395
-      longitude || 0,  // -78.9847
-    );
-
-    return {
-      id: user.id,
-      name: user.name_user,
-      email: user.email_user,
-      groups: user.userGroups.map(ug => ({
-        id: ug.group.id,
-        name: ug.group.name,
-      })),
-      company: {
-        id: user.company.id,
-        name: user.company.name,
-      },
-      branch,
-    };
   }
 
   // 👇 ESTO ES EL "HELPER" (pero es solo un método privado)
