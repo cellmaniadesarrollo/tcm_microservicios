@@ -11,27 +11,34 @@ async function bootstrap() {
   await redisIoAdapter.connectToRedis();
   app.useWebSocketAdapter(redisIoAdapter);
 
-  // 2. Configurar el microservice RMQ
+  // 2. Configurar microservice RMQ para ÓRDENES
   app.connectMicroservice<MicroserviceOptions>({
     transport: Transport.RMQ,
     options: {
-      urls: [process.env.RABBIT_URL || 'amqp://guest:guest@localhost:5672'],
+      urls: [process.env.RABBIT_URL || 'amqp://guest:guest@ms-notifications-rabbitmq:5672'],
       queue: 'realtime_orders_queue',
-      queueOptions: {
-        durable: true,
-      },
-      // prefetchCount: 1, // recomendado en producción
+      queueOptions: { durable: true },
     },
   });
 
-  // 3. ¡¡¡ ESTO ES LO QUE FALTABA !!!
+  // 3. Configurar microservice RMQ para TAREAS
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.RMQ,
+    options: {
+      urls: [process.env.RABBIT_URL || 'amqp://guest:guest@ms-notifications-rabbitmq:5672'],
+      queue: 'realtime_tasks_queue',  // ← AGREGAR ESTA
+      queueOptions: { durable: true },
+    },
+  });
+
+  // 4. Iniciar todos los microservicios
   await app.startAllMicroservices();
 
-  // 4. Iniciar el servidor HTTP + WebSocket
+  // 5. Iniciar el servidor HTTP + WebSocket
   await app.listen(3002);
 
   console.log('🚀 Realtime service corriendo en puerto 3002');
-  console.log('📡 Microservice RMQ iniciado + Socket.IO con Redis');
+  console.log('📡 Microservicios RMQ iniciados (orders + tasks) + Socket.IO con Redis');
 }
 
 bootstrap();
