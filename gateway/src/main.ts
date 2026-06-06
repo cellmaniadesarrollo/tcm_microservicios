@@ -31,6 +31,7 @@ async function bootstrap() {
       },
       // Muy importante cuando hay proxy delante (Nginx, ALB, CloudFront, etc.)
       trustProxy: true,
+      bodyLimit: 50 * 1024 * 1024,
     }),
   );
 
