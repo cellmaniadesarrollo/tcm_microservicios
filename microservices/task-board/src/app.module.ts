@@ -10,6 +10,7 @@ import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { ImagesModule } from './images/images.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 @Module({
   imports: [
@@ -29,7 +30,8 @@ import { ImagesModule } from './images/images.module';
     TasksModule,
     LabelsModule,
     AwsS3Module,
-    ImagesModule
+    ImagesModule,
+    NotificationsModule
   ],
   controllers: [AppController],
   providers: [AppService],
