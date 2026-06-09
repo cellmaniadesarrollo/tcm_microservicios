@@ -144,4 +144,17 @@ export class NotificationsService {
       )
     );
   }
+
+  async getFinishedOrdersOverThreeMonths(
+    page: number = 1,
+    limit: number = 20
+  ) {
+    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_finished_orders_over_three_months' },
+        { page, limit }
+      )
+    );
+  }
 }

@@ -733,4 +733,74 @@ export class NotificationsService {
       notifications,
     };
   }
+
+  async getFinishedOrdersOverThreeMonths(
+    page: number = 1,
+    limit: number = 20
+  ) {
+    const skip = (page - 1) * limit;
+    
+    // Calcular fecha hace 3 meses
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    
+    // Obtener todas las notificaciones con TRABAJO FINALIZADO
+    const allFinished = await this.notificationModel
+      .find({
+        currentStatus: 'TRABAJO FINALIZADO',
+        $or: [
+          { entityType: 'order' },
+          { entityType: 'ORDER' }
+        ]
+      })
+      .lean()
+      .exec();
+    
+    // Filtrar por fecha de finalización real (desde statusHistory) y agrupar por orden
+    const uniqueByOrder = new Map();
+    
+    allFinished.forEach(notification => {
+      // Buscar la entrada de TRABAJO FINALIZADO en statusHistory
+      const finishedEntry = notification.statusHistory?.find(
+        (entry: any) => entry.status === 'TRABAJO FINALIZADO'
+      );
+      
+      if (!finishedEntry) return;
+      
+      const finishedDate = new Date(finishedEntry.changedAt);
+      
+      // Solo incluir si tiene más de 3 meses
+      if (finishedDate > threeMonthsAgo) return;
+      
+      const orderId = notification.entityId;
+      const existing = uniqueByOrder.get(orderId);
+      
+      // Mantener solo una notificación por orden
+      if (!existing) {
+        uniqueByOrder.set(orderId, {
+          ...notification,
+          finishedDate: finishedDate
+        });
+      }
+    });
+    
+    // Convertir a array y ordenar por fecha de finalización (más antiguas primero)
+    const allNotifications = Array.from(uniqueByOrder.values())
+      .sort((a, b) => a.finishedDate.getTime() - b.finishedDate.getTime());
+    
+    // Aplicar paginación
+    const total = allNotifications.length;
+    const paginatedNotifications = allNotifications.slice(skip, skip + limit);
+    
+    console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total}`);
+    console.log(`📅 Fecha límite: ${threeMonthsAgo.toISOString()}`);
+    
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications: paginatedNotifications,
+    };
+  }
 }
