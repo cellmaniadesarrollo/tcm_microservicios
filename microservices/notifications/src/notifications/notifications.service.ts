@@ -638,4 +638,99 @@ export class NotificationsService {
     
     return this.create(notification);
   }
+
+  async getDeliveredNotifications(page: number = 1, limit: number = 20) {
+    const skip = (page - 1) * limit;
+    
+    // Calcular fecha hace 1 mes
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+    
+    // ✅ Usar any[] para evitar errores de tipo
+    const pipeline: any[] = [
+      {
+        $match: {
+          currentStatus: 'ENTREGADA',
+          $or: [
+            { entityType: 'order' },
+            { entityType: 'ORDER' }
+          ]
+        }
+      },
+      {
+        $addFields: {
+          deliveryDate: {
+            $arrayElemAt: [
+              {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: '$statusHistory',
+                      as: 'history',
+                      cond: { $eq: ['$$history.status', 'ENTREGADA'] }
+                    }
+                  },
+                  as: 'delivery',
+                  in: '$$delivery.changedAt'
+                }
+              },
+              0
+            ]
+          }
+        }
+      },
+      {
+        $match: {
+          deliveryDate: { $exists: true, $ne: null }
+        }
+      },
+      {
+        $match: {
+          deliveryDate: { $lte: oneMonthAgo }
+        }
+      },
+      {
+        $sort: { deliveryDate: -1 }  // ✅ Sin as const, funciona con any[]
+      },
+      {
+        $group: {
+          _id: '$entityId',  // Agrupar por orden para evitar duplicados
+          notification: { $first: '$$ROOT' }
+        }
+      },
+      {
+        $replaceRoot: { newRoot: '$notification' }
+      },
+      {
+        $sort: { deliveryDate: -1 }  // ✅ Sin as const
+      },
+      {
+        $facet: {
+          metadata: [
+            { $count: 'total' }
+          ],
+          notifications: [
+            { $skip: skip },
+            { $limit: limit }
+          ]
+        }
+      }
+    ];
+    
+    const result = await this.notificationModel.aggregate(pipeline);
+    
+    const total = result[0]?.metadata[0]?.total || 0;
+    const notifications = result[0]?.notifications || [];
+    
+    console.log(`📊 Entregadas hace más de 1 mes: ${total}`);
+    console.log(`📅 Fecha límite: ${oneMonthAgo.toISOString()}`);
+    
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications,
+    };
+  }
 }

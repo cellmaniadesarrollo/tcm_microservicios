@@ -134,4 +134,14 @@ export class NotificationsService {
       )
     );
   }
+
+  async getDeliveredNotifications(page: number = 1, limit: number = 20) {
+    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_delivered_notifications' },
+        { page, limit }
+      )
+    );
+  }
 }

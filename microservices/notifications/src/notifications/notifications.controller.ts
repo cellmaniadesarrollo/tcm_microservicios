@@ -233,4 +233,16 @@ export class NotificationsController {
     const originalMsg = context.getMessage();
     channel.ack(originalMsg);
   }
+
+  @MessagePattern({ cmd: 'get_delivered_notifications' })
+  async getDeliveredNotifications(@Payload() data: {
+    page?: number;
+    limit?: number;
+  }) {
+    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}`);
+    return await this.notificationsService.getDeliveredNotifications(
+      data.page || 1,
+      data.limit || 20
+    );
+  }
 }
