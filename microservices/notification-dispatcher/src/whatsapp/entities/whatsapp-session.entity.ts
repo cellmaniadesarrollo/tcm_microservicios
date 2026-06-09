@@ -1,34 +1,40 @@
-import {
-    Entity, PrimaryGeneratedColumn, Column,
-    OneToOne, JoinColumn, UpdateDateColumn, CreateDateColumn,
-} from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
+import { WhatsappRouting } from './whatsapp-routing.entity';
+
+export type SessionStatus = 'CONNECTED' | 'DISCONNECTED' | 'BANNED';
 
 @Entity('whatsapp_sessions')
 export class WhatsappSession {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
 
-    @OneToOne(() => CompanyReplica, { onDelete: 'CASCADE' })
+    @ManyToOne(() => CompanyReplica, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'companyId' })
     company!: CompanyReplica;
 
     @Column()
     companyId!: string;
 
+    // Aquí haces la conexión: una sesión pertenece a un tipo de enrutamiento
+    @ManyToOne(() => WhatsappRouting, { onDelete: 'SET NULL', nullable: true, eager: true })
+    @JoinColumn({ name: 'routingId' })
+    routing!: WhatsappRouting | null;
+
+    @Column({ nullable: true })
+    routingId!: string | null; // El ID del tipo de sesión (ALL, NOTIFICATIONS, etc.)
+
     @Column({ nullable: true })
     phoneNumber!: string;
 
-    /** Credenciales principales de Baileys (se actualizan poco) */
     @Column({ type: 'jsonb', nullable: true })
     creds: any;
 
-    /** Signal keys (se actualizan frecuentemente) */
     @Column({ type: 'jsonb', nullable: true })
     keys: any;
 
-    @Column({ default: 'DISCONNECTED' }) // CONNECTED | DISCONNECTED | BANNED
-    status!: string;
+    @Column({ default: 'DISCONNECTED' })
+    status!: SessionStatus;
 
     @CreateDateColumn()
     createdAt!: Date;

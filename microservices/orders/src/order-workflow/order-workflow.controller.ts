@@ -40,10 +40,11 @@ export class OrderWorkflowController {
       branchId: string;
     };
   }) {
-    return this.orderWorkflowService.listOrders(
+    const orders = await this.orderWorkflowService.listOrders(
       data.user,
       data.dto,
     );
+    return orders
   }
   @MessagePattern({ cmd: 'list_my_orders' })
   async listMyOrders(data: {
@@ -117,6 +118,7 @@ export class OrderWorkflowController {
   async registerPayment(
     @Payload() data: {
       dto: CreateOrderPaymentDto;
+      files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>; // ← nuevo
       user: {
         userId: string;
         companyId: string;
@@ -124,17 +126,25 @@ export class OrderWorkflowController {
       };
     },
   ): Promise<any> {
-    // Aquí el servicio ya lanza RpcException si algo falla
-    return this.orderWorkflowService.registerIncomePayment(data.dto, data.user);
+    return this.orderWorkflowService.registerIncomePayment(
+      data.dto,
+      data.user,
+      data.files ?? [], // ← nuevo
+    );
   }
   @MessagePattern({ cmd: 'close_order' })
   async closeOrder(
     @Payload() data: {
       dto: CloseOrderDto;
+      files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>; // ← nuevo
       user: { userId: string; companyId: string; branchId: string };
     },
   ): Promise<OrderDelivery> {
-    return this.orderWorkflowService.closeOrder(data.dto, data.user);
+    return this.orderWorkflowService.closeOrder(
+      data.dto,
+      data.user,
+      data.files ?? [], // ← nuevo
+    );
   }
 
   @MessagePattern({ cmd: 'get_payment_catalogs' })

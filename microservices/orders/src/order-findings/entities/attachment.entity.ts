@@ -14,6 +14,7 @@ export enum AttachmentEntityType {
   FINDING = 'FINDING',
   PROCEDURE = 'PROCEDURE',
   ORDER = 'ORDER',
+  PAYMENT = 'PAYMENT',
 }
 
 @Entity('attachments')

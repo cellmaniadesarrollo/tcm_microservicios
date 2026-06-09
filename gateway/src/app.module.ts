@@ -13,6 +13,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { LegacyModule } from './legacy/legacy.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { NotificationsDispatcherModule } from './notifications-dispatcher/notifications-dispatcher.module';
 @Module({
   imports: [UsersModule,
     ConfigModule.forRoot({
@@ -25,7 +26,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     SubscriptionsModule,
     LegacyModule,
     ReportsModule,
-    NotificationsModule
+    NotificationsModule,
+    NotificationsDispatcherModule
      
   ],
   controllers: [AppController],

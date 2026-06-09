@@ -52,25 +52,25 @@ async function bootstrap() {
       transport: Transport.RMQ,
       options: {
         urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
-        queue: 'notifications_dispacher_queue',
+        queue: 'notifications_dispatcher_queue',
         queueOptions: { durable: true },
         persistent: true,
       },
     });
 
     // ── 3. Conectar Microservicio Kafka (Sincronización de réplicas) ──
-    app.connectMicroservice<MicroserviceOptions>({
-      transport: Transport.KAFKA,
-      options: {
-        client: {
-          clientId: 'notification-dispatcher',
-          brokers: (process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092').split(','),
-        },
-        consumer: {
-          groupId: 'notifications-group-id',
-        },
-      },
-    });
+    // app.connectMicroservice<MicroserviceOptions>({
+    //   transport: Transport.KAFKA,
+    //   options: {
+    //     client: {
+    //       clientId: 'notification-dispatcher',
+    //       brokers: (process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092').split(','),
+    //     },
+    //     consumer: {
+    //       groupId: 'notifications-group-id',
+    //     },
+    //   },
+    // });
 
     // ── 4. Interceptor global y arranque de Microservicios ──
     app.useGlobalInterceptors(new InternalAuthInterceptor());

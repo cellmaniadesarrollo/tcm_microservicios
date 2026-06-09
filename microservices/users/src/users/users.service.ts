@@ -187,7 +187,7 @@ export class UsersService {
       };
 
     } catch (error: any) { // Opción rápida: cambiar a 'any' si tu linter lo permite.
-      console.log(error)
+      // console.log(error)
       // O LA OPCIÓN SEGURA (Manteniendo 'unknown'):
       if (error instanceof RpcException) {
         throw error;
@@ -262,7 +262,7 @@ export class UsersService {
   }
 
   async findFullDataByCreatedAfter(date: Date | null): Promise<any[]> {
-    console.log(date)
+    // console.log(date)
     const qb = await this.userRepo.find({
       where: date
         ? { updatedAt: MoreThan(date) }
