@@ -1,5 +1,5 @@
 // tasks/tasks.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Task, TaskStatus } from './entities/task.entity';
@@ -7,6 +7,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { TaskCollaboratorsService } from './task-collaborators.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { PushNotificationsService } from '../push-notifications/push-notifications.service';
 
 @Injectable()
 export class TasksService {
@@ -15,13 +16,15 @@ export class TasksService {
     private taskRepository: Repository<Task>,
     private collaboratorsService: TaskCollaboratorsService,
     private notificationsService: NotificationsService,
+    @Inject(forwardRef(() => PushNotificationsService))
+    private pushService: PushNotificationsService, // ✅ Agregar esto
   ) {}
 
   async create(createTaskDto: CreateTaskDto): Promise<Task> {
     const task = this.taskRepository.create(createTaskDto);
     const savedTask = await this.taskRepository.save(task);
     
-    // Enviar notificación de tarea creada
+    // Enviar notificación de tarea creada (WebSocket)
     await this.notificationsService.emitTaskCreated(
       {
         id: savedTask.id,
@@ -33,14 +36,33 @@ export class TasksService {
         columnName: createTaskDto.columnName,
       },
       savedTask.boardId,
-      createTaskDto.companyId || '', // ✅ Convertir undefined a string vacío
+      createTaskDto.companyId || '',
       savedTask.createdBy,
       createTaskDto.userName || savedTask.createdBy,
       savedTask.assignedTo
     );
     
+    // ✅ Enviar PUSH notification a los miembros del board (excepto al creador)
+    // Este método NO necesita userId porque sendToBoardMembers lo maneja internamente
+    await this.pushService.sendToBoardMembers(
+      savedTask.boardId,
+      {
+        title: '📋 Nueva Tarea',
+        body: `"${savedTask.title}"`,
+        data: {
+          taskId: savedTask.id,
+          boardId: savedTask.boardId,
+          taskTitle: savedTask.title,
+          url: `/taskboard/task/${savedTask.id}`,
+        },
+      },
+      savedTask.createdBy // Excluir al creador
+    );
+    
     return savedTask;
   }
+
+  // ==================== RESTO DEL CÓDIGO IGUAL ====================
 
   async findAll(): Promise<Task[]> {
     return this.taskRepository.find({
@@ -90,7 +112,6 @@ export class TasksService {
   async update(id: string, updateTaskDto: UpdateTaskDto): Promise<Task> {
     const task = await this.findOne(id);
     
-    // Registrar cambios para la notificación
     const changes: string[] = [];
     
     if (updateTaskDto.title && updateTaskDto.title !== task.title) {
@@ -115,7 +136,6 @@ export class TasksService {
       changes.push(`asignado actualizado`);
     }
     
-    // Verificar si se está completando la tarea
     const wasCompleted = updateTaskDto.status === TaskStatus.DONE && task.status !== TaskStatus.DONE;
     
     Object.assign(task, updateTaskDto);
@@ -126,12 +146,11 @@ export class TasksService {
     
     const savedTask = await this.taskRepository.save(task);
     
-    // Enviar notificaciones según el tipo de cambio
     if (wasCompleted) {
       await this.notificationsService.emitTaskCompleted(
         { id: savedTask.id, title: savedTask.title },
         savedTask.boardId,
-        updateTaskDto.companyId || '', // ✅ Convertir undefined a string vacío
+        updateTaskDto.companyId || '',
         updateTaskDto.updatedBy || savedTask.createdBy,
         updateTaskDto.userName || savedTask.createdBy
       );
@@ -144,7 +163,7 @@ export class TasksService {
           priority: savedTask.priority,
         },
         savedTask.boardId,
-        updateTaskDto.companyId || '', // ✅ Convertir undefined a string vacío
+        updateTaskDto.companyId || '',
         updateTaskDto.updatedBy || savedTask.createdBy,
         updateTaskDto.userName || savedTask.createdBy,
         changes
@@ -157,11 +176,10 @@ export class TasksService {
   async remove(id: string, updateTaskDto?: UpdateTaskDto): Promise<void> {
     const task = await this.findOne(id);
     
-    // Enviar notificación de eliminación
     await this.notificationsService.emitTaskDeleted(
       { id: task.id, title: task.title },
       task.boardId,
-      updateTaskDto?.companyId || '', // ✅ Convertir undefined a string vacío
+      updateTaskDto?.companyId || '',
       updateTaskDto?.updatedBy || task.createdBy,
       updateTaskDto?.userName || task.createdBy
     );
@@ -185,12 +203,11 @@ export class TasksService {
     
     const savedTask = await this.taskRepository.save(task);
     
-    // Enviar notificación si cambió de columna
     if (fromColumnName && toColumnName && fromColumnName !== toColumnName) {
       await this.notificationsService.emitTaskMoved(
         { id: savedTask.id, title: savedTask.title },
         savedTask.boardId,
-        updateTaskDto?.companyId || '', // ✅ Convertir undefined a string vacío
+        updateTaskDto?.companyId || '',
         updateTaskDto?.updatedBy || savedTask.createdBy,
         updateTaskDto?.userName || savedTask.createdBy,
         fromColumnName,
@@ -201,7 +218,7 @@ export class TasksService {
     return savedTask;
   }
 
-  // ==================== MÉTODOS DE COLABORADORES ====================
+  // ==================== COLABORADORES ====================
 
   async addCollaborator(taskId: string, userId: string, addedBy: string) {
     return this.collaboratorsService.addCollaborator(taskId, userId, addedBy);

@@ -1,5 +1,5 @@
 // tasks/tasks.module.ts
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TasksController } from './tasks.controller';
 import { TasksService } from './tasks.service';
@@ -12,11 +12,13 @@ import { TaskCommentsService } from './task-comments.service';
 import { SubTasksService } from './subtasks.service';
 import { NotificationsModule } from '../notifications/notifications.module'; 
 import { BoardColumn } from '../boards/entities/board-column.entity';
+import { PushNotificationsModule } from '../push-notifications/push-notifications.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Task, TaskCollaborator, TaskComment, SubTask, BoardColumn]),
     NotificationsModule,
+    forwardRef(() => PushNotificationsModule),
   ],
   controllers: [TasksController],
   providers: [
