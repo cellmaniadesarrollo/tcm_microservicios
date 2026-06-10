@@ -238,11 +238,13 @@ export class NotificationsController {
   async getDeliveredNotifications(@Payload() data: {
     page?: number;
     limit?: number;
+    includeArchived?: boolean;
   }) {
-    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}`);
+    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}`);
     return await this.notificationsService.getDeliveredNotifications(
       data.page || 1,
-      data.limit || 20
+      data.limit || 20,
+      data.includeArchived || false
     );
   }
 
@@ -250,11 +252,41 @@ export class NotificationsController {
   async getFinishedOrdersOverThreeMonths(@Payload() data: {
     page?: number;
     limit?: number;
+    includeArchived?: boolean;
   }) {
-    console.log(`📦 [Notifications] get_finished_orders_over_three_months - page: ${data.page}, limit: ${data.limit}`);
+    console.log(`📦 [Notifications] get_finished_orders_over_three_months - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}`);
     return await this.notificationsService.getFinishedOrdersOverThreeMonths(
       data.page || 1,
-      data.limit || 20
+      data.limit || 20,
+      data.includeArchived || false
+    );
+  }
+
+  @MessagePattern({ cmd: 'update_notification_notes' })
+  async updateNotificationNotes(@Payload() data: {
+    notificationId: string;
+    userId: string;
+    notes: string;
+  }) {
+    console.log(`📝 [Notifications] update_notification_notes - id: ${data.notificationId}`);
+    return await this.notificationsService.updateNotificationNotes(
+      data.notificationId,
+      data.userId,
+      data.notes
+    );
+  }
+
+  @MessagePattern({ cmd: 'archive_notification' })
+  async archiveNotification(@Payload() data: {
+    notificationId: string;
+    userId: string;
+    archived: boolean;
+  }) {
+    console.log(`📦 [Notifications] archive_notification - id: ${data.notificationId}, archived: ${data.archived}`);
+    return await this.notificationsService.archiveNotification(
+      data.notificationId,
+      data.userId,
+      data.archived
     );
   }
 }
