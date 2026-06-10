@@ -1,9 +1,11 @@
-// src/sync/sync.gateway.ts
 import {
   WebSocketGateway,
   WebSocketServer,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
+  MessageBody,
+  ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '../common/jwt/jwt.service';
@@ -21,7 +23,6 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handleConnection(client: Socket) {
     let token: string | undefined;
 
-    // Extraer token de diferentes posibles ubicaciones
     const authHeader = client.handshake.headers.authorization as string;
     if (authHeader?.startsWith('Bearer ')) {
       token = authHeader.substring(7);
@@ -43,8 +44,8 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const payload = this.jwtService.verifyToken(token);
       client.data.user = payload;
 
-      // === MULTITENANT: Obtener company_id del token ===
       const companyId = payload.company_id || payload.companyId;
+      const userId = payload.sub || payload.id;
 
       if (!companyId) {
         client.emit('error', { message: 'company_id no encontrado en el token' });
@@ -52,16 +53,20 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      // Unir al usuario SOLO a la room de su empresa
+      // ✅ Unirse a sala de la empresa
       const companyRoom = `company:${companyId}`;
       client.join(companyRoom);
 
-      // Confirmación de conexión exitosa
+      // ✅ Unirse a sala personal (para notificaciones individuales)
+      const userRoom = `user:${userId}`;
+      client.join(userRoom);
+
       client.emit('connection_success', {
         message: '✅ Conexión WebSocket establecida correctamente',
-        userId: payload.sub || payload.id,
+        userId: userId,
         companyId: companyId,
         room: companyRoom,
+        userRoom: userRoom,
         timestamp: new Date().toISOString(),
       });
 
@@ -78,8 +83,6 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   handleDisconnect(client: Socket) {
-    // No se hace nada (puedes agregar logging si lo deseas)
+    console.log(`Cliente desconectado: ${client.id}`);
   }
-
-
 }

@@ -1,3 +1,4 @@
+// users/src/main.ts
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
@@ -23,6 +24,16 @@ async function bootstrap() {
     // ── 2. NestJS con Express ──
     const app = await NestFactory.create(AppModule);
 
+    // Conectar TCP
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.TCP,
+      options: {
+        host: '0.0.0.0',
+        port: 3001,
+      },
+    });
+
+    // Conectar RabbitMQ
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.RMQ,
       options: {
@@ -43,8 +54,10 @@ async function bootstrap() {
     });
 
     app.useGlobalInterceptors(new InternalAuthInterceptor());
+    
+    // ✅ Iniciar todos los microservicios
     await app.startAllMicroservices();
-    console.log('✅ Microservicios RabbitMQ iniciados');
+    console.log('✅ Microservicios iniciados (TCP:3001, RabbitMQ)');
 
     // ── 3. Cierra temporal y Express toma el puerto ──
     await new Promise<void>((resolve, reject) =>

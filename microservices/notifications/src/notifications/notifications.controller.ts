@@ -233,4 +233,28 @@ export class NotificationsController {
     const originalMsg = context.getMessage();
     channel.ack(originalMsg);
   }
+
+  @MessagePattern({ cmd: 'get_delivered_notifications' })
+  async getDeliveredNotifications(@Payload() data: {
+    page?: number;
+    limit?: number;
+  }) {
+    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}`);
+    return await this.notificationsService.getDeliveredNotifications(
+      data.page || 1,
+      data.limit || 20
+    );
+  }
+
+  @MessagePattern({ cmd: 'get_finished_orders_over_three_months' })
+  async getFinishedOrdersOverThreeMonths(@Payload() data: {
+    page?: number;
+    limit?: number;
+  }) {
+    console.log(`📦 [Notifications] get_finished_orders_over_three_months - page: ${data.page}, limit: ${data.limit}`);
+    return await this.notificationsService.getFinishedOrdersOverThreeMonths(
+      data.page || 1,
+      data.limit || 20
+    );
+  }
 }

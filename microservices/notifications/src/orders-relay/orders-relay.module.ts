@@ -4,8 +4,8 @@ import { OrdersRelayService } from './orders-relay.service';
 import { OrdersEventsListener } from './orders-events.listener';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { Notification, NotificationSchema } from 'src/notifications/entities/notification.entity';
-import { Audit, AuditSchema } from 'src/audit/entities/audit.entity';
+import { Notification, NotificationSchema } from '../notifications/entities/notification.entity';
+import { Audit, AuditSchema } from '../audit/entities/audit.entity';
 
 @Module({
   imports: [
