@@ -316,7 +316,7 @@ export class OrdersController {
     @Body() dto: GetOrderFullDataGatewayDto,
     @User() user: any,
   ) {
-    return firstValueFrom(
+    const data = await firstValueFrom(
       this.CustomerService.send(
         { cmd: 'get_order_full_data' },
         {
@@ -330,6 +330,8 @@ export class OrdersController {
         },
       ),
     );
+
+    return data
   }
   @Post('change-order-status')
   async changeOrderStatus(
@@ -580,17 +582,68 @@ export class OrdersController {
   }
 
   @Post('payments')
-  //@Groups('CASHIERS')
-  async registerPayment(
-    @Body() dto: CreateOrderPaymentGatewayDto, // adapta el DTO si es necesario
-    @User() user: any,
-  ) {
+  // @Groups('CASHIERS')
+  async registerPayment(@Req() request: FastifyRequest, @User() user: any) {
+    // 1. Parsear multipart
+    const files: { buffer: Buffer; originalname: string; mimetype: string; size: number }[] = [];
+    const formData: Record<string, string> = {};
+
+    for await (const part of request.parts()) {
+      if (isMultipartFile(part)) {
+        const buffers: Buffer[] = [];
+        for await (const chunk of part.file) {
+          buffers.push(chunk as Buffer);
+        }
+        const buffer = Buffer.concat(buffers);
+        files.push({
+          buffer,
+          originalname: part.filename,
+          mimetype: part.mimetype,
+          size: buffer.length,
+        });
+      } else {
+        formData[part.fieldname] = part.value as string;
+      }
+    }
+
+    // 2. Procesar imágenes a WebP
+    const processedFiles = await Promise.all(
+      files.map(file => processFileForUpload(file))
+    );
+
+    // 3. Validar tamaño
+    for (const file of processedFiles) {
+      if (file.size > 80 * 1024 * 1024) {
+        throw new BadRequestException(`El archivo ${file.originalname} es demasiado grande`);
+      }
+    }
+
+    // 4. Armar DTO desde formData
+    const dto: CreateOrderPaymentGatewayDto = {
+      orderId: Number(formData.orderId),
+      amount: Number(formData.amount),
+      paymentTypeId: Number(formData.paymentTypeId),
+      paymentMethodId: formData.paymentMethodId ? Number(formData.paymentMethodId) : null,
+      reference: formData.reference,
+      observation: formData.observation,
+    };
+
+    // 5. Serializar archivos para el microservicio
+    const formattedFiles = processedFiles.map(f => ({
+      buffer: f.buffer.toString('base64'),
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
+    }));
+
+    // 6. Enviar al microservicio
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'register_order_payment' },
         {
           internalToken: process.env.INTERNAL_SECRET,
           dto,
+          files: formattedFiles, // ← nuevo
           user: {
             userId: user.sub,
             companyId: user.companyId,
@@ -601,17 +654,73 @@ export class OrdersController {
     );
   }
   @Post('close')
-  @Groups('TECHNICIANS', 'CASHIERS', 'MANAGERS') // o los roles que puedan cerrar
-  async closeOrder(
-    @Body() dto: CloseOrderGatewayDto,
-    @User() user: any,
-  ) {
+  @Groups('TECHNICIANS', 'CASHIERS', 'MANAGERS')
+  async closeOrder(@Req() request: FastifyRequest, @User() user: any) {
+    // 1. Parsear multipart
+    const files: { buffer: Buffer; originalname: string; mimetype: string; size: number }[] = [];
+    const formData: Record<string, string> = {};
+
+    for await (const part of request.parts()) {
+      if (isMultipartFile(part)) {
+        const buffers: Buffer[] = [];
+        for await (const chunk of part.file) {
+          buffers.push(chunk as Buffer);
+        }
+        const buffer = Buffer.concat(buffers);
+        files.push({
+          buffer,
+          originalname: part.filename,
+          mimetype: part.mimetype,
+          size: buffer.length,
+        });
+      } else {
+        formData[part.fieldname] = part.value as string;
+      }
+    }
+
+    // 2. Procesar imágenes a WebP
+    const processedFiles = await Promise.all(
+      files.map(file => processFileForUpload(file))
+    );
+
+    // 3. Validar tamaño
+    for (const file of processedFiles) {
+      if (file.size > 80 * 1024 * 1024) {
+        throw new BadRequestException(`El archivo ${file.originalname} es demasiado grande`);
+      }
+    }
+
+    // 4. Armar DTO desde formData
+    const dto: CloseOrderGatewayDto = {
+      orderId: Number(formData.orderId),
+      amount: Number(formData.amount),
+      paymentMethodId: formData.paymentMethodId
+        ? Number(formData.paymentMethodId)
+        : undefined,
+      receivedByCustomerId: formData.receivedByCustomerId
+        ? Number(formData.receivedByCustomerId)
+        : undefined,
+      receivedByName: formData.receivedByName || undefined,
+      signatureCollected: formData.signatureCollected === 'true',
+      closureObservation: formData.closureObservation || undefined,
+    };
+
+    // 5. Serializar archivos para el microservicio
+    const formattedFiles = processedFiles.map(f => ({
+      buffer: f.buffer.toString('base64'),
+      originalname: f.originalname,
+      mimetype: f.mimetype,
+      size: f.size,
+    }));
+
+    // 6. Enviar al microservicio
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'close_order' },
         {
           internalToken: process.env.INTERNAL_SECRET,
           dto,
+          files: formattedFiles, // ← nuevo
           user: {
             userId: user.sub,
             companyId: user.companyId,

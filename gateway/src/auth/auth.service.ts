@@ -16,7 +16,7 @@ export class AuthService {
     try {
       // 1️⃣ Login usuario
       const user = await this.usersService.login(dto);
-      console.log(user)
+      //console.log(user)
       // 2️⃣ Validar suscripción
       const subscription =
         await this.subscriptionsClient.validateCompanySubscription(

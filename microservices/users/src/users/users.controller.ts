@@ -40,12 +40,12 @@ export class UsersController {
     async login(@Body() loginUserDto: LoginUserDto) {
 
         const user = await this.usersService.validateUser(loginUserDto);
-        console.log(user)
+        // console.log(user)
         return instanceToPlain(user);
     }
     @Post('test')
     test(@Body() body: any) {
-        console.log('Body recibido:', body);
+        // console.log('Body recibido:', body);
         return { received: body };
     }
 
