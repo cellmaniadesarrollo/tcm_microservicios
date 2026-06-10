@@ -4,8 +4,8 @@ import {
   ExecutionContext,
   Injectable,
   NestInterceptor,
-  UnauthorizedException,
 } from '@nestjs/common';
+import { RpcException } from '@nestjs/microservices'; // <-- CRUCIAL PARA RPC
 import { Observable } from 'rxjs';
 
 @Injectable()
@@ -21,13 +21,21 @@ export class InternalAuthInterceptor implements NestInterceptor {
     // RPC → toda petición DEBE venir del gateway con el token
     if (type === 'rpc') {
       const payload = context.switchToRpc().getData();
+
+      // ── LOG DE DIAGNÓSTICO INTERNO ─────────────────────────────────────────
+      console.log('📥 [InternalAuthInterceptor] Payload crudo recibido:', JSON.stringify(payload, null, 2));
+      // ─────────────────────────────────────────────────────────────────────────
+
       const token = payload?.internalToken;
 
-      if (token !== process.env.INTERNAL_SECRET) {
+      // Validación rigurosa del secreto
+      if (!token || token !== process.env.INTERNAL_SECRET) {
         console.log('❌ Petición no autorizada — no viene del gateway', {
-          received: token ? '***' : 'undefined',
+          received: token ? 'Token Incorrecto' : 'undefined',
         });
-        throw new UnauthorizedException('Token interno inválido');
+
+        // Rompemos usando la excepción nativa de microservicios para que viaje por RabbitMQ
+        throw new RpcException('Unauthorized: Token interno inválido o ausente');
       }
 
       return next.handle();

@@ -38,13 +38,14 @@ export class UsersController {
     @ApiResponse({ status: 201, description: 'Inicio de sesión exitoso', type: LoginResponseDto })
     @ApiResponse({ status: 401, description: 'Credenciales inválidas' })
     async login(@Body() loginUserDto: LoginUserDto) {
-        console.log(loginUserDto)
+
         const user = await this.usersService.validateUser(loginUserDto);
+        // console.log(user)
         return instanceToPlain(user);
     }
     @Post('test')
     test(@Body() body: any) {
-        console.log('Body recibido:', body);
+        // console.log('Body recibido:', body);
         return { received: body };
     }
 
