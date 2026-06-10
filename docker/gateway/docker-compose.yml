@@ -29,6 +29,7 @@ services:
     env_file: [../.env]
     environment:
       - REDIS_URL=redis://redis-realtime:6379
+      - RABBIT_URL=amqp://guest:guest@ms-notifications-rabbitmq:5672 
     networks: [backend]
 
 networks:

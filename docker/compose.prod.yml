@@ -81,6 +81,9 @@ services:
           ms.client.billing.updated
           ms.order.created
           ms.order.updated
+          ms.taskboard.created
+          ms.taskboard.updated
+          ms.taskboard.deleted
         "
 
         echo "⏳ Sincronizando tópicos en Kafka..."
@@ -377,6 +380,47 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # ─────────────────────────────────────────
+  # TASK BOARD MICROSERVICE
+  # ─────────────────────────────────────────
+
+  task-board:
+    build:
+      context: ../microservices/task-board
+      dockerfile: Dockerfile  # Usar Dockerfile de producción (no .dev)
+    container_name: ms-task-board
+    restart: always
+    ports:
+      - "3005:3000"
+    environment:
+      - NODE_ENV=production  # Cambiado a production
+      - PORT=3000
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${TASKBOARD_DB_HOST}  # Variable específica
+      - DB_PORT=${TASKBOARD_DB_PORT}
+      - DB_USER=${TASKBOARD_DB_USER}
+      - DB_PASSWORD=${TASKBOARD_DB_PASSWORD}
+      - DB_NAME=${DB_NAME_TASKBOARDS}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
 
 networks:
   backend:

@@ -111,4 +111,20 @@ export class NotificationsController {
   ) {
     return this.notificationsService.getFutureNotifications(page, limit);
   }
+
+  @Get('delivered')
+  async getDeliveredNotifications(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.notificationsService.getDeliveredNotifications(page, limit);
+  }
+
+  @Get('finished/three-months')
+  async getFinishedOrdersOverThreeMonths(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    return this.notificationsService.getFinishedOrdersOverThreeMonths(page, limit);
+  }
 }

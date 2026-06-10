@@ -30,6 +30,7 @@ on:
           - reports
           - realtime
           - notifications
+          - task-board
           - notification-dispatcher
           # ── Infraestructura (solo logs/restart, nunca deploy) ──
           - kafka
@@ -99,7 +100,7 @@ jobs:
             SERVICES_TO_PROCESS=""
 
             # Solo microservicios de aplicación (kafka/rabbitmq/init-kafka excluidos)
-            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications gateway"
+            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway"
 
             if [ "$ACTION" == "deploy_smart" ]; then
               echo "🔍 Analizando cambios automáticos..."
@@ -117,6 +118,7 @@ jobs:
                 ["reports"]="microservices/reporting-hub/"
                 ["realtime"]="realtime/"
                 ["notifications"]="microservices/notifications/"
+                ["task-board"]="microservices/task-board/"
                 ["notification-dispatcher"]="microservices/notification-dispatcher/"
               )
 

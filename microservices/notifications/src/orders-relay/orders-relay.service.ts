@@ -2,8 +2,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Notification } from 'src/notifications/entities/notification.entity';
-import { Audit } from 'src/audit/entities/audit.entity';
+import { Notification } from '../notifications/entities/notification.entity';
+import { Audit } from '../audit/entities/audit.entity';
 
 @Injectable()
 export class OrdersRelayService {
