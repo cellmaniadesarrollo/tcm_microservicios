@@ -12,6 +12,7 @@ import { Order } from './order.entity';
 import { PaymentType } from './payment-type.entity';
 import { PaymentMethod } from './payment-method.entity';
 import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
+import { Attachment } from '../../order-findings/entities/attachment.entity';
 
 export enum CashFlowDirection {
     INGRESO = 'INGRESO',
@@ -80,4 +81,6 @@ export class OrderPayment {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    attachments?: Attachment[];
 }

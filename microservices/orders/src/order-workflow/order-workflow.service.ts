@@ -324,6 +324,7 @@ export class OrderWorkflowService {
       .leftJoin('device.model', 'deviceModel')
       .leftJoin('deviceModel.brand', 'deviceBrand')
       .leftJoin('device.imeis', 'imei')
+
       .select(['o.id', 'o.entry_date'])
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
@@ -416,6 +417,9 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.payments', 'payments')
       .leftJoinAndSelect('payments.paymentType', 'paymentType')
       .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
+      .leftJoinAndSelect('o.branch', 'branch')    // ← aquí sí
+      .leftJoinAndSelect('o.company', 'company')  // ← aquí sí
+      .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.entry_date', 'DESC')
       .getMany();
@@ -833,7 +837,7 @@ export class OrderWorkflowService {
       const procedureIds = order.findings?.length
         ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
         : [];
-
+      const paymentIds = order.payments?.length ? order.payments.map((p) => p.id) : [];
       const whereConditions: any[] = [
         { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
       ];
@@ -845,7 +849,13 @@ export class OrderWorkflowService {
       if (procedureIds.length) {
         whereConditions.push({ entity_type: AttachmentEntityType.PROCEDURE, entity_id: In(procedureIds), is_active: true });
       }
-
+      if (paymentIds.length) {
+        whereConditions.push({
+          entity_type: AttachmentEntityType.PAYMENT,
+          entity_id: In(paymentIds),
+          is_active: true,
+        });
+      }
       const allAttachments = await this.attachmentRepository.find({
         where: whereConditions,
         order: { createdAt: 'ASC' },
@@ -866,7 +876,10 @@ export class OrderWorkflowService {
           proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) || [];
         });
       });
-
+      order.payments?.forEach((payment) => {
+        payment.attachments =
+          attachmentsMap.get(`${AttachmentEntityType.PAYMENT}_${payment.id}`) || [];
+      });
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       await this.enrichAttachmentsWithSignedUrls(order);
@@ -931,7 +944,21 @@ export class OrderWorkflowService {
         }
       }
     }
-
+    // ─── Attachments de PAYMENTS ─────────────────────────────────────────────
+    for (const payment of order.payments ?? []) {
+      if (payment.attachments?.length) {
+        for (const att of payment.attachments) {
+          promises.push(
+            this.awsS3Service
+              .getPresignedUrl(att.file_url, 1800)
+              .then((signed) => { att.file_url = signed; })
+              .catch((err) => {
+                console.error(`[ERROR] Falló presigned PAYMENT ${att.id}:`, err.message);
+              }),
+          );
+        }
+      }
+    }
     await Promise.allSettled(promises);
   }
 
@@ -1076,6 +1103,7 @@ export class OrderWorkflowService {
   async registerIncomePayment(
     dto: CreateOrderPaymentDto,
     authenticatedUser: { userId: string; companyId: string; branchId: string },
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [], // ← nuevo
   ): Promise<OrderPayment> {
     return this.paymentRepository.manager.transaction(async (transactionalEntityManager) => {
       // 1. Buscar la orden (aggregate root)
@@ -1157,7 +1185,34 @@ export class OrderWorkflowService {
       });
 
       // 7. Persistir
+      // 7. Persistir
       const savedPayment = await transactionalEntityManager.save(payment);
+
+      // 8. ← NUEVO: Subir adjuntos a S3
+      const attachments: Attachment[] = [];
+
+      for (const file of files) {
+        const buffer = Buffer.from(file.buffer, 'base64');
+        const prefix = `payment/${savedPayment.id}/`;
+        const url = await this.awsS3Service.uploadBuffer(
+          buffer,
+          file.originalname,
+          file.mimetype,
+          prefix,
+        );
+
+        const attachment = transactionalEntityManager.create(Attachment, {
+          entity_type: AttachmentEntityType.PAYMENT,
+          entity_id: savedPayment.id,
+          file_name: file.originalname,
+          file_url: url,
+          file_type: file.mimetype,
+          uploaded_by_id: authenticatedUser.userId,
+          is_public: true,
+        });
+
+        attachments.push(await transactionalEntityManager.save(attachment));
+      }
       await this.broadcastService.publishOrderUpdated(savedPayment.order_id, 'payment_added', {
         payment: {
           id: savedPayment.id,
@@ -1178,7 +1233,7 @@ export class OrderWorkflowService {
         },
       });
 
-      return savedPayment;
+      return { ...savedPayment, attachments };
     });
   }
 
@@ -1187,6 +1242,7 @@ export class OrderWorkflowService {
   async closeOrder(
     dto: CloseOrderDto,
     user: { userId: string; companyId: string; branchId: string },
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [], // ← nuevo
   ): Promise<OrderDelivery> {
 
     const result = await this.orderRepo.manager.transaction(async (manager) => {
@@ -1265,7 +1321,34 @@ export class OrderWorkflowService {
         branch_id: user.branchId,
       });
 
-      const savedPayment = await manager.save(finalPayment); // ← guardamos el resultado
+      const savedPayment = await manager.save(finalPayment);
+
+      // ── NUEVO: Subir adjuntos a S3 y persistir ────────────────────────────
+      const attachments: Attachment[] = [];
+
+      for (const file of files) {
+        const buffer = Buffer.from(file.buffer, 'base64');
+        const prefix = `payment/${savedPayment.id}/`;  // ← igual que en registerIncomePayment
+        const url = await this.awsS3Service.uploadBuffer(
+          buffer,
+          file.originalname,
+          file.mimetype,
+          prefix,
+        );
+
+        const attachment = manager.create(Attachment, {
+          entity_type: AttachmentEntityType.PAYMENT,   // ← igual que en registerIncomePayment
+          entity_id: savedPayment.id,                  // ← apunta al pago, no al delivery
+          file_name: file.originalname,
+          file_url: url,
+          file_type: file.mimetype,
+          uploaded_by_id: user.userId,
+          is_public: true,
+        });
+
+        attachments.push(await manager.save(attachment));
+      }
+      // ─────────────────────────────────────────────────────────────────────
 
       await manager.getRepository(Order).update(
         { id: order.id, company_id: user.companyId },
@@ -1307,12 +1390,13 @@ export class OrderWorkflowService {
         fromStatusName,
         observationText,
         historyId: historyResult.id,
-        savedPayment,   // ← nuevo
-        paymentType,    // ← nuevo
+        savedPayment,
+        paymentType,
+        attachments,   // ← nuevo
       };
     });
 
-    // ── Fuera de la transacción ────────────────────────────────────────────────
+    // ── Fuera de la transacción ───────────────────────────────────────────────
     const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
     await this.emitNotification(
@@ -1335,7 +1419,6 @@ export class OrderWorkflowService {
       },
     });
 
-    // ← Broadcast del pago final, después del cierre
     await this.broadcastService.publishOrderUpdated(dto.orderId, 'payment_added', {
       payment: {
         id: result.savedPayment.id,
@@ -1352,12 +1435,12 @@ export class OrderWorkflowService {
         company_id: result.savedPayment.company_id,
         branch_id: result.savedPayment.branch_id,
         createdAt: result.savedPayment.createdAt,
+        attachments: result.attachments,   // ← nuevo: adjuntos en el broadcast
       },
     });
 
     return result.delivery;
   }
-
 
   async getPaymentTypes(): Promise<{ id: number; name: string }[]> {
     return this.paymentTypeRepository.find({
