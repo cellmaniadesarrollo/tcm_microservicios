@@ -7,171 +7,14 @@ import { NotificationLog } from './entities/notification-log.entity';
 import { NotificationSchedule } from './entities/notification-schedule.entity';
 import { OrderReplica } from '../orders-relay/entities/order-replica.entity';
 import { CustomerContactCache } from '../customers-events/entities/customer-contact-cache.entity';
+import { isNotifiableOrder } from './helpers/order-type.helper';
+import { ORDER_MESSAGES, REMINDER_MESSAGES } from './helpers/message-builder.helper'
+import { REMINDER_INTERVALS, LAST_REMINDER_STEP, MAX_DAYS_FROM_START, addDays } from './helpers/reminder-schedule.helper';
+import { MessagePurpose } from '../whatsapp/entities/whatsapp-routing.entity';
 
 // ── Constantes de estado ──────────────────────────────────────────────────────
 const STATUS_TRABAJO_FINALIZADO = 'TRABAJO FINALIZADO';
 const STATUS_ENTREGADA = 'ENTREGADA';
-const MAX_DAYS_FROM_START = 90;
-
-// ── Patrón de intervalos de recordatorio (en días) ───────────────────────────
-// Día acumulado: 1 → 4 → 7 → 15 → 30 → 45 → 60 → 75 → 90 (fin)
-const REMINDER_INTERVALS = [1, 3, 3, 8, 15, 15, 15, 15, 15] as const;
-const LAST_REMINDER_STEP = REMINDER_INTERVALS.length - 1; // 8
-
-// ── Tipos de orden que reciben notificaciones ─────────────────────────────────
-const ALLOWED_ORDER_TYPES = new Set(['PERSONALIZADO', 'SERVICIO TECNICO']);
-
-function isNotifiableOrder(order: OrderReplica): boolean {
-    return ALLOWED_ORDER_TYPES.has(order.typeName?.trim().toUpperCase() ?? '');
-}
-
-// ── Constante reutilizable ─────────────────────────────────────────────────
-const NO_REPLY = `\n⚠️ *Este número es solo de notificaciones, por favor no respondas a este mensaje.*`;
-
-// ── Mensajes por cambio de estado ─────────────────────────────────────────────
-const ORDER_MESSAGES: Record<string, (order: OrderReplica) => string> = {
-    INGRESADO: (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu orden *#${o.orderNumber ?? o.publicId}* ha sido ingresada correctamente ✅\n\n` +
-        `🔗 Revisa los detalles del avance de tu reparación aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si tienes alguna duda, contáctanos al 📞 *098 377 5790*.\n\n` +
-        `¡Gracias por preferirnos!` +
-        NO_REPLY,
-
-    'TRABAJO FINALIZADO': (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Hemos concluido el trabajo en tu *${o.deviceBrand ?? ''} ${o.deviceModel ?? ''}* y ya está listo para retiro 🔧\n\n` +
-        `🔗 Revisa el diagnóstico, resultado del servicio y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si después de revisar tienes alguna duda, por favor contáctanos al 📞 *098 377 5790*.\n\n` +
-        `Te esperamos pronto para que lo retires.` +
-        NO_REPLY,
-
-    ENTREGADA: (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu orden *#${o.orderNumber ?? o.publicId}* ha sido entregada exitosamente 🙌\n\n` +
-        `🔗 Revisa los detalles y precio final de tu orden aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `¡Gracias por preferir Team Cellmania!` +
-        NO_REPLY,
-};
-
-// ── Mensajes de recordatorio por paso ────────────────────────────────────────
-//
-//  Paso | Intervalo | Día acumulado | Tipo
-//  -----|-----------|---------------|--------------------------------
-//   0   |  +1 día   |   Día  1      | Recordatorio suave
-//   1   |  +3 días  |   Día  4      | Recordatorio amigable
-//   2   |  +3 días  |   Día  7      | Tono más directo
-//   3   |  +8 días  |   Día 15      | Urgencia moderada + aviso bodega
-//   4   | +15 días  |   Día 30      | Urgencia alta
-//   5   | +15 días  |   Día 45      | Urgencia muy alta
-//   6   | +15 días  |   Día 60      | ⚠️ Aviso traslado a bodega
-//   7   | +15 días  |   Día 75      | ⚠️ Aviso recuperación de repuestos
-//   8   | +15 días  |   Día 90      | 🔴 Mensaje final — cierre de responsabilidad
-//
-
-// ── Mensajes de recordatorio por paso ────────────────────────────────────────
-const REMINDER_MESSAGES: Array<(order: OrderReplica) => string> = [
-    // Paso 0 — Día 1
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ya está listo para retiro.\n\n` +
-        `🔗 Revisa el diagnóstico, precio y detalles de tu orden aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si después de revisar tienes alguna duda, contáctanos al 📞 *098 377 5790*.\n\n` +
-        `¡Te esperamos pronto! 🛠️` +
-        NO_REPLY,
-
-    // Paso 1 — Día 4
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* continúa listo para retiro en nuestro local.\n\n` +
-        `🔗 Revisa el diagnóstico y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si tienes alguna duda después de revisarlo, estamos para ayudarte al 📞 *098 377 5790*.\n\n` +
-        `Esperamos verte pronto 😊` +
-        NO_REPLY,
-
-    // Paso 2 — Día 7
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Han pasado varios días y tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ya está reparado y listo para retiro.\n\n` +
-        `🔗 Revisa el diagnóstico y precio de tu orden aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Cualquier duda que tengas después de revisarlo, por favor contáctanos al 📞 *098 377 5790*.\n\n` +
-        `Te pedimos pasar a retirarlo a la brevedad.` +
-        NO_REPLY,
-
-    // Paso 3 — Día 15
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Han transcurrido 15 días desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro.\n\n` +
-        `🔗 Revisa el diagnóstico y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si después de revisar tienes alguna duda, comunícate con nosotros al 📞 *098 377 5790*.\n\n` +
-        `Recuerda que a partir de los 30 días el equipo pasa a bodega.` +
-        NO_REPLY,
-
-    // Paso 4 — Día 30
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva **30 días** listo para retiro ⚠️\n\n` +
-        `🔗 Revisa el diagnóstico y precio actualizado aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si tienes dudas después de revisarlo, contáctanos al 📞 *098 377 5790* para coordinar.` +
-        NO_REPLY,
-
-    // Paso 5 — Día 45
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Aviso importante: tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva **45 días** listo para retiro 🔔\n\n` +
-        `🔗 Revisa diagnóstico y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si después de revisar tienes alguna duda, por favor contáctanos *inmediatamente* al 📞 *098 377 5790* para coordinar el retiro.` +
-        NO_REPLY,
-
-    // Paso 6 — Día 60 (Traslado a bodega)
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `🔔 Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* ha sido trasladado a bodega tras **60 días** sin retiro 📦\n\n` +
-        `🔗 Revisa el diagnóstico y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si tienes dudas o deseas coordinar la entrega, contáctanos al 📞 *098 377 5790* antes de acercarte.` +
-        NO_REPLY,
-
-    // Paso 7 — Día 75 (Recuperación de repuestos)
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `⚠️ Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* lleva **75 días** sin ser retirado.\n\n` +
-        `🔗 Revisa el diagnóstico y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `Si después de revisar tienes dudas o quieres recuperar tu equipo, contáctanos **urgentemente** al 📞 *098 377 5790*, ya que podríamos proceder a recuperar repuestos.` +
-        NO_REPLY,
-
-    // Paso 8 — Día 90 (Mensaje final)
-    (o) =>
-        `*${o.customer?.company?.name ?? 'Nosotros'}*\n\n` +
-        `🔴 Hola ${o.customer?.firstName ?? 'estimado/a'},\n\n` +
-        `Han transcurrido **90 días (3 meses)** desde que tu *${o.deviceBrand ?? 'equipo'} ${o.deviceModel ?? ''}* quedó listo para retiro.\n\n` +
-        `🔗 Revisa el diagnóstico y precio aquí:\n` +
-        `https://ordenes.teamcellmania.com/device-query/${o.publicId ?? o.orderNumber}\n\n` +
-        `De acuerdo con las condiciones de servicio, el plazo de custodia ha finalizado. Si aún deseas recuperarlo, contáctanos *de inmediato* al 📞 *098 377 5790*.\n\n` +
-        `No garantizamos disponibilidad pasada esta fecha.` +
-        NO_REPLY,
-];
 
 @Injectable()
 export class NotificationsService {
@@ -191,7 +34,7 @@ export class NotificationsService {
     ) { }
 
     // ── Llamados desde el consumer ────────────────────────────────────────────
-
+    // ── handleOrderCreated ────────────────────────────────────────────────────────
     async handleOrderCreated(orderId: number): Promise<void> {
         const order = await this.findOrder(orderId);
         if (!order) {
@@ -199,33 +42,33 @@ export class NotificationsService {
             return;
         }
 
-        if (!isNotifiableOrder(order)) {
-            this.logger.debug(`handleOrderCreated: tipo "${order.typeName}" ignorado para orden ${orderId}`);
+        if (!order.companyId) {
+            this.logger.warn(`handleOrderCreated: orden ${orderId} sin companyId`);
             return;
         }
+
+        if (!isNotifiableOrder(order)) return;
 
         const statusKey = order.statusName?.trim();
         const messageFn = ORDER_MESSAGES[statusKey];
-        if (!messageFn) {
-            this.logger.warn(`handleOrderCreated: estado "${statusKey}" sin mensaje configurado`);
-            return;
-        }
+        if (!messageFn) return;
 
         const phone = await this.getMobileContact(order.customerId);
-        if (!phone) {
-            this.logger.warn(`handleOrderCreated: sin contacto móvil para cliente ${order.customerId}`);
-            return;
-        }
+        if (!phone) return;
 
         await this.dispatch({
             orderId: order.id,
             customerId: order.customerId,
+            companyId: order.companyId,         // 👈
+            purpose: 'NOTIFICATIONS',           // 👈
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
             message: messageFn(order),
         });
     }
 
+
+    // ── handleStatusChanged ───────────────────────────────────────────────────────
     async handleStatusChanged(orderId: number, newStatusName: string): Promise<void> {
         this.logger.log(`handleStatusChanged: orden ${orderId} → "${newStatusName}"`);
 
@@ -235,27 +78,25 @@ export class NotificationsService {
             return;
         }
 
-        if (!isNotifiableOrder(order)) {
-            this.logger.debug(`handleStatusChanged: tipo "${order.typeName}" ignorado para orden ${orderId}`);
+        if (!order.companyId) {
+            this.logger.warn(`handleStatusChanged: orden ${orderId} sin companyId`);
             return;
         }
+
+        if (!isNotifiableOrder(order)) return;
 
         const statusKey = newStatusName?.trim();
         const messageFn = ORDER_MESSAGES[statusKey];
-        if (!messageFn) {
-            this.logger.warn(`handleStatusChanged: estado "${statusKey}" sin mensaje configurado`);
-            return;
-        }
+        if (!messageFn) return;
 
         const phone = await this.getMobileContact(order.customerId);
-        if (!phone) {
-            this.logger.warn(`handleStatusChanged: sin contacto móvil para cliente ${order.customerId}`);
-            return;
-        }
+        if (!phone) return;
 
         await this.dispatch({
             orderId: order.id,
             customerId: order.customerId,
+            companyId: order.companyId,         // 👈
+            purpose: 'NOTIFICATIONS',           // 👈
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
             message: messageFn(order),
@@ -282,7 +123,7 @@ export class NotificationsService {
         }
 
         const now = new Date();
-        const firstInterval = REMINDER_INTERVALS[0]; // 1 día
+        const firstInterval = REMINDER_INTERVALS[0];
 
         await this.scheduleRepo.save(
             this.scheduleRepo.create({
@@ -290,7 +131,7 @@ export class NotificationsService {
                 customerId: order.customerId,
                 startedAt: now,
                 currentStep: 0,
-                nextSendAt: this.addDays(now, firstInterval),
+                nextSendAt: addDays(now, firstInterval),
                 status: 'ACTIVE',
             }),
         );
@@ -306,7 +147,7 @@ export class NotificationsService {
     }
 
     // ── Ejecutado por el scheduler ────────────────────────────────────────────
-
+    // ── processDueReminders ───────────────────────────────────────────────────────
     async processDueReminders(): Promise<void> {
         const nowUTC = new Date();
         const hourEC = (nowUTC.getUTCHours() - 5 + 24) % 24;
@@ -326,9 +167,13 @@ export class NotificationsService {
         for (const schedule of due) {
             const order = await this.findOrder(schedule.orderId);
 
-            // Orden no existe, ya fue entregada, o tipo no permitido → cancelar
             if (!order || order.statusName?.trim() === STATUS_ENTREGADA || !isNotifiableOrder(order)) {
                 await this.scheduleRepo.update(schedule.id, { status: 'CANCELLED' });
+                continue;
+            }
+
+            if (!order.companyId) {
+                this.logger.warn(`processDueReminders: orden ${schedule.orderId} sin companyId, saltando`);
                 continue;
             }
 
@@ -336,7 +181,6 @@ export class NotificationsService {
             const messageFn = REMINDER_MESSAGES[currentStep];
 
             if (!messageFn) {
-                // No debería ocurrir, pero lo manejamos defensivamente
                 this.logger.error(`processDueReminders: paso ${currentStep} fuera de rango para schedule ${schedule.id}`);
                 await this.scheduleRepo.update(schedule.id, { status: 'COMPLETED' });
                 continue;
@@ -347,6 +191,8 @@ export class NotificationsService {
                 await this.dispatch({
                     orderId: schedule.orderId,
                     customerId: schedule.customerId,
+                    companyId: order.companyId,     // 👈
+                    purpose: 'REMINDERS',           // 👈
                     type: 'PICKUP_REMINDER',
                     sequenceStep: currentStep,
                     recipient: phone,
@@ -354,21 +200,18 @@ export class NotificationsService {
                 });
             }
 
-            // Si era el último paso → completar la secuencia
             if (currentStep >= LAST_REMINDER_STEP) {
                 await this.scheduleRepo.update(schedule.id, { status: 'COMPLETED' });
                 this.logger.log(`Secuencia completada (día 90) para orden ${schedule.orderId}`);
                 continue;
             }
 
-            // Calcular siguiente envío
             const nextStep = currentStep + 1;
             const nextInterval = REMINDER_INTERVALS[nextStep];
-            const nextSendAt = this.addDays(new Date(), nextInterval);
-            const limitDate = this.addDays(schedule.startedAt, MAX_DAYS_FROM_START);
+            const nextSendAt = addDays(new Date(), nextInterval);
+            const limitDate = addDays(schedule.startedAt, MAX_DAYS_FROM_START);
 
             if (nextSendAt > limitDate) {
-                // Seguridad extra: si por alguna razón la fecha excede el límite, completamos
                 await this.scheduleRepo.update(schedule.id, { status: 'COMPLETED' });
                 this.logger.log(`Secuencia completada (límite ${MAX_DAYS_FROM_START} días) para orden ${schedule.orderId}`);
             } else {
@@ -376,10 +219,6 @@ export class NotificationsService {
                     currentStep: nextStep,
                     nextSendAt,
                 });
-                this.logger.log(
-                    `Orden ${schedule.orderId}: paso ${currentStep} enviado, ` +
-                    `próximo paso ${nextStep} en ${nextInterval} día(s) (${nextSendAt.toISOString()})`,
-                );
             }
         }
     }
@@ -442,16 +281,22 @@ export class NotificationsService {
 
     // ── Core: enviar + registrar ──────────────────────────────────────────────
 
+    // ── dispatch: agrega context ──────────────────────────────────────────────────
     private async dispatch(params: {
         orderId: number;
         customerId: number;
+        companyId: string;                  // 👈 nuevo
+        purpose: MessagePurpose;            // 👈 nuevo
         type: NotificationLog['type'];
         recipient: string;
         message: string;
         sequenceStep?: number;
     }): Promise<void> {
         try {
-            await this.whatsapp.send(params.recipient, params.message);
+            await this.whatsapp.send(params.recipient, params.message, {
+                companyId: params.companyId,
+                purpose: params.purpose,
+            });
             await this.logRepo.save(
                 this.logRepo.create({
                     orderId: params.orderId,
@@ -483,7 +328,8 @@ export class NotificationsService {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    // ── Helpers privados (acceso a datos) ─────────────────────────────────────
 
     private async findOrder(orderId: number): Promise<OrderReplica | null> {
         return this.orderRepo.findOne({
@@ -502,11 +348,5 @@ export class NotificationsService {
             where: { customer: { id: customerId }, typeName: 'MÓVIL' },
         });
         return fallback?.value ?? null;
-    }
-
-    private addDays(date: Date, days: number): Date {
-        const d = new Date(date);
-        d.setDate(d.getDate() + days);
-        return d;
     }
 }

@@ -4,11 +4,13 @@ import { firstValueFrom } from 'rxjs';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
 import { Logger } from '@nestjs/common';
+import { Groups } from '../common/auth/decorators/groups.decorator';
 
 const logger = new Logger('NotificationsDispatcher');
 
 @Controller('notifications-dispatcher')
 @Auth()
+@Groups()
 export class NotificationsDispatcherController {
   constructor(
     @Inject('NOTIFICATIONS_DISPATCHER_SERVICE') private readonly client: ClientProxy,

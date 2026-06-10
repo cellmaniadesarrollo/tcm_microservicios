@@ -11,6 +11,7 @@ import {
     JoinColumn,
 } from 'typeorm';
 import { CustomerCache } from '../../customers-events/entities/customer-cache.entity';
+import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 
 @Entity('order_replicas')
 export class OrderReplica {
@@ -88,4 +89,12 @@ export class OrderReplica {
 
     @UpdateDateColumn({ name: 'updated_at' })
     updatedAt!: Date;
+    // ── Empresa ────────────────────────────────────────────────────────────────
+    @Index()
+    @Column({ name: 'company_id', type: 'uuid', nullable: true })
+    companyId?: string;
+
+    @ManyToOne(() => CompanyReplica, { nullable: true, eager: false })
+    @JoinColumn({ name: 'company_id' })
+    company?: CompanyReplica;
 }

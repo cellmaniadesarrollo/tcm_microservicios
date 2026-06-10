@@ -16,7 +16,7 @@ export class OrdersRelayController implements OnModuleInit {
         try {
             // 1. Sincronizar Normalizaciones (Maestros/Catálogos)
             // Es recomendable hacerlo primero para tener los IDs de referencia listos.
-            await this.syncNormalizations();
+            //  await this.syncNormalizations();
 
             // 2. Sincronizar Órdenes
             await this.syncOrders();
