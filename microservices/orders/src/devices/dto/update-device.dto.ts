@@ -2,6 +2,7 @@
 import { Type } from 'class-transformer';
 import {
   IsArray,
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -81,4 +82,8 @@ export class UpdateDeviceDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateAccountDto)
   accounts?: UpdateAccountDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  forceLink?: boolean;
 }
