@@ -34,19 +34,11 @@ export class CustomersEventsListener {
 
   private async handleClientCreated(eventType: string, data: any) {
     console.log(`🟢 [${eventType}] Procesando cliente creado: ${data?.id}`);
-    try {
-      await this.cacheService.syncCustomer(data);
-    } catch (error: any) {
-      console.error(`❌ Error sincronizando cliente creado: ${error.message}`);
-    }
+    await this.cacheService.syncCustomer(data);
   }
 
   private async handleClientUpdated(eventType: string, data: any) {
     console.log(`🔵 [${eventType}] Procesando cliente actualizado: ${data?.id}`);
-    try {
-      await this.cacheService.syncCustomer(data);
-    } catch (error: any) {
-      console.error(`❌ Error sincronizando cliente actualizado: ${error.message}`);
-    }
+    await this.cacheService.syncCustomer(data);
   }
 }
