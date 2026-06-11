@@ -1,11 +1,11 @@
 import { Module } from '@nestjs/common';
 import { UsersModule } from './users/users.module';
 import { AppController } from './app.controller';
-import { AppService } from './app.service'; 
+import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
- 
+
 import { JwtModule } from './common/jwt/jwt.module';
-import { OrdersModule } from './orders/orders.module'; 
+import { OrdersModule } from './orders/orders.module';
 import { CustomersModule } from './customers/customers.module';
 import { CompaniesModule } from './companies/companies.module';
 import { AuthModule } from './auth/auth.module';
@@ -14,6 +14,7 @@ import { LegacyModule } from './legacy/legacy.module';
 import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TaskboardModule } from './taskboard/taskboard.module';  // ✅ Agregar import
+import { NotificationsDispatcherModule } from './notifications-dispatcher/notifications-dispatcher.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { TaskboardModule } from './taskboard/taskboard.module';  // ✅ Agregar 
     ReportsModule,
     NotificationsModule,
     TaskboardModule,  // ✅ Agregar aquí
+    NotificationsDispatcherModule
   ],
   controllers: [AppController],
   providers: [AppService],
