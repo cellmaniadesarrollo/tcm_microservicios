@@ -4,6 +4,7 @@ import {
   IsString,
   IsArray,
   ValidateNested,
+  IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -61,4 +62,8 @@ export class UpdateDeviceGatewayDto {
   @ValidateNested({ each: true })
   @Type(() => UpdateDeviceAccountGatewayDto)
   accounts: UpdateDeviceAccountGatewayDto[];
+
+  @IsOptional()
+  @IsBoolean()
+  forceLink?: boolean;
 }

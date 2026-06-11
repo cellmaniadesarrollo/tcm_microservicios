@@ -258,39 +258,121 @@ export class DevicesService {
   ): Promise<DeviceResponseDto> {
 
     const device = await this.deviceRepo.findOne({
-      where: {
-        device_id: deviceId,
-        company_id: user.companyId,
-      },
+      where: { device_id: deviceId, company_id: user.companyId },
       relations: ['imeis', 'accounts'],
     });
 
-    if (!device) {
-      throw new Error('Device not found');
+    if (!device) throw new Error('Device not found');
+
+    // ── Solo activar lógica de confirmación si el dispositivo NO tiene IMEIs ──
+    const deviceSinImeis = device.imeis.length === 0;
+    const hayImeisEntrantes = (dto.imeis ?? []).length > 0;
+
+    if (deviceSinImeis && hayImeisEntrantes && !dto.forceLink) {
+      const conflictos = await this.detectarConflictosImei(
+        dto.imeis ?? [],
+        user.companyId,
+      );
+
+      if (conflictos.length > 0) {
+        // Devolver sin guardar, pidiendo confirmación
+        return {
+          device_id: device.device_id,
+          models_id: device.models_id,
+          device_type_id: device.device_type_id,
+          serial_number: device.serial_number,
+          color: device.color,
+          storage: device.storage,
+          observations: device.observations,
+          imeis: device.imeis.map(i => ({
+            imei_id: i.imei_id,
+            imei_number: i.imei_number,
+          })),
+          accounts: device.accounts.map(a => ({
+            account_id: a.account_id,
+            username: a.username,
+            account_type: a.account_type,
+          })),
+          requiresConfirmation: true,
+          confirmationData: {
+            conflictingImeis: conflictos,
+            message: this.buildConfirmationMessage(conflictos),
+          },
+        };
+      }
     }
 
-    // 1️⃣ Campos simples
+    // ── Flujo normal ─────────────────────────────────────────────────────────
     device.models_id = dto.models_id;
     device.device_type_id = dto.device_type_id;
-    if (dto.color !== undefined) {
-      device.color = dto.color;
+    if (dto.color !== undefined) device.color = dto.color;
+    if (dto.storage !== undefined) device.storage = dto.storage;
+    if (dto.observations !== undefined) device.observations = dto.observations;
+
+    // Si forceLink=true, reasignar IMEIs conflictivos antes de sincronizar
+    if (deviceSinImeis && hayImeisEntrantes && dto.forceLink) {
+      await this.liberarImeisConflictivos(dto.imeis ?? [], user.companyId);
     }
 
-    if (dto.storage !== undefined) {
-      device.storage = dto.storage;
-    }
-    if (dto.observations !== undefined) {  // ✅ NUEVO
-      device.observations = dto.observations;
-    }
-    // 2️⃣ IMEIs → sincronización
     device.imeis = this.syncImeis(device, dto.imeis ?? [], user.companyId);
-
-    // 3️⃣ Accounts → sincronización
     device.accounts = this.syncAccounts(device, dto.accounts ?? []);
 
     await this.deviceRepo.save(device);
-
     return this.mapToResponse(device);
+  }
+
+  // ── Detecta IMEIs que ya existen en la empresa vinculados a otro dispositivo ──
+  private async detectarConflictosImei(
+    incoming: { imei_id?: number; imei_number: string }[],
+    companyId: string,
+  ): Promise<{ imei_number: string; currentDeviceId: number | null }[]> {
+
+    const conflictos: { imei_number: string; currentDeviceId: number | null }[] = [];
+
+    for (const item of incoming) {
+      const existente = await this.imeiRepo.findOne({
+        where: { imei_number: item.imei_number, company_id: companyId },
+        relations: ['device'],
+      });
+
+      if (existente) {
+        conflictos.push({
+          imei_number: item.imei_number,
+          // device puede ser null si la relación quedó huérfana
+          currentDeviceId: existente.device?.device_id ?? null,
+        });
+      }
+    }
+
+    return conflictos;
+  }
+
+  // ── Desvincula los IMEIs conflictivos para que syncImeis pueda reasignarlos ──
+  private async liberarImeisConflictivos(
+    incoming: { imei_id?: number; imei_number: string }[],
+    companyId: string,
+  ): Promise<void> {
+    for (const item of incoming) {
+      const existente = await this.imeiRepo.findOne({
+        where: { imei_number: item.imei_number, company_id: companyId },
+      });
+
+      if (existente) {
+        // Eliminar el registro viejo; syncImeis creará uno nuevo limpio
+        await this.imeiRepo.remove(existente);
+      }
+    }
+  }
+
+  private buildConfirmationMessage(
+    conflictos: { imei_number: string; currentDeviceId: number | null }[],
+  ): string {
+    const lineas = conflictos.map(c =>
+      c.currentDeviceId
+        ? `IMEI ${c.imei_number} ya está asignado al dispositivo #${c.currentDeviceId}`
+        : `IMEI ${c.imei_number} existe en el sistema sin dispositivo asignado (huérfano)`,
+    );
+    return lineas.join('. ') + '. ¿Desea vincularlo a este dispositivo?';
   }
 
   private syncImeis(
