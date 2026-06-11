@@ -233,7 +233,8 @@ export class OrdersRelayService {
             id: data.id,
             publicId: data.public_id,           // ← UUID real
             orderNumber: data.order_number,        // ← número legible
-
+            // ── Empresa ────────────────────────────────────────────────
+            companyId: data.company?.id,
             // ── Cliente: solo FK ───────────────────────────────────────────────
             customerId: data.customer?.id,
 

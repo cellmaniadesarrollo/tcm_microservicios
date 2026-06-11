@@ -1,4 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+    Entity, PrimaryGeneratedColumn, Column, ManyToOne,
+    JoinColumn, CreateDateColumn, UpdateDateColumn
+} from 'typeorm';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 import { WhatsappRouting } from './whatsapp-routing.entity';
 
@@ -16,13 +19,12 @@ export class WhatsappSession {
     @Column()
     companyId!: string;
 
-    // Aquí haces la conexión: una sesión pertenece a un tipo de enrutamiento
     @ManyToOne(() => WhatsappRouting, { onDelete: 'SET NULL', nullable: true, eager: true })
     @JoinColumn({ name: 'routingId' })
     routing!: WhatsappRouting | null;
 
     @Column({ nullable: true })
-    routingId!: string | null; // El ID del tipo de sesión (ALL, NOTIFICATIONS, etc.)
+    routingId!: string | null;
 
     @Column({ nullable: true })
     phoneNumber!: string;
@@ -36,9 +38,14 @@ export class WhatsappSession {
     @Column({ default: 'DISCONNECTED' })
     status!: SessionStatus;
 
+    // ─── Auditoría ────────────────────────────────────────────────────────────
+
     @CreateDateColumn()
     createdAt!: Date;
 
     @UpdateDateColumn()
     updatedAt!: Date;
+
+    @Column({ type: 'timestamptz', nullable: true })
+    lastUsedAt!: Date | null;
 }

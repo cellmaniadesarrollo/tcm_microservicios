@@ -7,6 +7,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { GROUPS_KEY } from '../decorators/groups.decorator';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
+
 /**
  * =====================================================
  * GROUPS GUARD – REGLAS DE AUTORIZACIÓN POR GRUPOS
@@ -97,20 +98,26 @@ export class GroupsGuard implements CanActivate {
   constructor(private reflector: Reflector) { }
 
   canActivate(context: ExecutionContext): boolean {
-    // 👇 agregar esto al inicio
+    // ✅ Ruta marcada con @Public() → acceso libre
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
     ]);
     if (isPublic) return true;
 
-    const requiredGroups = this.reflector.getAllAndOverride<string[]>(
+    // ✅ Lee los grupos requeridos
+    // - undefined  → decorador no existe → ruta pública
+    // - null       → decorador vacío @Groups() → solo admins
+    // - string[]   → grupos explícitos
+    const requiredGroups = this.reflector.getAllAndOverride<string[] | null>(
       GROUPS_KEY,
       [context.getHandler(), context.getClass()],
     );
 
-    if (!requiredGroups || requiredGroups.length === 0) return true;
+    // 1️⃣ Sin decorador @Groups() → público
+    if (requiredGroups === undefined) return true;
 
+    // A partir de aquí la ruta es privada, se necesita usuario
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
@@ -119,13 +126,37 @@ export class GroupsGuard implements CanActivate {
     }
 
     const SUPER_GROUPS = ['COMPANY_ADMIN', 'ADMINS'];
-    const isSuperUser = user.groups.some(group => SUPER_GROUPS.includes(group));
-    if (isSuperUser) return true;
-
-    const hasRequiredGroup = requiredGroups.some(group =>
-      user.groups.includes(group),
+    const isSuperUser = user.groups.some((g: string) =>
+      SUPER_GROUPS.includes(g),
     );
 
+    // 2️⃣ Decorador vacío @Groups() → solo admins
+    if (requiredGroups === null) {
+      if (!isSuperUser) throw new ForbiddenException('No tiene permisos');
+      return true;
+    }
+
+    // 3️⃣ / 4️⃣ Grupos explícitos NO admin → admins siempre pasan
+    // 5️⃣ / 6️⃣ Si hay admins explícitos → NO aplica el bypass automático
+    const hasAdminExplicit = requiredGroups.some((g) =>
+      SUPER_GROUPS.includes(g),
+    );
+
+    if (hasAdminExplicit) {
+      // Solo acceden exactamente los grupos listados
+      const hasAccess = user.groups.some((g: string) =>
+        requiredGroups.includes(g),
+      );
+      if (!hasAccess) throw new ForbiddenException('No tiene permisos');
+      return true;
+    }
+
+    // Grupos no-admin → admins pasan automáticamente
+    if (isSuperUser) return true;
+
+    const hasRequiredGroup = user.groups.some((g: string) =>
+      requiredGroups.includes(g),
+    );
     if (!hasRequiredGroup) throw new ForbiddenException('No tiene permisos');
 
     return true;
