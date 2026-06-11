@@ -10,7 +10,7 @@ const logger = new Logger('NotificationsDispatcher');
 
 @Controller('notifications-dispatcher')
 @Auth()
-@Groups()
+//@Groups()
 export class NotificationsDispatcherController {
   constructor(
     @Inject('NOTIFICATIONS_DISPATCHER_SERVICE') private readonly client: ClientProxy,
