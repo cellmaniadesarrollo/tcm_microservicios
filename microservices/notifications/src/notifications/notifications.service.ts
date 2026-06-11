@@ -639,24 +639,29 @@ export class NotificationsService {
     return this.create(notification);
   }
 
-  async getDeliveredNotifications(page: number = 1, limit: number = 20) {
+  async getDeliveredNotifications( page: number = 1, limit: number = 20, includeArchived: boolean = false ) {
     const skip = (page - 1) * limit;
     
     // Calcular fecha hace 1 mes
     const oneMonthAgo = new Date();
     oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
     
-    // ✅ Usar any[] para evitar errores de tipo
+    // ✅ Construir match base
+    const matchStage: any = {
+      currentStatus: 'ENTREGADA',
+      $or: [
+        { entityType: 'order' },
+        { entityType: 'ORDER' }
+      ]
+    };
+    
+    // ✅ Excluir archivadas a menos que se pida incluirlas
+    if (!includeArchived) {
+      matchStage.isArchived = { $ne: true };
+    }
+    
     const pipeline: any[] = [
-      {
-        $match: {
-          currentStatus: 'ENTREGADA',
-          $or: [
-            { entityType: 'order' },
-            { entityType: 'ORDER' }
-          ]
-        }
-      },
+      { $match: matchStage },
       {
         $addFields: {
           deliveryDate: {
@@ -690,11 +695,11 @@ export class NotificationsService {
         }
       },
       {
-        $sort: { deliveryDate: -1 }  // ✅ Sin as const, funciona con any[]
+        $sort: { deliveryDate: -1 }
       },
       {
         $group: {
-          _id: '$entityId',  // Agrupar por orden para evitar duplicados
+          _id: '$entityId',
           notification: { $first: '$$ROOT' }
         }
       },
@@ -702,7 +707,7 @@ export class NotificationsService {
         $replaceRoot: { newRoot: '$notification' }
       },
       {
-        $sort: { deliveryDate: -1 }  // ✅ Sin as const
+        $sort: { deliveryDate: -1 }
       },
       {
         $facet: {
@@ -722,7 +727,7 @@ export class NotificationsService {
     const total = result[0]?.metadata[0]?.total || 0;
     const notifications = result[0]?.notifications || [];
     
-    console.log(`📊 Entregadas hace más de 1 mes: ${total}`);
+    console.log(`📊 Entregadas hace más de 1 mes: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'})`);
     console.log(`📅 Fecha límite: ${oneMonthAgo.toISOString()}`);
     
     return {
@@ -734,25 +739,30 @@ export class NotificationsService {
     };
   }
 
-  async getFinishedOrdersOverThreeMonths(
-    page: number = 1,
-    limit: number = 20
-  ) {
+  async getFinishedOrdersOverThreeMonths( page: number = 1, limit: number = 20, includeArchived: boolean = false ) {
     const skip = (page - 1) * limit;
     
     // Calcular fecha hace 3 meses
     const threeMonthsAgo = new Date();
     threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
     
+    // ✅ Construir query base
+    const query: any = {
+      currentStatus: 'TRABAJO FINALIZADO',
+      $or: [
+        { entityType: 'order' },
+        { entityType: 'ORDER' }
+      ]
+    };
+    
+    // ✅ Excluir archivadas a menos que se pida incluirlas
+    if (!includeArchived) {
+      query.isArchived = { $ne: true };
+    }
+    
     // Obtener todas las notificaciones con TRABAJO FINALIZADO
     const allFinished = await this.notificationModel
-      .find({
-        currentStatus: 'TRABAJO FINALIZADO',
-        $or: [
-          { entityType: 'order' },
-          { entityType: 'ORDER' }
-        ]
-      })
+      .find(query)
       .lean()
       .exec();
     
@@ -792,7 +802,7 @@ export class NotificationsService {
     const total = allNotifications.length;
     const paginatedNotifications = allNotifications.slice(skip, skip + limit);
     
-    console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total}`);
+    console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'})`);
     console.log(`📅 Fecha límite: ${threeMonthsAgo.toISOString()}`);
     
     return {
@@ -801,6 +811,73 @@ export class NotificationsService {
       limit,
       totalPages: Math.ceil(total / limit),
       notifications: paginatedNotifications,
+    };
+  }
+
+  async updateNotificationNotes(
+    notificationId: string,
+    userId: string,
+    notes: string
+  ): Promise<{ modifiedCount: number; orderId: string }> {
+    // 1. Obtener la notificación original
+    const notification = await this.notificationModel.findOne({ _id: notificationId });
+    
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+    
+    const orderId = notification.entityId;
+    
+    // 2. Actualizar notas en TODAS las notificaciones con el mismo entityId
+    const result = await this.notificationModel.updateMany(
+      { entityId: orderId },
+      { 
+        notes: notes || null, 
+        updatedAt: new Date() 
+      }
+    );
+    
+    console.log(`📝 Notas actualizadas en ${result.modifiedCount} notificaciones para la orden ${orderId} por usuario ${userId}`);
+    
+    return { 
+      modifiedCount: result.modifiedCount, 
+      orderId: orderId 
+    };
+  }
+
+  async archiveNotification(
+    notificationId: string,
+    userId: string,
+    archived: boolean
+  ): Promise<{ modifiedCount: number; orderId: string }> {
+    // 1. Obtener la notificación original para conocer su entityId
+    const notification = await this.notificationModel.findOne({ _id: notificationId });
+    
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+    
+    const orderId = notification.entityId;  // ← Este es el ID de la orden (ej: "46")
+    
+    // 2. Archivar TODAS las notificaciones con el mismo entityId
+    const result = await this.notificationModel.updateMany(
+      { 
+        entityId: orderId,
+        currentStatus: { $in: ['ENTREGADA', 'TRABAJO FINALIZADO'] }
+      },
+      {
+        isArchived: archived,
+        archivedAt: archived ? new Date() : null,
+        archivedBy: archived ? userId : null,
+        updatedAt: new Date()
+      }
+    );
+    
+    console.log(`${archived ? '📦 Archivadas' : '📂 Desarchivadas'} ${result.modifiedCount} notificaciones para la orden ${orderId} por usuario ${userId}`);
+    
+    return { 
+      modifiedCount: result.modifiedCount, 
+      orderId: orderId 
     };
   }
 }

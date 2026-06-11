@@ -135,25 +135,54 @@ export class NotificationsService {
     );
   }
 
-  async getDeliveredNotifications(page: number = 1, limit: number = 20) {
-    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}`);
+  async getDeliveredNotifications(page: number = 1, limit: number = 20, includeArchived: boolean = false) {
+    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchives: ${includeArchived}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_delivered_notifications' },
-        { page, limit }
+        { page, limit, includeArchived }
       )
     );
   }
 
   async getFinishedOrdersOverThreeMonths(
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    includeArchived: boolean = false
   ) {
-    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}`);
+    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_finished_orders_over_three_months' },
-        { page, limit }
+        { page, limit, includeArchived }
+      )
+    );
+  }
+
+  async updateNotificationNotes(
+    notificationId: string,
+    userId: string,
+    notes: string
+  ) {
+    console.log(`📝 [Gateway] updateNotificationNotes - id: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'update_notification_notes' },
+        { notificationId, userId, notes }
+      )
+    );
+  }
+
+  async archiveNotification(
+    notificationId: string,
+    userId: string,
+    archived: boolean
+  ) {
+    console.log(`📦 [Gateway] archiveNotification - id: ${notificationId}, archived: ${archived}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'archive_notification' },
+        { notificationId, userId, archived }
       )
     );
   }

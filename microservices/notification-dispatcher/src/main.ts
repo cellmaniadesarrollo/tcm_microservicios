@@ -3,8 +3,8 @@ import { AppModule } from './app.module';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { InternalAuthInterceptor } from './interceptors/internal-auth.interceptor';
-
-// ── Silenciar ruido interno de Baileys ────────────────────────────────────────
+import * as util from 'util';
+// ── Silenciar ruido interno (Nivel Sistema Operativo / Proceso) ───────────────
 const BAILEYS_NOISE = [
   'Closing session',
   'SessionEntry',
@@ -12,30 +12,29 @@ const BAILEYS_NOISE = [
   'registrationId',
   'currentRatchet',
   'signedKeyId',
+  'ephemeralKeyPair',
+  'rootKey',
+  'pendingPreKey'
 ];
 
-const _consoleLog = console.log.bind(console);
+// Guardamos la función original de escritura en la terminal
+const originalWrite = process.stdout.write.bind(process.stdout);
 
-console.log = (...args: any[]) => {
-  // Convertimos todos los argumentos a un solo string para buscar los patrones
-  const completeLogLine = args
-    .map(arg => {
-      try {
-        if (typeof arg === 'string') return arg;
-        // Usamos una inspección simple para evitar errores de JSON.stringify con Buffers/Circular
-        return Object.keys(arg || {}).join(' ');
-      } catch {
-        return '';
-      }
-    })
-    .join(' ');
+// Redefinimos la escritura estándar
+// @ts-ignore
+process.stdout.write = (chunk: any, encoding?: any, callback?: any) => {
+  // Convertimos el chunk (que suele ser un Buffer o String) a texto plano
+  const logString = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
 
-  // Si el log contiene alguno de los ruidos, lo ignoramos por completo
-  if (BAILEYS_NOISE.some(pattern => completeLogLine.includes(pattern))) {
-    return;
+  // Si contiene alguna de las palabras clave de Baileys, lo ignoramos por completo
+  if (BAILEYS_NOISE.some(pattern => logString.includes(pattern))) {
+    // Si requiere un callback para no congelar el stream, lo ejecutamos de forma segura
+    if (typeof callback === 'function') callback();
+    return true;
   }
 
-  _consoleLog(...args);
+  // Si está limpio, permitimos que se imprima normalmente
+  return originalWrite(chunk, encoding, callback);
 };
 // ─────────────────────────────────────────────────────────────────────────────
 

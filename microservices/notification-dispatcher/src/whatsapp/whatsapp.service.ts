@@ -1,6 +1,8 @@
+// src/whatsapp/whatsapp.service.ts
+
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 import makeWASocket, {
     DisconnectReason,
     WASocket,
@@ -13,13 +15,17 @@ import { WhatsappSession } from './entities/whatsapp-session.entity';
 import { CompanyReplica } from '../companies/entities/company-replica.entity';
 import { useDatabaseAuthState } from './utils/database-auth-state.util';
 import { WhatsappRouting } from './entities/whatsapp-routing.entity';
+import { toJid, randomDelay, withTimeout } from './helpers/whatsapp.helpers';
+import { MessagePurpose } from './entities/whatsapp-routing.entity';
 
 const baileysLogger = pino({ level: 'silent' });
 const POST_SEND_DISCONNECT_MS = 30_000;
 const SEND_DELAY_MIN_MS = 4_000;
 const SEND_DELAY_MAX_MS = 9_000;
+const LAZY_CONNECT_TIMEOUT_MS = 20_000;
 
 interface SessionRuntime {
+    sessionId: string;
     socket: WASocket;
     qr: string | null;
     sendQueue: Promise<void>;
@@ -90,7 +96,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         return this.routingRepo.find({ order: { name: 'ASC' } });
     }
 
-    /** Solo crea el registro. No abre socket ni genera QR. */
     async createSession(companyId: string, routingId: string): Promise<WhatsappSession> {
         const routing = await this.routingRepo.findOne({ where: { id: routingId } });
         if (!routing) throw new Error(`Routing ${routingId} no existe`);
@@ -98,10 +103,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         const company = await this.companyRepo.findOne({ where: { id: companyId } });
         if (!company) throw new Error(`Empresa ${companyId} no encontrada`);
 
-        // Si ya existe sesión con ese routing la eliminamos (evitar duplicados)
         const existing = await this.sessionRepo.findOne({ where: { companyId, routingId } });
         if (existing) {
-            this.killRuntime(existing.id);           // cierra socket si estaba vivo
+            this.killRuntime(existing.id);
             await this.sessionRepo.remove(existing);
         }
 
@@ -125,14 +129,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         const routing = await this.routingRepo.findOne({ where: { id: routingId } });
         if (!routing) throw new Error(`Routing ${routingId} no existe`);
 
-        // Eliminar posible conflicto
         const duplicate = await this.sessionRepo.findOne({ where: { companyId, routingId } });
         if (duplicate && duplicate.id !== sessionId) {
             this.killRuntime(duplicate.id);
             await this.sessionRepo.remove(duplicate);
         }
 
-        // Matar el runtime actual de esta sesión (queda desvinculada)
         this.killRuntime(sessionId);
 
         await this.sessionRepo
@@ -155,10 +157,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     // ─── Vinculación (QR) ─────────────────────────────────────────────────────
 
-    /**
-     * Abre el socket para una sesión específica y genera su QR.
-     * Si ya está vinculada (CONNECTED) no hace nada.
-     */
     async linkSession(companyId: string, sessionId: string): Promise<{ linking: boolean }> {
         const session = await this.sessionRepo.findOne({ where: { id: sessionId, companyId } });
         if (!session) throw new Error(`Sesión ${sessionId} no encontrada`);
@@ -169,7 +167,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         }
 
         this.logger.log(`Iniciando vinculación de sesión ${sessionId}...`);
-        // Arrancamos sin await: el QR se guarda en runtime y el frontend lo consulta
         this.openSocket(session).catch((err) =>
             this.logger.error(`Error al vincular sesión ${sessionId}:`, err),
         );
@@ -177,7 +174,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         return { linking: true };
     }
 
-    /** Devuelve el QR (base64 PNG) de una sesión concreta. */
     getQrStatus(sessionId: string): {
         qr: string | null;
         status: 'waiting_qr' | 'connected' | 'disconnected';
@@ -194,7 +190,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         const { state, saveCreds } = await useDatabaseAuthState(session, this.sessionRepo);
         const { version } = await fetchLatestBaileysVersion();
 
-        this.logger.log(`Usando versión WA: ${version}`);
         const socket = makeWASocket({
             version,
             auth: {
@@ -207,8 +202,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             fireInitQueries: false,
         });
 
-        // Runtime inicial (sin qr todavía)
         const rt: SessionRuntime = {
+            sessionId: session.id,
             socket,
             qr: null,
             sendQueue: Promise.resolve(),
@@ -222,16 +217,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
         socket.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
-
-            // ─── LOG COMPLETO DEL UPDATE ──────────────────────────────────────────
-            this.logger.log(`[${session.id}] connection.update recibido: ${JSON.stringify({
-                connection,
-                qr: qr ? `QR_PRESENTE (${qr.length} chars)` : null,
-                lastDisconnect: lastDisconnect ? {
-                    statusCode: (lastDisconnect.error as Boom)?.output?.statusCode,
-                    message: (lastDisconnect.error as Boom)?.message,
-                } : null,
-            })}`);
 
             if (qr) {
                 rt.qr = qr;
@@ -250,12 +235,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 const loggedOut = statusCode === DisconnectReason.loggedOut;
                 const restartRequired = statusCode === DisconnectReason.restartRequired;
                 const conflict = statusCode === 401;
-                const wasIntentional = rt.intentionalClose; // ← leer antes de borrar el runtime
+                const wasIntentional = rt.intentionalClose;
 
                 this.runtimes.delete(session.id);
                 this.linkingPromises.delete(session.id);
 
-                // ✅ Si fue cierre intencional (delete/update routing), no hacer nada
                 if (wasIntentional) {
                     this.logger.log(`[${session.id}] Cierre intencional. No reconectar.`);
                     return;
@@ -269,8 +253,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                         .execute();
 
                 } else if (conflict) {
-                    // ✅ Conflict = otra sesión activa, NO limpiar creds, solo marcar desconectado
-                    this.logger.warn(`[${session.id}] Conflicto de sesión (401). Marcando desconectado sin limpiar creds.`);
+                    this.logger.warn(`[${session.id}] Conflicto de sesión (401). Marcando desconectado.`);
                     await this.sessionRepo.update(session.id, { status: 'DISCONNECTED' });
 
                 } else if (restartRequired) {
@@ -286,78 +269,174 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         });
     }
 
-    /** Cierra y elimina el runtime de una sesión sin tocar la BD. */
+    // ─── Resolución de sesión ─────────────────────────────────────────────────
+
+    /**
+     * Busca el sessionId correcto para una empresa y propósito.
+     * Orden: purpose exacto → ALL como fallback.
+     * Si no hay runtime activo pero hay creds en DB, intenta reconexión lazy.
+     */
+    private async resolveSession(
+        companyId: string,
+        purpose: MessagePurpose,
+    ): Promise<SessionRuntime> {
+
+        // Construir orden de preferencia: [purpose, 'ALL'] sin duplicados
+        const candidates: MessagePurpose[] = purpose === 'ALL'
+            ? ['ALL']
+            : [purpose, 'ALL'];
+
+        for (const candidate of candidates) {
+            const session = await this.sessionRepo.findOne({
+                where: { companyId, routing: { purpose: candidate } },
+                relations: ['routing'],
+            });
+
+            if (!session) continue;
+
+            // Caso 1: runtime activo en memoria
+            const rt = this.runtimes.get(session.id);
+            if (rt) return rt;
+
+            // Caso 2: sin runtime pero tiene creds y no está DISCONNECTED → lazy reconnect
+            if (session.creds && session.status !== 'DISCONNECTED') {
+                this.logger.log(`[${session.id}] Lazy reconnect para ${candidate}...`);
+                const openedRt = await this.lazyConnect(session);
+                if (openedRt) return openedRt;
+            }
+
+            // Caso 3: DISCONNECTED o sin creds → este candidato no sirve, probar siguiente
+        }
+
+        throw new Error(
+            `No hay sesión disponible para empresa ${companyId} con purpose ${purpose}`,
+        );
+    }
+
+    /**
+     * Abre el socket y espera hasta que la conexión sea 'open'.
+     * Si tarda más de LAZY_CONNECT_TIMEOUT_MS, retorna null.
+     */
+    private async lazyConnect(session: WhatsappSession): Promise<SessionRuntime | null> {
+        // Evitar abrir múltiples sockets para la misma sesión en paralelo
+        if (this.linkingPromises.has(session.id)) {
+            await this.linkingPromises.get(session.id);
+            return this.runtimes.get(session.id) ?? null;
+        }
+
+        const connectPromise = new Promise<void>((resolve, reject) => {
+            this.openSocket(session).catch(reject);
+
+            const interval = setInterval(() => {
+                const rt = this.runtimes.get(session.id);
+                if (rt && !rt.qr) {
+                    clearInterval(interval);
+                    resolve();
+                }
+            }, 300);
+
+            setTimeout(() => {
+                clearInterval(interval);
+                reject(new Error(`Lazy connect timeout para sesión ${session.id}`));
+            }, LAZY_CONNECT_TIMEOUT_MS);
+        });
+
+        this.linkingPromises.set(session.id, connectPromise.then(() => { }).catch(() => { }));
+
+        try {
+            await connectPromise;
+            return this.runtimes.get(session.id) ?? null;
+        } catch (err) {
+            this.logger.warn(`Lazy connect falló para sesión ${session.id}: ${err}`);
+            return null;
+        } finally {
+            this.linkingPromises.delete(session.id);
+        }
+    }
+
     private killRuntime(sessionId: string): void {
         const rt = this.runtimes.get(sessionId);
         if (!rt) return;
         this.clearTimer(rt);
-        rt.intentionalClose = true; // ← marcar antes de cerrar
-        try {
-            rt.socket.end(undefined);
-        } catch (_) { }
+        rt.intentionalClose = true;
+        try { rt.socket.end(undefined); } catch (_) { }
         this.runtimes.delete(sessionId);
         this.linkingPromises.delete(sessionId);
         this.logger.log(`Runtime de sesión ${sessionId} destruido`);
     }
 
-    // ─── Envíos ───────────────────────────────────────────────────────────────
+    // ─── Envíos públicos ──────────────────────────────────────────────────────
 
-    async sendText(sessionId: string, to: string, text: string) {
-        return this.enqueue(sessionId, async (socket) => {
-            return socket.sendMessage(this.toJid(to), { text });
-        });
+    async sendText(
+        companyId: string,
+        purpose: MessagePurpose,
+        to: string,
+        text: string,
+    ) {
+        const rt = await this.resolveSession(companyId, purpose);
+        return this.enqueue(rt, (socket) =>
+            socket.sendMessage(toJid(to), { text }),
+        );
     }
 
-    async sendImage(sessionId: string, to: string, imageBuffer: Buffer, caption?: string) {
-        return this.enqueue(sessionId, async (socket) => {
-            return socket.sendMessage(this.toJid(to), { image: imageBuffer, caption });
-        });
+    async sendImage(
+        companyId: string,
+        purpose: MessagePurpose,
+        to: string,
+        imageBuffer: Buffer,
+        caption?: string,
+    ) {
+        const rt = await this.resolveSession(companyId, purpose);
+        return this.enqueue(rt, (socket) =>
+            socket.sendMessage(toJid(to), { image: imageBuffer, caption }),
+        );
     }
 
     async sendDocument(
-        sessionId: string,
+        companyId: string,
+        purpose: MessagePurpose,
         to: string,
         fileBuffer: Buffer,
         fileName: string,
         mimetype: string,
         caption?: string,
     ) {
-        return this.enqueue(sessionId, async (socket) => {
-            return socket.sendMessage(this.toJid(to), { document: fileBuffer, fileName, mimetype, caption });
-        });
+        const rt = await this.resolveSession(companyId, purpose);
+        return this.enqueue(rt, (socket) =>
+            socket.sendMessage(toJid(to), { document: fileBuffer, fileName, mimetype, caption }),
+        );
     }
 
     // ─── Cola con delay por sesión ────────────────────────────────────────────
 
-    private enqueue<T>(sessionId: string, task: (socket: WASocket) => Promise<T>): Promise<T> {
-        const rt = this.runtimes.get(sessionId);
-        if (!rt) throw new Error(`Sesión ${sessionId} no tiene socket activo`);
-
+    private enqueue<T>(rt: SessionRuntime, task: (socket: WASocket) => Promise<T>): Promise<T> {
         const result = rt.sendQueue.then(async () => {
             const elapsed = Date.now() - rt.lastSentAt;
             if (rt.lastSentAt > 0 && elapsed < SEND_DELAY_MAX_MS) {
-                await this.randomDelay();
+                await randomDelay(SEND_DELAY_MIN_MS, SEND_DELAY_MAX_MS);
             }
-            return Promise.race([
+            return withTimeout(
                 task(rt.socket),
-                new Promise<never>((_, reject) =>
-                    setTimeout(() => reject(new Error('Timeout: WhatsApp tardó demasiado')), 12_000),
-                ),
-            ]);
+                12_000,
+                'Timeout: WhatsApp tardó demasiado',
+            );
         });
 
         rt.sendQueue = result.then(
-            () => { rt.lastSentAt = Date.now(); this.scheduleDisconnect(sessionId); },
+            async () => {
+                rt.lastSentAt = Date.now();
+                this.scheduleDisconnect(rt.sessionId);        // 👈 necesita sessionId en rt
+                await this.touchSession(rt.sessionId).catch( // 👈 fire-and-forget con catch
+                    (err) => this.logger.warn(`touchSession falló: ${err}`),
+                );
+            },
             () => { rt.lastSentAt = Date.now(); },
         );
 
         return result;
     }
 
-    private randomDelay(): Promise<void> {
-        const ms = Math.floor(Math.random() * (SEND_DELAY_MAX_MS - SEND_DELAY_MIN_MS + 1)) + SEND_DELAY_MIN_MS;
-        return new Promise((r) => setTimeout(r, ms));
-    }
+    // ─── Disconnect timer ─────────────────────────────────────────────────────
 
     private scheduleDisconnect(sessionId: string): void {
         const rt = this.runtimes.get(sessionId);
@@ -365,6 +444,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         this.clearTimer(rt);
         rt.disconnectTimer = setTimeout(() => {
             this.logger.log(`Sesión ${sessionId} sin actividad. Cerrando socket 💤`);
+            rt.intentionalClose = true;
             rt.socket.end(undefined);
             this.runtimes.delete(sessionId);
         }, POST_SEND_DISCONNECT_MS);
@@ -377,17 +457,41 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // ─── Helpers ──────────────────────────────────────────────────────────────
+    // ─── Limpieza de sesiones inactivas (llamado desde scheduler) ─────────────
 
-    private normalizePhone(phone: string): string {
-        let digits = phone.replace(/\D/g, '');
-        if (digits.startsWith('0')) digits = '593' + digits.slice(1);
-        if (digits.startsWith('5930')) digits = '593' + digits.slice(4);
-        return digits;
+    /** Domingo 11pm - Paso 1: sesiones sin uso en 7 días → limpiar keys */
+    async cleanInactiveKeys(): Promise<void> {
+        const threshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const result = await this.sessionRepo
+            .createQueryBuilder()
+            .update()
+            .set({ keys: () => 'NULL' })
+            .where('status != :banned', { banned: 'BANNED' })
+            .andWhere('(lastUsedAt IS NULL OR lastUsedAt < :threshold)', { threshold })
+            .andWhere('keys IS NOT NULL')
+            .execute();
+
+        this.logger.log(`cleanInactiveKeys: ${result.affected} sesiones limpiadas ✅`);
     }
 
-    private toJid(phone: string): string {
-        const normalized = this.normalizePhone(phone);
-        return normalized.includes('@') ? normalized : `${normalized}@s.whatsapp.net`;
+    /** Domingo 11pm - Paso 2: sesiones sin uso en 30 días → limpiar creds + DISCONNECTED */
+    async cleanStaleCredentials(): Promise<void> {
+        const threshold = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const result = await this.sessionRepo
+            .createQueryBuilder()
+            .update()
+            .set({ creds: () => 'NULL', keys: () => 'NULL', status: 'DISCONNECTED', phoneNumber: () => 'NULL' })
+            .where('status != :banned', { banned: 'BANNED' })
+            .andWhere('(lastUsedAt IS NULL OR lastUsedAt < :threshold)', { threshold })
+            .andWhere('creds IS NOT NULL')
+            .execute();
+
+        this.logger.log(`cleanStaleCredentials: ${result.affected} sesiones purgadas ✅`);
+    }
+
+    // ─── Actualizar lastUsedAt ─────────────────────────────────────────────────
+
+    private async touchSession(sessionId: string): Promise<void> {
+        await this.sessionRepo.update(sessionId, { lastUsedAt: new Date() });
     }
 }

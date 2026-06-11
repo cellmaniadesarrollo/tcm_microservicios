@@ -462,4 +462,34 @@ export class TaskboardService {
       throw error;
     }
   }
+
+  // ========== PUSH NOTIFICATIONS ==========
+
+  async getVapidPublicKey() {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getVapidPublicKey`);
+    return lastValueFrom(
+      this.taskboardClient.send({ cmd: 'push-notifications.vapid-public-key' }, {})
+    );
+  }
+
+  async subscribeToPush(userId: string, subscription: any) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: subscribeToPush - userId: ${userId}`);
+    return lastValueFrom(
+      this.taskboardClient.send({ cmd: 'push-notifications.subscribe' }, { userId, subscription })
+    );
+  }
+
+  async unsubscribeFromPush(userId: string, endpoint: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: unsubscribeFromPush - userId: ${userId}`);
+    return lastValueFrom(
+      this.taskboardClient.send({ cmd: 'push-notifications.unsubscribe' }, { userId, endpoint })
+    );
+  }
+
+  async getUserPushSubscriptions(userId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getUserPushSubscriptions - userId: ${userId}`);
+    return lastValueFrom(
+      this.taskboardClient.send({ cmd: 'push-notifications.user-subscriptions' }, { userId })
+    );
+  }
 }
