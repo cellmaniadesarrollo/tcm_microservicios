@@ -27,7 +27,7 @@ export class NotificationsDispatcherController {
       ),
     );
   }
-
+  //pan
   @Get('routing-types')
   async listRoutingTypes() {
     return firstValueFrom(
