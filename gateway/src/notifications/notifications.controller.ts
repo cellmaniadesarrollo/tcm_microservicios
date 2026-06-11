@@ -116,15 +116,37 @@ export class NotificationsController {
   async getDeliveredNotifications(
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('includeArchived') includeArchived?: string,
   ) {
-    return this.notificationsService.getDeliveredNotifications(page, limit);
+    const includeArchivedBool = includeArchived === 'true';
+    return this.notificationsService.getDeliveredNotifications(page, limit, includeArchivedBool);
   }
 
   @Get('finished/three-months')
   async getFinishedOrdersOverThreeMonths(
     @Query('page') page?: number,
     @Query('limit') limit?: number,
+    @Query('includeArchived') includeArchived?: string,
   ) {
-    return this.notificationsService.getFinishedOrdersOverThreeMonths(page, limit);
+    const includeArchivedBool = includeArchived === 'true';
+    return this.notificationsService.getFinishedOrdersOverThreeMonths(page, limit, includeArchivedBool);
+  }
+
+  @Patch(':id/notes')
+  async updateNotificationNotes(
+    @Param('id') id: string,
+    @Body('userId') userId: string,
+    @Body('notes') notes: string,
+  ) {
+    return this.notificationsService.updateNotificationNotes(id, userId, notes);
+  }
+
+  @Patch(':id/archive')
+  async archiveNotification(
+    @Param('id') id: string,
+    @Body('userId') userId: string,
+    @Body('archived') archived: boolean,
+  ) {
+    return this.notificationsService.archiveNotification(id, userId, archived);
   }
 }

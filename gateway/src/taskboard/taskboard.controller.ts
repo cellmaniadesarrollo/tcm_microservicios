@@ -383,4 +383,41 @@ export class TaskboardController {
   removeLabel(@Param('id') id: string) {
     return this.taskboardService.removeLabel(id);
   }
+
+    // ========== PUSH NOTIFICATIONS ==========
+
+  @Get('push-notifications/vapid-public-key')
+  async getVapidPublicKey() {
+    return this.taskboardService.getVapidPublicKey();
+  }
+
+  @Post('push-notifications/subscribe')
+  async subscribeToPush(
+    @Body('userId') userId: string,
+    @Body('subscription') subscription: any,
+  ) {
+    if (!userId) {
+      return { success: false, message: 'userId es requerido' };
+    }
+    if (!subscription || !subscription.endpoint) {
+      return { success: false, message: 'Suscripción inválida' };
+    }
+    return this.taskboardService.subscribeToPush(userId, subscription);
+  }
+
+  @Delete('push-notifications/unsubscribe')
+  async unsubscribeFromPush(
+    @Body('userId') userId: string,
+    @Body('endpoint') endpoint: string,
+  ) {
+    if (!userId || !endpoint) {
+      return { success: false, message: 'userId y endpoint son requeridos' };
+    }
+    return this.taskboardService.unsubscribeFromPush(userId, endpoint);
+  }
+
+  @Get('push-notifications/subscriptions/:userId')
+  async getUserPushSubscriptions(@Param('userId') userId: string) {
+    return this.taskboardService.getUserPushSubscriptions(userId);
+  }
 }
