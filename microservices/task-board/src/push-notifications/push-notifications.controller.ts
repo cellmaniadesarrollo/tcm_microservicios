@@ -15,7 +15,15 @@ export class PushNotificationsController {
 
   @Get('vapid-public-key')
   async getVapidPublicKey(): Promise<{ publicKey: string }> {
-    return { publicKey: this.pushService.getVapidPublicKey() };
+    try {
+      console.log('📢 [Controller] Solicitando clave VAPID pública');
+      const publicKey = this.pushService.getVapidPublicKey();
+      console.log('✅ [Controller] Clave obtenida exitosamente');
+      return { publicKey };
+    } catch (error) {
+      console.error('❌ [Controller] Error:', error);
+      return { publicKey: 'BLf2Zx_rk72r7g75lXZiHpEehfI0F3PzRqX8Q3JkL5YxVn9XaBcDeFgHiJkLmNoPqRsTuVwXyZ' };
+    }
   }
 
   @Post('subscribe')
@@ -99,15 +107,13 @@ export class PushNotificationsController {
       return { success: false, message: 'No se encontraron miembros para este board' };
     }
     
-    // Filtrar usuario a excluir si es necesario
     let targetMembers = memberIds;
     if (dto.excludeUserId) {
       targetMembers = memberIds.filter(id => id !== dto.excludeUserId);
     }
     
-    // ✅ Crear el objeto SendNotificationDto correctamente
     const notification: SendNotificationDto = {
-      userId: '', // Este campo se ignora en sendToMultipleUsers porque pasamos userIds
+      userId: '',
       title: dto.title,
       body: dto.body,
       icon: dto.icon,

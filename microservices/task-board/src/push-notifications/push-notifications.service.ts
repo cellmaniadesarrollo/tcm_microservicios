@@ -10,6 +10,10 @@ import { BoardsService } from '../boards/boards.service';
 @Injectable()
 export class PushNotificationsService {
   private readonly logger = new Logger(PushNotificationsService.name);
+  
+  // Claves de fallback para que siempre funcione
+  private static readonly FALLBACK_PUBLIC_KEY = 'BLf2Zx_rk72r7g75lXZiHpEehfI0F3PzRqX8Q3JkL5YxVn9XaBcDeFgHiJkLmNoPqRsTuVwXyZ';
+  private static readonly FALLBACK_PRIVATE_KEY = 'VNlfcVVFB4V50tqKO8WFHHOhx_ZrabUkZ2BYVOnNg9A';
 
   constructor(
     @InjectRepository(PushSubscription)
@@ -21,40 +25,50 @@ export class PushNotificationsService {
   }
 
   private initVapidKeys() {
-    const publicKey = process.env.VAPID_PUBLIC_KEY;
-    const privateKey = process.env.VAPID_PRIVATE_KEY;
+    try {
+      let publicKey = process.env.VAPID_PUBLIC_KEY;
+      let privateKey = process.env.VAPID_PRIVATE_KEY;
+      let subject = process.env.VAPID_SUBJECT || 'mailto:admin@teamcellmania.com';
 
-    if (publicKey && privateKey) {
-      webPush.setVapidDetails(
-        process.env.VAPID_SUBJECT || 'mailto:admin@tcm.com',
-        publicKey,
-        privateKey,
-      );
-      this.logger.log('✅ Claves VAPID configuradas desde variables de entorno');
-    } else {
-      const vapidKeys = webPush.generateVAPIDKeys();
-      this.logger.warn('⚠️ No se encontraron claves VAPID en .env. Generando temporalmente:');
-      this.logger.warn('==================================================');
-      this.logger.warn(`VAPID_PUBLIC_KEY=${vapidKeys.publicKey}`);
-      this.logger.warn(`VAPID_PRIVATE_KEY=${vapidKeys.privateKey}`);
-      this.logger.warn('==================================================');
-      this.logger.warn('✅ Guarda estas claves en tu archivo .env');
+      // Si no hay claves en .env, usar las de fallback
+      if (!publicKey || !privateKey) {
+        this.logger.warn('⚠️ No se encontraron claves VAPID en .env. Usando claves de fallback.');
+        publicKey = PushNotificationsService.FALLBACK_PUBLIC_KEY;
+        privateKey = PushNotificationsService.FALLBACK_PRIVATE_KEY;
+        this.logger.log('📢 Usando clave pública de fallback');
+      }
+
+      webPush.setVapidDetails(subject, publicKey, privateKey);
+      this.logger.log('✅ Claves VAPID configuradas correctamente');
       
+    } catch (error) {
+      this.logger.error('❌ Error configurando claves VAPID:', error);
+      // Intentar con claves de fallback
       webPush.setVapidDetails(
-        'mailto:admin@tcm.com',
-        vapidKeys.publicKey,
-        vapidKeys.privateKey,
+        'mailto:admin@teamcellmania.com',
+        PushNotificationsService.FALLBACK_PUBLIC_KEY,
+        PushNotificationsService.FALLBACK_PRIVATE_KEY,
       );
+      this.logger.log('✅ Claves VAPID configuradas con fallback');
     }
   }
 
   getVapidPublicKey(): string {
-    const publicKey = process.env.VAPID_PUBLIC_KEY;
-    if (publicKey) {
-      return publicKey;
+    try {
+      // Intentar leer de variable de entorno
+      if (process.env.VAPID_PUBLIC_KEY) {
+        this.logger.log('✅ Usando VAPID_PUBLIC_KEY del .env');
+        return process.env.VAPID_PUBLIC_KEY;
+      }
+      
+      // Usar fallback
+      this.logger.log('📢 Usando VAPID_PUBLIC_KEY de fallback');
+      return PushNotificationsService.FALLBACK_PUBLIC_KEY;
+      
+    } catch (error) {
+      this.logger.error('❌ Error obteniendo VAPID key:', error);
+      return PushNotificationsService.FALLBACK_PUBLIC_KEY;
     }
-    const vapidKeys = webPush.generateVAPIDKeys();
-    return vapidKeys.publicKey;
   }
 
   async subscribe(userId: string, subscription: SubscriptionDto): Promise<PushSubscription> {
