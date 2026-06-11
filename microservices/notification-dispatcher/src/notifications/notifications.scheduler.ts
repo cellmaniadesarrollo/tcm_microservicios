@@ -22,7 +22,7 @@ export class NotificationsScheduler implements OnApplicationBootstrap {
     @Cron('*/15 * * * *')
     async processReminders(): Promise<void> {
         this.logger.debug('Procesando recordatorios pendientes...');
-        // await this.notifications.processDueReminders();
+        await this.notifications.processDueReminders();
     }
 
     // ─── Limpieza dominical 11pm ──────────────────────────────────────────────
