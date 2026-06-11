@@ -186,7 +186,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     // ─── Socket interno ───────────────────────────────────────────────────────
 
-    private async openSocket(session: WhatsappSession): Promise<void> {
+    private async openSocket(session: WhatsappSession, retryCount = 0): Promise<void> {
         const { state, saveCreds } = await useDatabaseAuthState(session, this.sessionRepo);
         const { version } = await fetchLatestBaileysVersion();
 
@@ -225,6 +225,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
             if (connection === 'open') {
                 rt.qr = null;
+                retryCount = 0; // 👈 reset al conectar exitosamente
                 const phone = socket.user?.id?.split(':')[0] ?? 'desconocido';
                 this.logger.log(`[${session.id}] Conectado como ${phone} ✅`);
                 await this.sessionRepo.update(session.id, { status: 'CONNECTED', phoneNumber: phone });
@@ -235,6 +236,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 const loggedOut = statusCode === DisconnectReason.loggedOut;
                 const restartRequired = statusCode === DisconnectReason.restartRequired;
                 const conflict = statusCode === 401;
+
+                // 👈 leer el flag ANTES de borrar el runtime del Map
                 const wasIntentional = rt.intentionalClose;
 
                 this.runtimes.delete(session.id);
@@ -242,13 +245,22 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
                 if (wasIntentional) {
                     this.logger.log(`[${session.id}] Cierre intencional. No reconectar.`);
+                    // 👈 actualizar DB: el socket se cerró a propósito, reflejar estado real
+                    await this.sessionRepo.update(session.id, { status: 'DISCONNECTED' });
                     return;
                 }
 
                 if (loggedOut) {
                     this.logger.warn(`[${session.id}] Logout real. Limpiando credenciales...`);
-                    await this.sessionRepo.createQueryBuilder().update()
-                        .set({ status: 'DISCONNECTED', creds: () => 'NULL', keys: () => 'NULL', phoneNumber: () => 'NULL' })
+                    await this.sessionRepo
+                        .createQueryBuilder()
+                        .update()
+                        .set({
+                            status: 'DISCONNECTED',
+                            creds: () => 'NULL',
+                            keys: () => 'NULL',
+                            phoneNumber: () => 'NULL',
+                        })
                         .where('id = :id', { id: session.id })
                         .execute();
 
@@ -259,11 +271,20 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 } else if (restartRequired) {
                     this.logger.warn(`[${session.id}] Restart requerido. Reconectando en 3s...`);
                     const freshSession = await this.sessionRepo.findOne({ where: { id: session.id } });
-                    if (freshSession) setTimeout(() => this.openSocket(freshSession), 3_000);
+                    if (freshSession) setTimeout(() => this.openSocket(freshSession, 0), 3_000);
 
                 } else {
-                    this.logger.warn(`[${session.id}] Cierre inesperado (código ${statusCode}). Reconectando en 3s...`);
-                    setTimeout(() => this.openSocket(session), 3_000);
+                    // 👈 backoff exponencial: 3s → 6s → 12s → 24s → máx 60s
+                    const delay = Math.min(3_000 * Math.pow(2, retryCount), 60_000);
+                    this.logger.warn(
+                        `[${session.id}] Cierre inesperado (código ${statusCode}). ` +
+                        `Reconectando en ${delay / 1000}s (intento ${retryCount + 1})...`
+                    );
+                    const freshSession = await this.sessionRepo.findOne({ where: { id: session.id } });
+                    setTimeout(
+                        () => this.openSocket(freshSession ?? session, retryCount + 1),
+                        delay,
+                    );
                 }
             }
         });
