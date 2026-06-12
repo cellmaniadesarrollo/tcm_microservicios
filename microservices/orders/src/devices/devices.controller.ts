@@ -40,4 +40,5 @@ export class DevicesController {
   async checkWarrantyByImei(data: { dto: CheckWarrantyDto }) {
     return this.devicesService.checkWarrantyByImei(data.dto);
   }
+
 }

@@ -37,6 +37,9 @@ import { BroadcastService } from '../broadcast/broadcast.service';
 import { ConnectableObservable } from 'rxjs';
 import { SearchHistoryService } from '../search-history/search-history.service';
 import { buildDateRangeUTC } from './helpers/date-range.helper';
+import { DeviceResponseDto } from '../devices/dto/device-response.dto';
+import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
+import { DevicesService } from '../devices/devices.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -71,6 +74,7 @@ export class OrderWorkflowService {
     private readonly userCacheService: UsersEmployeesEventsService,
     private readonly broadcastService: BroadcastService,
     private readonly searchHistoryService: SearchHistoryService,
+    private readonly devicesService: DevicesService,
   ) { }
 
   async createOrder(
@@ -2530,6 +2534,31 @@ export class OrderWorkflowService {
     });
   }
 
+
+  async linkDeviceToOrder(
+    dto: LinkDeviceToOrderDto,
+    user: { companyId: string },
+  ): Promise<{ success: boolean; device: DeviceResponseDto }> {
+
+    const order = await this.orderRepo.findOne({
+      where: { id: dto.orderId, company_id: user.companyId },
+    });
+
+    if (!order) throw new Error('Order not found');
+
+    // Validar que el nuevo device exista y pertenezca a la empresa
+    const newDevice = await this.devicesService.findOneById(dto.newDeviceId, user);
+    if (!newDevice) throw new Error('Device de destino no encontrado');
+
+    // 1️⃣ Vincular el device existente (el que tenía el IMEI) a la orden
+    order.device_id = dto.newDeviceId;
+    await this.orderRepo.save(order);
+
+    // 2️⃣ Eliminar el device viejo (el que se quedó sin IMEI)
+    await this.devicesService.deleteDevice(dto.oldDeviceId, user);
+
+    return { success: true, device: newDevice };
+  }
 }
 
 function mapUser(u: any) {

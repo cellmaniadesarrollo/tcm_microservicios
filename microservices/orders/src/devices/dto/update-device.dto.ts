@@ -87,3 +87,15 @@ export class UpdateDeviceDto {
   @IsBoolean()
   forceLink?: boolean;
 }
+import { IsNumber } from 'class-validator';
+
+export class LinkDeviceToOrderDto {
+  @IsNumber()
+  orderId!: number;
+
+  @IsNumber()
+  newDeviceId!: number;
+
+  @IsNumber()
+  oldDeviceId!: number;
+}
