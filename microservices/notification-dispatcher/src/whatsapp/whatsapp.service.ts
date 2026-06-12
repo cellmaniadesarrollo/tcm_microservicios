@@ -28,6 +28,7 @@ interface SessionRuntime {
     sessionId: string;
     socket: WASocket;
     qr: string | null;
+    isOpen: boolean;
     sendQueue: Promise<void>;
     lastSentAt: number;
     disconnectTimer: NodeJS.Timeout | null;
@@ -210,6 +211,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             sessionId: session.id,
             socket,
             qr: null,
+            isOpen: false,
             sendQueue: Promise.resolve(),
             lastSentAt: 0,
             disconnectTimer: null,
@@ -229,6 +231,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
             if (connection === 'open') {
                 rt.qr = null;
+                rt.isOpen = true;   // ← agregado
                 retryCount = 0;
                 const phone = socket.user?.id?.split(':')[0] ?? 'desconocido';
                 this.logger.log(`[${session.id}] Conectado como ${phone} ✅`);
@@ -344,9 +347,20 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
             const interval = setInterval(() => {
                 const rt = this.runtimes.get(session.id);
-                if (rt && !rt.qr) {
+
+                if (!rt) return; // todavía no se creó el runtime, seguir esperando
+
+                if (rt.isOpen) {
                     clearInterval(interval);
                     resolve();
+                    return;
+                }
+
+                if (rt.qr) {
+                    // requiere escaneo manual, no podemos esperar indefinidamente
+                    clearInterval(interval);
+                    reject(new Error(`Sesión ${session.id} requiere QR, no se puede lazy-reconnect`));
+                    return;
                 }
             }, 300);
 
