@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { DeviceAccount } from './entities/device_account.entity';
-import { In, Like, QueryFailedError, Repository } from 'typeorm';
+import { EntityManager, In, Like, QueryFailedError, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DeviceIMEI } from './entities/device_imei.entity';
 import { Device } from './entities/device.entity';
@@ -322,14 +322,20 @@ export class DevicesService {
 
 
   // ── Reutilizable: elimina un device completo (cascade borra imeis/accounts) ──
-  async deleteDevice(deviceId: number, user: { companyId: string }): Promise<void> {
-    const device = await this.deviceRepo.findOne({
+  async deleteDevice(
+    deviceId: number,
+    user: { companyId: string },
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repo = manager ? manager.getRepository(Device) : this.deviceRepo;
+
+    const device = await repo.findOne({
       where: { device_id: deviceId, company_id: user.companyId },
     });
 
     if (!device) throw new Error('Device not found');
 
-    await this.deviceRepo.remove(device); // cascade elimina imeis/accounts
+    await repo.remove(device); // cascade elimina imeis/accounts
   }
 
   // ── Detecta IMEIs que ya existen en la empresa vinculados a otro dispositivo ──
