@@ -11,7 +11,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
     constructor() {
         this.kafka = new Kafka({
-            clientId: 'ms-orders-consumer',        // ← cambiado a orders
+            clientId: 'ms-companies-consumer',        // ← mscompanies
             brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092'],
             retry: {
                 initialRetryTime: 100,
@@ -25,7 +25,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.consumer = this.kafka.consumer({
-            groupId: 'ms-orders-consumer-group',   // ← cambiado a orders
+            groupId: 'ms-companies-consumer-group',   // ← mscompanies
             sessionTimeout: 45000,
             heartbeatInterval: 5000,
             rebalanceTimeout: 60000,
@@ -37,17 +37,15 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         console.log(`📌 Handler registrado para topic: ${topic}`);
     }
 
-    // Solo conecta — NO suscribe todavía
     async onModuleInit() {
         try {
             await this.consumer.connect();
-            console.log('✅ Kafka Consumer conectado - ms-orders');
-        } catch (error) {
+            console.log('✅ Kafka Consumer conectado - ms-companies');  // ← mscompanies
+        } catch (error: any) {
             console.error('❌ Error conectando Kafka Consumer:', error.message);
         }
     }
 
-    // El listener llama esto DESPUÉS de registrar todos sus handlers
     async start() {
         try {
             const topics = Array.from(this.handlers.keys());
@@ -71,7 +69,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
                 },
             });
 
-        } catch (error) {
+        } catch (error: any) {
             console.error('❌ Error iniciando suscripción Kafka:', error.message);
         }
     }
@@ -92,14 +90,13 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
             await handler(event.eventType, event.data);
 
-            // ✅ Commit manual solo si el handler no lanzó error
             await this.consumer.commitOffsets([{
                 topic,
                 partition,
                 offset: (BigInt(message.offset) + 1n).toString(),
             }]);
 
-        } catch (error) {
+        } catch (error: any) {
             console.error(`❌ [Kafka Consumer] Error procesando mensaje de ${topic}:`, error.message);
         }
     }
