@@ -2,7 +2,7 @@
 
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Not, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 import makeWASocket, {
     DisconnectReason,
     WASocket,
@@ -176,10 +176,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     getQrStatus(sessionId: string): {
         qr: string | null;
-        status: 'waiting_qr' | 'connected' | 'disconnected';
+        status: 'waiting_qr' | 'connected' | 'idle' | 'disconnected';
     } {
         const rt = this.runtimes.get(sessionId);
-        if (!rt) return { qr: null, status: 'disconnected' };
+        if (!rt) {
+            // sin runtime: consultar último estado conocido no es posible aquí,
+            // pero podemos distinguir idle vs disconnected si el caller lo necesita
+            return { qr: null, status: 'disconnected' };
+        }
         if (rt.qr) return { qr: rt.qr, status: 'waiting_qr' };
         return { qr: null, status: 'connected' };
     }
@@ -225,7 +229,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
             if (connection === 'open') {
                 rt.qr = null;
-                retryCount = 0; // 👈 reset al conectar exitosamente
+                retryCount = 0;
                 const phone = socket.user?.id?.split(':')[0] ?? 'desconocido';
                 this.logger.log(`[${session.id}] Conectado como ${phone} ✅`);
                 await this.sessionRepo.update(session.id, { status: 'CONNECTED', phoneNumber: phone });
@@ -237,16 +241,16 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 const restartRequired = statusCode === DisconnectReason.restartRequired;
                 const conflict = statusCode === 401;
 
-                // 👈 leer el flag ANTES de borrar el runtime del Map
+                // leer flag ANTES de borrar el runtime del Map
                 const wasIntentional = rt.intentionalClose;
 
                 this.runtimes.delete(session.id);
                 this.linkingPromises.delete(session.id);
 
                 if (wasIntentional) {
-                    this.logger.log(`[${session.id}] Cierre intencional. No reconectar.`);
-                    // 👈 actualizar DB: el socket se cerró a propósito, reflejar estado real
-                    await this.sessionRepo.update(session.id, { status: 'DISCONNECTED' });
+                    // Cierre por timer de inactividad: tiene creds, puede reconectar → IDLE
+                    this.logger.log(`[${session.id}] Cierre intencional (inactividad). Marcando IDLE 💤`);
+                    await this.sessionRepo.update(session.id, { status: 'IDLE' });
                     return;
                 }
 
@@ -265,7 +269,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                         .execute();
 
                 } else if (conflict) {
-                    this.logger.warn(`[${session.id}] Conflicto de sesión (401). Marcando desconectado.`);
+                    // 401: sesión reemplazada manualmente desde el móvil → DISCONNECTED real
+                    this.logger.warn(`[${session.id}] Conflicto de sesión (401). Marcando DISCONNECTED.`);
                     await this.sessionRepo.update(session.id, { status: 'DISCONNECTED' });
 
                 } else if (restartRequired) {
@@ -274,11 +279,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                     if (freshSession) setTimeout(() => this.openSocket(freshSession, 0), 3_000);
 
                 } else {
-                    // 👈 backoff exponencial: 3s → 6s → 12s → 24s → máx 60s
+                    // Cierre inesperado: backoff exponencial 3s → 6s → 12s → 24s → máx 60s
                     const delay = Math.min(3_000 * Math.pow(2, retryCount), 60_000);
                     this.logger.warn(
                         `[${session.id}] Cierre inesperado (código ${statusCode}). ` +
-                        `Reconectando en ${delay / 1000}s (intento ${retryCount + 1})...`
+                        `Reconectando en ${delay / 1000}s (intento ${retryCount + 1})...`,
                     );
                     const freshSession = await this.sessionRepo.findOne({ where: { id: session.id } });
                     setTimeout(
@@ -292,17 +297,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     // ─── Resolución de sesión ─────────────────────────────────────────────────
 
-    /**
-     * Busca el sessionId correcto para una empresa y propósito.
-     * Orden: purpose exacto → ALL como fallback.
-     * Si no hay runtime activo pero hay creds en DB, intenta reconexión lazy.
-     */
     private async resolveSession(
         companyId: string,
         purpose: MessagePurpose,
     ): Promise<SessionRuntime> {
 
-        // Construir orden de preferencia: [purpose, 'ALL'] sin duplicados
         const candidates: MessagePurpose[] = purpose === 'ALL'
             ? ['ALL']
             : [purpose, 'ALL'];
@@ -319,14 +318,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             const rt = this.runtimes.get(session.id);
             if (rt) return rt;
 
-            // Caso 2: sin runtime pero tiene creds y no está DISCONNECTED → lazy reconnect
-            if (session.creds && session.status !== 'DISCONNECTED') {
-                this.logger.log(`[${session.id}] Lazy reconnect para ${candidate}...`);
+            // Caso 2: sin runtime pero tiene creds y está CONNECTED o IDLE → lazy reconnect
+            if (session.creds && (session.status === 'CONNECTED' || session.status === 'IDLE')) {
+                this.logger.log(`[${session.id}] Lazy reconnect para ${candidate} (estado: ${session.status})...`);
                 const openedRt = await this.lazyConnect(session);
                 if (openedRt) return openedRt;
             }
 
-            // Caso 3: DISCONNECTED o sin creds → este candidato no sirve, probar siguiente
+            // Caso 3: DISCONNECTED o BANNED o sin creds → probar siguiente candidato
         }
 
         throw new Error(
@@ -334,12 +333,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         );
     }
 
-    /**
-     * Abre el socket y espera hasta que la conexión sea 'open'.
-     * Si tarda más de LAZY_CONNECT_TIMEOUT_MS, retorna null.
-     */
     private async lazyConnect(session: WhatsappSession): Promise<SessionRuntime | null> {
-        // Evitar abrir múltiples sockets para la misma sesión en paralelo
         if (this.linkingPromises.has(session.id)) {
             await this.linkingPromises.get(session.id);
             return this.runtimes.get(session.id) ?? null;
@@ -446,8 +440,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         rt.sendQueue = result.then(
             async () => {
                 rt.lastSentAt = Date.now();
-                this.scheduleDisconnect(rt.sessionId);        // 👈 necesita sessionId en rt
-                await this.touchSession(rt.sessionId).catch( // 👈 fire-and-forget con catch
+                this.scheduleDisconnect(rt.sessionId);
+                await this.touchSession(rt.sessionId).catch(
                     (err) => this.logger.warn(`touchSession falló: ${err}`),
                 );
             },
@@ -463,11 +457,13 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         const rt = this.runtimes.get(sessionId);
         if (!rt) return;
         this.clearTimer(rt);
-        rt.disconnectTimer = setTimeout(() => {
+        rt.disconnectTimer = setTimeout(async () => {
             this.logger.log(`Sesión ${sessionId} sin actividad. Cerrando socket 💤`);
             rt.intentionalClose = true;
             rt.socket.end(undefined);
             this.runtimes.delete(sessionId);
+            // No actualizamos DB aquí: el handler connection.update lo hará
+            // cuando llegue el evento 'close' con wasIntentional = true → IDLE
         }, POST_SEND_DISCONNECT_MS);
     }
 
@@ -487,7 +483,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             .createQueryBuilder()
             .update()
             .set({ keys: () => 'NULL' })
-            .where('status != :banned', { banned: 'BANNED' })
+            .where('status NOT IN (:...excluded)', { excluded: ['BANNED', 'DISCONNECTED'] })
             .andWhere('(lastUsedAt IS NULL OR lastUsedAt < :threshold)', { threshold })
             .andWhere('keys IS NOT NULL')
             .execute();
@@ -502,7 +498,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             .createQueryBuilder()
             .update()
             .set({ creds: () => 'NULL', keys: () => 'NULL', status: 'DISCONNECTED', phoneNumber: () => 'NULL' })
-            .where('status != :banned', { banned: 'BANNED' })
+            .where('status NOT IN (:...excluded)', { excluded: ['BANNED', 'DISCONNECTED'] })
             .andWhere('(lastUsedAt IS NULL OR lastUsedAt < :threshold)', { threshold })
             .andWhere('creds IS NOT NULL')
             .execute();

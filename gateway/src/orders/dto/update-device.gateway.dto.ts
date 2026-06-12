@@ -67,3 +67,14 @@ export class UpdateDeviceGatewayDto {
   @IsBoolean()
   forceLink?: boolean;
 }
+
+export class LinkDeviceToOrderDto {
+  @IsNumber()
+  orderId!: number;
+
+  @IsNumber()
+  newDeviceId!: number;
+
+  @IsNumber()
+  oldDeviceId!: number;
+}

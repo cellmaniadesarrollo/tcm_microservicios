@@ -264,41 +264,44 @@ export class DevicesService {
 
     if (!device) throw new Error('Device not found');
 
-    // ── Solo activar lógica de confirmación si el dispositivo NO tiene IMEIs ──
     const deviceSinImeis = device.imeis.length === 0;
-    const hayImeisEntrantes = (dto.imeis ?? []).length > 0;
+    const incomingImeis = dto.imeis ?? [];
 
-    if (deviceSinImeis && hayImeisEntrantes && !dto.forceLink) {
-      const conflictos = await this.detectarConflictosImei(
-        dto.imeis ?? [],
-        user.companyId,
-      );
+    // ── Solo evaluamos huérfanos/conflictos si el device está sin IMEI ──────
+    if (deviceSinImeis && incomingImeis.length > 0) {
+      for (const item of incomingImeis) {
+        if (item.imei_id) continue; // ya pertenece a este device, no aplica
 
-      if (conflictos.length > 0) {
-        // Devolver sin guardar, pidiendo confirmación
-        return {
-          device_id: device.device_id,
-          models_id: device.models_id,
-          device_type_id: device.device_type_id,
-          serial_number: device.serial_number,
-          color: device.color,
-          storage: device.storage,
-          observations: device.observations,
-          imeis: device.imeis.map(i => ({
-            imei_id: i.imei_id,
-            imei_number: i.imei_number,
-          })),
-          accounts: device.accounts.map(a => ({
-            account_id: a.account_id,
-            username: a.username,
-            account_type: a.account_type,
-          })),
-          requiresConfirmation: true,
-          confirmationData: {
-            conflictingImeis: conflictos,
-            message: this.buildConfirmationMessage(conflictos),
-          },
-        };
+        const existente = await this.imeiRepo.findOne({
+          where: { imei_number: item.imei_number, company_id: user.companyId },
+          relations: ['device'],
+        });
+
+        if (!existente) continue; // no hay conflicto, sigue flujo normal
+
+        if (!existente.device) {
+          // 🟢 HUÉRFANO → reasignar automáticamente, sin confirmación
+          existente.device = device;
+          await this.imeiRepo.save(existente);
+
+          // lo agregamos al array en memoria para que syncImeis lo reconozca
+          device.imeis.push(existente);
+          // y le pasamos su imei_id al item entrante, para que syncImeis lo trate como update
+          item.imei_id = existente.imei_id;
+
+        } else if (existente.device.device_id !== device.device_id) {
+          // 🔴 OCUPADO → no se guarda nada, se pide confirmación al frontend
+          const conflictDevice = await this.findOneById(existente.device.device_id, user);
+
+          return {
+            ...this.mapToResponse(device),
+            requiresConfirmation: true,
+            conflictImei: item.imei_number,
+            conflictDevice: conflictDevice ?? undefined,
+            message: `El IMEI ${item.imei_number} ya está asignado al dispositivo #${existente.device.device_id}.`,
+          };
+        }
+        // si pertenece al mismo device (caso raro estando sin imeis), se ignora
       }
     }
 
@@ -309,16 +312,24 @@ export class DevicesService {
     if (dto.storage !== undefined) device.storage = dto.storage;
     if (dto.observations !== undefined) device.observations = dto.observations;
 
-    // Si forceLink=true, reasignar IMEIs conflictivos antes de sincronizar
-    if (deviceSinImeis && hayImeisEntrantes && dto.forceLink) {
-      await this.liberarImeisConflictivos(dto.imeis ?? [], user.companyId);
-    }
-
-    device.imeis = this.syncImeis(device, dto.imeis ?? [], user.companyId);
+    device.imeis = this.syncImeis(device, incomingImeis, user.companyId);
     device.accounts = this.syncAccounts(device, dto.accounts ?? []);
 
     await this.deviceRepo.save(device);
     return this.mapToResponse(device);
+  }
+
+
+
+  // ── Reutilizable: elimina un device completo (cascade borra imeis/accounts) ──
+  async deleteDevice(deviceId: number, user: { companyId: string }): Promise<void> {
+    const device = await this.deviceRepo.findOne({
+      where: { device_id: deviceId, company_id: user.companyId },
+    });
+
+    if (!device) throw new Error('Device not found');
+
+    await this.deviceRepo.remove(device); // cascade elimina imeis/accounts
   }
 
   // ── Detecta IMEIs que ya existen en la empresa vinculados a otro dispositivo ──
