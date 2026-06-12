@@ -11,6 +11,7 @@ import { OrderDelivery } from './entities/order-delivery.entity';
 import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
+import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
@@ -200,6 +201,12 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.getOrderPayment(data.dto, data.user);
   }
-
+  @MessagePattern({ cmd: 'link_device_to_order' })
+  async linkDeviceToOrder(data: {
+    dto: LinkDeviceToOrderDto;
+    user: { companyId: string };
+  }) {
+    return this.orderWorkflowService.linkDeviceToOrder(data.dto, data.user);
+  }
 }
 

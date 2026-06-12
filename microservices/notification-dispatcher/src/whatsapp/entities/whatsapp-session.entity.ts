@@ -5,7 +5,7 @@ import {
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 import { WhatsappRouting } from './whatsapp-routing.entity';
 
-export type SessionStatus = 'CONNECTED' | 'DISCONNECTED' | 'BANNED';
+export type SessionStatus = 'CONNECTED' | 'IDLE' | 'DISCONNECTED' | 'BANNED';
 
 @Entity('whatsapp_sessions')
 export class WhatsappSession {

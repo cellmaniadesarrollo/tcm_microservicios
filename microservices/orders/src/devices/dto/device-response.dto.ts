@@ -9,13 +9,9 @@ export class DeviceResponseDto {
   imeis?: { imei_id: number; imei_number: string }[];
   accounts?: { account_id: number; username: string; account_type: string }[];
 
-  // ── Confirmación de vinculación ──────────────────────────────────────────
+  // ── Confirmación de IMEI ocupado ──────────────────────────────────────────
   requiresConfirmation?: boolean;
-  confirmationData?: {
-    conflictingImeis: {
-      imei_number: string;
-      currentDeviceId: number | null; // null = huérfano
-    }[];
-    message: string;
-  };
+  conflictImei?: string;
+  conflictDevice?: DeviceResponseDto;
+  message?: string;
 }

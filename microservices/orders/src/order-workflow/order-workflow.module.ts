@@ -20,11 +20,12 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
 import { BroadcastModule } from '../broadcast/broadcast.module';
 import { SearchHistoryModule } from '../search-history/search-history.module';
+import { DevicesModule } from '../devices/devices.module';
 
 @Module({
   imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
     OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment, Attachment, OrderNote, OrderNoteLog]),
-    BroadcastModule, SearchHistoryModule],
+    BroadcastModule, SearchHistoryModule, DevicesModule],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService],
 

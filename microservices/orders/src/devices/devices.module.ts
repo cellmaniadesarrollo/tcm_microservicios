@@ -13,5 +13,6 @@ import { AwsS3Module } from '../aws-s3/aws-s3.module';
   imports: [TypeOrmModule.forFeature([Device, DeviceAccount, DeviceIMEI, FindingProcedure, Attachment]), AwsS3Module],
   controllers: [DevicesController],
   providers: [DevicesService],
+  exports: [DevicesService]
 })
 export class DevicesModule { }
