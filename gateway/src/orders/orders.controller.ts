@@ -33,7 +33,7 @@ import { GetDeviceByIdGatewayDto } from './dto/get-device-by-id.gateway.dto';
 import { GetOrderFullDataGatewayDto } from './dto/get-order-full-data-gateway.dto';
 import { ListOrdersGatewayDto } from './dto/list-orders-gateway.dto';
 import { SearchIMEIGatewayDto } from './dto/search-imei.dto';
-import { UpdateDeviceGatewayDto } from './dto/update-device.gateway.dto';
+import { LinkDeviceToOrderDto, UpdateDeviceGatewayDto } from './dto/update-device.gateway.dto';
 import { UpdateFindingProcedureGatewayDto } from './dto/update-finding-procedure-gateway.dto';
 import { UpdateOrderFindingGatewayDto } from './dto/update-order-finding-gateway.dto';
 import { UploadAttachmentGatewayDto } from './dto/upload-attachment.gateway.dto';
@@ -906,7 +906,19 @@ export class OrdersController {
       ),
     );
   }
-
+  @Post('order/link-device')
+  async linkDeviceToOrder(@Body() body: LinkDeviceToOrderDto, @User() user: any) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'link_device_to_order' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto: body,
+          user: { userId: user.userId, companyId: user.companyId },
+        },
+      ),
+    );
+  }
 }
 // Type guard (fuera o dentro de la clase)
 function isMultipartFile(part: any): part is { file: any; filename: string; mimetype: string } {

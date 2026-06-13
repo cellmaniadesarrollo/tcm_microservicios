@@ -37,6 +37,9 @@ import { BroadcastService } from '../broadcast/broadcast.service';
 import { ConnectableObservable } from 'rxjs';
 import { SearchHistoryService } from '../search-history/search-history.service';
 import { buildDateRangeUTC } from './helpers/date-range.helper';
+import { DeviceResponseDto } from '../devices/dto/device-response.dto';
+import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
+import { DevicesService } from '../devices/devices.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -71,6 +74,7 @@ export class OrderWorkflowService {
     private readonly userCacheService: UsersEmployeesEventsService,
     private readonly broadcastService: BroadcastService,
     private readonly searchHistoryService: SearchHistoryService,
+    private readonly devicesService: DevicesService,
   ) { }
 
   async createOrder(
@@ -2528,6 +2532,51 @@ export class OrderWorkflowService {
         changed_at: history.changed_at,
       },
     });
+  }
+
+
+  async linkDeviceToOrder(
+    dto: LinkDeviceToOrderDto,
+    user: { companyId: string },
+  ): Promise<{ success: boolean; device: DeviceResponseDto }> {
+
+    return this.orderRepo.manager.transaction(async (manager) => {
+
+      const order = await manager.findOne(Order, {
+        where: { id: dto.orderId, company_id: user.companyId },
+      });
+
+      if (!order) throw new Error('Order not found');
+
+      // Validar que el nuevo device exista y pertenezca a la empresa
+      const newDevice = await this.devicesService.findOneById(dto.newDeviceId, user);
+      if (!newDevice) throw new Error('Device de destino no encontrado');
+
+      // 1️⃣ Vincular el device existente (el que tenía el IMEI) a esta orden
+      order.device_id = dto.newDeviceId;
+      await manager.save(order);
+
+      // 2️⃣ Verificar si OTRAS órdenes siguen apuntando al device viejo
+      const otrasOrdenes = await manager.find(Order, {
+        where: { device_id: dto.oldDeviceId, company_id: user.companyId },
+      });
+
+      if (otrasOrdenes.length > 0) {
+        // Desvincular el device viejo de cualquier otra orden que aún lo use
+        for (const o of otrasOrdenes) {
+          if (o.id !== order.id) {
+            o.device_id = undefined;
+            await manager.save(o);
+          }
+        }
+      }
+
+      // 3️⃣ Eliminar el device viejo (ya sin referencias)
+      await this.devicesService.deleteDevice(dto.oldDeviceId, user, manager);
+
+      return { success: true, device: newDevice };
+    });
+
   }
 
 }
