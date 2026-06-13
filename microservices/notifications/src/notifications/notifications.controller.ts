@@ -289,4 +289,18 @@ export class NotificationsController {
       data.archived
     );
   }
+
+  @MessagePattern({ cmd: 'get_reviewed_delivered_orders' })
+  async getReviewedDeliveredOrders(@Payload() data: {
+    userId: string;
+    page?: number;
+    limit?: number;
+  }) {
+    console.log(`📦 [Notifications] get_reviewed_delivered_orders - userId: ${data.userId}, page: ${data.page}, limit: ${data.limit}`);
+    return await this.notificationsService.getReviewedDeliveredOrders(
+      data.userId,
+      data.page || 1,
+      data.limit || 20
+    );
+  }
 }
