@@ -1,5 +1,5 @@
 // gateway/src/notifications/notifications.controller.ts
-import { Controller, Get, Post, Patch, Param, Body, Query } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, BadRequestException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 
 @Controller('notifications')
@@ -148,5 +148,89 @@ export class NotificationsController {
     @Body('archived') archived: boolean,
   ) {
     return this.notificationsService.archiveNotification(id, userId, archived);
+  }
+
+  @Get('delivered/reviewed')
+  async getReviewedDeliveredOrders(
+    @Query('userId') userId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    if (!userId) {
+      throw new BadRequestException('userId es requerido');
+    }
+    return this.notificationsService.getReviewedDeliveredOrders(userId, page, limit);
+  }
+
+  @Post('observations')
+  async createOrderObservation(
+    @Body('orderId') orderId: string,
+    @Body('userId') userId: string,
+    @Body('userName') userName: string,
+    @Body('observation') observation: string,
+  ) {
+    if (!orderId || !userId || !observation) {
+      throw new BadRequestException('orderId, userId y observation son requeridos');
+    }
+    return this.notificationsService.createOrderObservation({
+      orderId,
+      userId,
+      userName: userName || userId,
+      observation,
+    });
+  }
+
+  @Get('observations/order/:orderId')
+  async getOrderObservations(
+    @Param('orderId') orderId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    if (!orderId) {
+      throw new BadRequestException('orderId es requerido');
+    }
+    return this.notificationsService.getOrderObservations(orderId, page, limit);
+  }
+
+  @Get('observations/user/:userId')
+  async getUserObservations(
+    @Param('userId') userId: string,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+  ) {
+    if (!userId) {
+      throw new BadRequestException('userId es requerido');
+    }
+    return this.notificationsService.getUserObservations(userId, page, limit);
+  }
+
+  @Patch('observations/:id')
+  async updateOrderObservation(
+    @Param('id') id: string,
+    @Body('observation') observation: string,
+  ) {
+    if (!id) {
+      throw new BadRequestException('id es requerido');
+    }
+    if (!observation) {
+      throw new BadRequestException('observation es requerido');
+    }
+    return this.notificationsService.updateOrderObservation(id, observation);
+  }
+
+  @Delete('observations/:id')
+  async deleteOrderObservation(@Param('id') id: string) {
+    if (!id) {
+      throw new BadRequestException('id es requerido');
+    }
+    return this.notificationsService.deleteOrderObservation(id);
+  }
+
+  @Delete('observations/order/:orderId')
+  async deleteOrderObservationsByOrder(@Param('orderId') orderId: string) {
+    if (!orderId) {
+      throw new BadRequestException('orderId es requerido');
+    }
+    return this.notificationsService.deleteOrderObservationsByOrder(orderId);
   }
 }
