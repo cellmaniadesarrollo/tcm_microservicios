@@ -880,4 +880,67 @@ export class NotificationsService {
       orderId: orderId 
     };
   }
+
+  async getReviewedDeliveredOrders(
+    userId: string,
+    page: number = 1,
+    limit: number = 20
+  ) {
+    const skip = (page - 1) * limit;
+    
+    // Base del query
+    const baseQuery = {
+      userId: userId,
+      currentStatus: 'ENTREGADA',
+      $or: [
+        { entityType: 'order' },
+        { entityType: 'ORDER' }
+      ]
+    };
+    
+    // ✅ Query para notificaciones con notas (corregido)
+    const queryWithNotes = {
+      ...baseQuery,
+      notes: { $exists: true, $nin: [null, ''] }  // $nin en lugar de dos $ne
+    };
+    
+    // Query para notificaciones archivadas
+    const queryArchived = {
+      ...baseQuery,
+      isArchived: true
+    };
+    
+    // Ejecutar ambas consultas
+    const [notificationsWithNotes, notificationsArchived] = await Promise.all([
+      this.notificationModel.find(queryWithNotes).lean().exec(),
+      this.notificationModel.find(queryArchived).lean().exec()
+    ]);
+    
+    // Combinar y eliminar duplicados por entityId
+    const allNotifications = [...notificationsWithNotes, ...notificationsArchived];
+    const uniqueByOrder = new Map();
+    
+    allNotifications.forEach(notification => {
+      const orderId = notification.entityId;
+      if (!uniqueByOrder.has(orderId)) {
+        uniqueByOrder.set(orderId, notification);
+      }
+    });
+    
+    const uniqueNotifications = Array.from(uniqueByOrder.values())
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    
+    const total = uniqueNotifications.length;
+    const paginatedNotifications = uniqueNotifications.slice(skip, skip + limit);
+    
+    console.log(`📊 Órdenes entregadas revisadas: ${total}`);
+    
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications: paginatedNotifications,
+    };
+  }
 }
