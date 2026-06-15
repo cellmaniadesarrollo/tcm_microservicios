@@ -1,3 +1,4 @@
+//microservices\orders\src\order-workflow\entities\order.entity.ts
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -28,6 +29,7 @@ import { OrderDelivery } from './order-delivery.entity';
 import { OrderPayment } from './order-payment.entity';
 import { Attachment } from '../../order-findings/entities/attachment.entity';
 import { OrderNote } from './order-note.entity';
+import { OrderPotentialPurchase } from '../../order-potential-purchase/entities/order-potential-purchase.entity';
 
 @Entity('orders')
 @Index(['company_id', 'order_number'], { unique: true })
@@ -158,4 +160,7 @@ export class Order {
 
   @OneToMany(() => OrderPayment, (payment) => payment.order, { cascade: true })
   payments!: OrderPayment[];
+
+  @OneToOne(() => OrderPotentialPurchase, (pp) => pp.order, { nullable: true })
+  potentialPurchase?: OrderPotentialPurchase;
 }

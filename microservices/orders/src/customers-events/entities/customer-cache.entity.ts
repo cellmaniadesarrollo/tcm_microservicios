@@ -1,4 +1,5 @@
-import { Entity, PrimaryColumn, Column, OneToMany,CreateDateColumn,UpdateDateColumn, ManyToOne, Index,  } from 'typeorm';
+//microservices\orders\src\customers-events\entities\customer-cache.entity.ts
+import { Entity, PrimaryColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn, ManyToOne, Index, } from 'typeorm';
 import { CustomerContactCache } from './customer-contact-cache.entity';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 
@@ -24,7 +25,7 @@ export class CustomerCache {
   @Column({ type: 'varchar', length: 100 })
   lastName: string;
 
- 
+
 
   @OneToMany(
     () => CustomerContactCache,
