@@ -424,6 +424,8 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.branch', 'branch')    // ← aquí sí
       .leftJoinAndSelect('o.company', 'company')  // ← aquí sí
       .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+      .leftJoinAndSelect('o.potentialPurchase', 'potentialPurchase')
+      .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.entry_date', 'DESC')
       .getMany();
@@ -483,6 +485,8 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('device.imeis', 'imei')
       .leftJoinAndSelect('device.model', 'deviceModel')
       .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
+      .leftJoinAndSelect('o.potentialPurchase', 'potentialPurchase')
+      .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
     // ── Filtro principal según myOrdersFilter ──────────────────────────────────
@@ -714,6 +718,7 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('device.imeis', 'imei')
         .leftJoinAndSelect('device.model', 'deviceModel')
         .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
+
         .whereInIds(pagedIds)
         .orderBy('o.entry_date', 'DESC')
         .getMany();
@@ -764,6 +769,8 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.technicians', 'technicians')
         .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
         .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
+        .leftJoinAndSelect('order.potentialPurchase', 'potentialPurchase')
+        .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
@@ -2548,35 +2555,28 @@ export class OrderWorkflowService {
 
       if (!order) throw new Error('Order not found');
 
-      // Validar que el nuevo device exista y pertenezca a la empresa
       const newDevice = await this.devicesService.findOneById(dto.newDeviceId, user);
       if (!newDevice) throw new Error('Device de destino no encontrado');
 
-      // 1️⃣ Vincular el device existente (el que tenía el IMEI) a esta orden
+      // 1️⃣ Vincular el device existente a esta orden
       order.device_id = dto.newDeviceId;
       await manager.save(order);
 
-      // 2️⃣ Verificar si OTRAS órdenes siguen apuntando al device viejo
-      const otrasOrdenes = await manager.find(Order, {
-        where: { device_id: dto.oldDeviceId, company_id: user.companyId },
-      });
-
-      if (otrasOrdenes.length > 0) {
-        // Desvincular el device viejo de cualquier otra orden que aún lo use
-        for (const o of otrasOrdenes) {
-          if (o.id !== order.id) {
-            o.device_id = undefined;
-            await manager.save(o);
-          }
-        }
-      }
+      // 2️⃣ Desvincular CUALQUIER otra fila que aún apunte al device viejo
+      //    (usamos QueryBuilder porque save() con undefined no genera SET NULL)
+      await manager
+        .createQueryBuilder()
+        .update(Order)
+        .set({ device_id: dto.newDeviceId })
+        .where('device_id = :oldDeviceId', { oldDeviceId: dto.oldDeviceId })
+        .andWhere('company_id = :companyId', { companyId: user.companyId })
+        .execute();
 
       // 3️⃣ Eliminar el device viejo (ya sin referencias)
       await this.devicesService.deleteDevice(dto.oldDeviceId, user, manager);
 
       return { success: true, device: newDevice };
     });
-
   }
 
 }
