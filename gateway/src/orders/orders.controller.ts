@@ -47,6 +47,7 @@ import { CreateOrderNoteGatewayDto } from './dto/create-order-note-gateway.dto';
 import { UpdateOrderNoteGatewayDto } from './dto/update-order-note-gateway.dto';
 import { processFileForUpload } from '../common/helpers/process-file.helper';
 import { SaveSearchHistoryDto } from './dto/save-Search-history-gateway.dto';
+import { MarkPotentialPurchaseGatewayDto } from './dto/mark-potential-purchase-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -914,7 +915,41 @@ export class OrdersController {
         {
           internalToken: process.env.INTERNAL_SECRET,
           dto: body,
-          user: { userId: user.userId, companyId: user.companyId },
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
+
+  @Post('mark-potential-purchase')
+  async markPotentialPurchase(
+    @Body() body: MarkPotentialPurchaseGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'mark_potential_purchase' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          ...body,
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        },
+      ),
+    );
+  }
+
+  @Delete('unmark-potential-purchase/:order_id')
+  async unmarkPotentialPurchase(
+    @Param('order_id', ParseIntPipe) order_id: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'unmark_potential_purchase' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          order_id,
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
       ),
     );

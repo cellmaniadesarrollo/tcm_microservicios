@@ -17,6 +17,7 @@ import { KafkaModule } from './kafka/kafka.module';
 import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 import { SearchHistoryModule } from './search-history/search-history.module';
+import { OrderPotentialPurchaseModule } from './order-potential-purchase/order-potential-purchase.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { SearchHistoryModule } from './search-history/search-history.module';
     MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule,
     HealthModule,
     SearchHistoryModule,
+    OrderPotentialPurchaseModule,
   ],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],

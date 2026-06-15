@@ -291,7 +291,7 @@ export class DevicesService {
 
         } else if (existente.device.device_id !== device.device_id) {
           // 🔴 OCUPADO → no se guarda nada, se pide confirmación al frontend
-          const conflictDevice = await this.findOneById(existente.device.device_id, user);
+          const conflictDevice = await this.findDeviceWithModelInfo(existente.device.device_id, user);
 
           return {
             ...this.mapToResponse(device),
@@ -631,6 +631,44 @@ export class DevicesService {
       },
       has_active_warranty: warranties.some((w) => w.is_active),
       warranties,
+    };
+  }
+
+  private async findDeviceWithModelInfo(deviceId: number, user: { companyId: string }): Promise<DeviceResponseDto | null> {
+    const device = await this.deviceRepo.findOne({
+      where: {
+        device_id: deviceId,
+        company_id: user.companyId,
+      },
+      relations: ['imeis', 'accounts', 'model', 'model.brand'],
+    });
+
+    if (!device) return null;
+
+    return {
+      device_id: device.device_id,
+      serial_number: device.serial_number,
+      models_id: device.models_id,
+      device_type_id: device.device_type_id,
+      color: device.color,
+      storage: device.storage,
+      observations: device.observations,
+      imeis: device.imeis.map(i => ({
+        imei_id: i.imei_id,
+        imei_number: i.imei_number,
+      })),
+      accounts: device.accounts.map(a => ({
+        account_id: a.account_id,
+        username: a.username,
+        account_type: a.account_type,
+      })),
+      model: device.model ? {
+        models_id: device.model.models_id,
+        models_name: device.model.models_name,
+        models_brands_id: device.model.models_brands_id,
+        models_brand_name: device.model.brand?.brands_name || '',
+        models_img_url: device.model.models_img_url,
+      } : undefined,
     };
   }
 }
