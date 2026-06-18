@@ -12,10 +12,14 @@ import { CreateOrderNoteDto } from './dto/create-order-note.dto';
 import { UpdateOrderNoteDto } from './dto/update-order-note.dto';
 import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
+import { SaveInboundDto } from './dto/save-inbound.dto';
+import { SaveOutboundDto } from './dto/save-outbound.dto';
+import { OrderShippingService } from './order-shipping.service';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
-  constructor(private readonly orderWorkflowService: OrderWorkflowService) { }
+  constructor(private readonly orderWorkflowService: OrderWorkflowService,
+    private readonly orderShippingService: OrderShippingService) { }
 
   @MessagePattern({ cmd: 'async_orders_start' })
   async onSyncStart(@Payload() payload: any) {
@@ -70,10 +74,12 @@ export class OrderWorkflowController {
       branchId: string;
     };
   }) {
-    return this.orderWorkflowService.getOrderFullData(
+    const datas = await this.orderWorkflowService.getOrderFullData(
       data.dto.orderId,
       data.user,
     );
+    console.log(datas)
+    return datas
   }
 
   @MessagePattern({ cmd: 'change_order_status' })
@@ -207,6 +213,21 @@ export class OrderWorkflowController {
     user: { companyId: string };
   }) {
     return this.orderWorkflowService.linkDeviceToOrder(data.dto, data.user);
+  }
+
+  @MessagePattern({ cmd: 'save_order_inbound' })
+  async saveInbound(@Payload() payload: { orderId: number; dto: SaveInboundDto }) {
+    return this.orderShippingService.saveInbound(payload.orderId, payload.dto);
+  }
+
+  @MessagePattern({ cmd: 'save_order_outbound' })
+  async saveOutbound(@Payload() payload: { orderId: number; dto: SaveOutboundDto }) {
+    return this.orderShippingService.saveOutbound(payload.orderId, payload.dto);
+  }
+
+  @MessagePattern({ cmd: 'get_order_shipping' })
+  async getShipping(@Payload() payload: { orderId: number }) {
+    return this.orderShippingService.findByOrder(payload.orderId);
   }
 }
 

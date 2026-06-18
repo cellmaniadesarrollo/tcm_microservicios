@@ -30,6 +30,7 @@ import { OrderPayment } from './order-payment.entity';
 import { Attachment } from '../../order-findings/entities/attachment.entity';
 import { OrderNote } from './order-note.entity';
 import { OrderPotentialPurchase } from '../../order-potential-purchase/entities/order-potential-purchase.entity';
+import { OrderShipping } from './order-shipping.entity';
 
 @Entity('orders')
 @Index(['company_id', 'order_number'], { unique: true })
@@ -141,6 +142,9 @@ export class Order {
 
   @Column({ type: 'text' })
   detalleIngreso!: string;
+  // 1. Flag nacional
+  @Column({ default: false })
+  is_national!: boolean;
 
   @Column({
     type: 'decimal',
@@ -163,4 +167,8 @@ export class Order {
 
   @OneToOne(() => OrderPotentialPurchase, (pp) => pp.order, { nullable: true })
   potentialPurchase?: OrderPotentialPurchase;
+
+  // 2. Relación con shipping
+  @OneToOne(() => OrderShipping, (s) => s.order, { nullable: true, cascade: true })
+  shipping?: OrderShipping;
 }
