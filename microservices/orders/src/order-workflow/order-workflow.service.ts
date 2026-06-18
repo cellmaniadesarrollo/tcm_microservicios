@@ -771,6 +771,12 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
         .leftJoinAndSelect('order.potentialPurchase', 'potentialPurchase')
         .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
+        .leftJoinAndSelect('order.shipping', 'shipping')
+        .leftJoinAndSelect('shipping.inboundOrigin', 'inboundOrigin')
+        .leftJoinAndSelect('inboundOrigin.parent', 'inboundOriginParent')       // cantón → provincia
+        .leftJoinAndSelect('inboundOriginParent.parent', 'inboundOriginRoot')   // provincia → raíz
+        .leftJoinAndSelect('shipping.outboundDestination', 'outboundDestination')
+
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
@@ -2201,7 +2207,7 @@ export class OrderWorkflowService {
       branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
       type: { id: order.type?.id, name: order.type?.name },
       priority: { id: order.priority?.id, name: order.priority?.name },
-
+      is_national: order.is_national,
       customer: {
         id: order.customer?.id,
         idNumber: order.customer?.idNumber,
@@ -2328,7 +2334,7 @@ export class OrderWorkflowService {
       branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
       type: { id: order.type?.id, name: order.type?.name },
       priority: { id: order.priority?.id, name: order.priority?.name },
-
+      is_national: order.is_national,
       customer: {
         id: order.customer?.id,
         idNumber: order.customer?.idNumber,

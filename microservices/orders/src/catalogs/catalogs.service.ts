@@ -7,6 +7,8 @@ import { DeviceType } from './entities/device_type.entity';
 import { OrderType } from './entities/order-type.entity';
 import { OrderPriority } from './entities/order-priority.entity';
 import { OrderStatus } from './entities/order_status.entity';
+import { GeoDivision } from './entities/geo-division.entity';
+import { GeoCountry } from './entities/geo-country.entity';
 
 @Injectable()
 export class CatalogsService {
@@ -27,6 +29,11 @@ export class CatalogsService {
         private orderPriorityRepo: Repository<OrderPriority>,
         @InjectRepository(OrderStatus)
         private orderStatusRepo: Repository<OrderStatus>,
+        @InjectRepository(GeoDivision)
+        private divisionRepo: Repository<GeoDivision>,
+        @InjectRepository(GeoCountry)
+        private countryRepo: Repository<GeoCountry>,
+
     ) { }
     async populateIfEmpty(): Promise<void> {
         const count = await this.deviceTypeRepo.count();
@@ -257,5 +264,27 @@ export class CatalogsService {
             orderStatuses,
             orderTypes
         };
+    }
+
+    async getCountries(): Promise<{ id: number; name: string }[]> {
+        const countries = await this.countryRepo.find({ order: { name: 'ASC' } });
+        return countries.map(c => ({ id: c.id, name: c.name }));
+    }
+
+    async getDivisionsByParent(
+        parent_id: number | null,
+        country_id: number | null,
+        level: number,
+    ): Promise<{ id: number; name: string }[]> {
+        const where: any = { level };
+        if (parent_id !== null) where.parent_id = parent_id;
+        if (country_id !== null) where.country_id = country_id;
+
+        const divisions = await this.divisionRepo.find({
+            where,
+            order: { name: 'ASC' },
+        });
+
+        return divisions.map(d => ({ id: d.id, name: d.name }));
     }
 }

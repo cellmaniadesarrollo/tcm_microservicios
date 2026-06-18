@@ -396,6 +396,7 @@ export class OrdersReportsService {
                 .select({
                     id: 1, order_number: 1,
                     previous_order_id: 1, revisadoAntes: 1,
+                    is_national: 1,
                     currentStatus: 1, type: 1, branch: 1,
                     customer: 1, device: 1, technicians: 1,
                     entry_date: 1, estimated_price: 1,
@@ -452,6 +453,7 @@ export class OrdersReportsService {
             return {
                 id: order.id, order_number: order.order_number,
                 revisadoAntes: order.revisadoAntes, currentStatus: order.currentStatus,
+                is_national: order.is_national ?? false,
                 type: order.type,
                 branch: { id: order.branch.id, name: order.branch.name },
                 customer: { id: order.customer.id, firstName: order.customer.firstName, lastName: order.customer.lastName },
@@ -912,7 +914,7 @@ export class OrdersReportsService {
             },
             validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
         };
-        console.log(counts)
+        // console.log(counts)
         // ── Cálculos derivados ────────────────────────────────────────────────────
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
