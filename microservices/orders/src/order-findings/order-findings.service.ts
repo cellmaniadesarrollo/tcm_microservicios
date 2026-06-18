@@ -292,11 +292,11 @@ export class OrderFindingsService {
       );
     }
 
-    if (procedure.client_approved && dto.client_approved === false) {
-      throw new RpcException(
-        new ForbiddenException('No se puede desaprobar un procedimiento ya aprobado por el cliente'),
-      );
-    }
+    // if (procedure.client_approved && dto.client_approved === false) {
+    //   throw new RpcException(
+    //     new ForbiddenException('No se puede desaprobar un procedimiento ya aprobado por el cliente'),
+    //   );
+    // }
 
     Object.assign(procedure, dto);
     const saved = await this.procedureRepository.save(procedure);

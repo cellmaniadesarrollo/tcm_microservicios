@@ -21,13 +21,17 @@ import { UsersEmployeesEventsModule } from '../users-employees-events/users-empl
 import { BroadcastModule } from '../broadcast/broadcast.module';
 import { SearchHistoryModule } from '../search-history/search-history.module';
 import { DevicesModule } from '../devices/devices.module';
+import { OrderShipping } from './entities/order-shipping.entity';
+import { OrderShippingService } from './order-shipping.service';
 
 @Module({
-  imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module, TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
-    OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment, Attachment, OrderNote, OrderNoteLog]),
+  imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module,
+    TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
+      OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment,
+      Attachment, OrderNote, OrderNoteLog, OrderShipping]),
     BroadcastModule, SearchHistoryModule, DevicesModule],
   controllers: [OrderWorkflowController],
-  providers: [OrderWorkflowService, PaymentCatalogSeederService],
+  providers: [OrderWorkflowService, PaymentCatalogSeederService, OrderShippingService],
 
   exports: [OrderWorkflowService],
 })

@@ -180,7 +180,6 @@ export class NotificationsController {
   @EventPattern('order.created')
   async handleOrderCreated(@Payload() event: any, @Ctx() context: RmqContext) {
     console.log(`📨 Evento recibido: order.created`);
-    // ✅ Soporte para scheduledFor y observations desde el evento
     await this.notificationsService.createOrUpdateFromOrderEvent({ 
       ...event, 
       action: 'created',
@@ -234,31 +233,37 @@ export class NotificationsController {
     channel.ack(originalMsg);
   }
 
+  // ✅ MODIFICADO: get_delivered_notifications con onlyWithNotes
   @MessagePattern({ cmd: 'get_delivered_notifications' })
   async getDeliveredNotifications(@Payload() data: {
     page?: number;
     limit?: number;
     includeArchived?: boolean;
+    onlyWithNotes?: boolean;  // ✅ NUEVO PARÁMETRO
   }) {
-    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}`);
+    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}, onlyWithNotes: ${data.onlyWithNotes}`);
     return await this.notificationsService.getDeliveredNotifications(
       data.page || 1,
       data.limit || 20,
-      data.includeArchived || false
+      data.includeArchived || false,
+      data.onlyWithNotes || false  // ✅ PASAR EL PARÁMETRO
     );
   }
 
+  // ✅ MODIFICADO: get_finished_orders_over_three_months con onlyWithNotes
   @MessagePattern({ cmd: 'get_finished_orders_over_three_months' })
   async getFinishedOrdersOverThreeMonths(@Payload() data: {
     page?: number;
     limit?: number;
     includeArchived?: boolean;
+    onlyWithNotes?: boolean;  // ✅ NUEVO PARÁMETRO
   }) {
-    console.log(`📦 [Notifications] get_finished_orders_over_three_months - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}`);
+    console.log(`📦 [Notifications] get_finished_orders_over_three_months - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}, onlyWithNotes: ${data.onlyWithNotes}`);
     return await this.notificationsService.getFinishedOrdersOverThreeMonths(
       data.page || 1,
       data.limit || 20,
-      data.includeArchived || false
+      data.includeArchived || false,
+      data.onlyWithNotes || false  // ✅ PASAR EL PARÁMETRO
     );
   }
 

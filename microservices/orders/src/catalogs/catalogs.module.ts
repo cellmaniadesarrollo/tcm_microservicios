@@ -9,11 +9,17 @@ import { DeviceType } from './entities/device_type.entity';
 import { OrderPriority } from './entities/order-priority.entity';
 import { OrderType } from './entities/order-type.entity';
 import { OrderStatus } from './entities/order_status.entity';
+import { GeoCountry } from './entities/geo-country.entity';
+import { GeoDivision } from './entities/geo-division.entity';
+import { CatalogsSeeder } from './seeders/catalogs.seeder';
 
 @Module({
-  imports:[TypeOrmModule.forFeature([Brand,Model,DeviceType,OrderPriority,OrderType,OrderStatus]),MysqlRawModule],
-  providers: [CatalogsService],
-  controllers: [CatalogsController], 
+  imports: [TypeOrmModule.forFeature([Brand, Model, DeviceType, OrderPriority, OrderType, OrderStatus,
+    GeoCountry,
+    GeoDivision,
+  ]), MysqlRawModule],
+  providers: [CatalogsService, CatalogsSeeder],
+  controllers: [CatalogsController],
 
 })
 export class CatalogsModule { }
