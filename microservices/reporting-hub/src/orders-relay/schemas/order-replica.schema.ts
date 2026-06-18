@@ -446,7 +446,9 @@ export class OrderReplica {
 
     @Prop({ required: true })
     order_number!: number;
-
+    // ── Campos escalares de la orden ─────────────────────────────
+    @Prop({ type: Boolean, default: false })
+    is_national!: boolean;
     // ── Snapshots de entidades relacionadas ───────────────────────
     @Prop({ type: CatalogSnapshotSchema, required: true })
     currentStatus!: CatalogSnapshot; // id + name

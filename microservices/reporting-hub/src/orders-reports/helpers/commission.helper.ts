@@ -28,6 +28,33 @@
 //  • Se aplica UNA VEZ POR ORDEN (procedureId = 0).
 //  • valueType === 'fixed'     → amount = value
 //  • valueType === 'percentage'→ amount = suma(todos los procedure_cost) * (value/100)
+//
+//  ── commissionType === 'all_devices_delivered' ───────────────────────────────
+//  • Filtro DB : company.id + type.id === 1 (SERVICIO_TECNICO)
+//                + statusHistory.toStatus.id === 8 (ENTREGADA) dentro del período.
+//                Sin filtro de sucursal, técnico ni tipo de dispositivo.
+//  • Condición helper: al menos un procedimiento con was_solved === true
+//  • Condición helper: revisadoAntes === false
+//  • Condición helper: suma(procedure_cost) >= ALL_DEVICES_DELIVERED_MIN_PROCEDURE_COST
+//  • Se aplica UNA VEZ POR ORDEN (procedureId = 0).
+//  • valueType === 'fixed'     → amount = value
+//  • valueType === 'percentage'→ amount = suma(todos los procedure_cost) * (value/100)
+//
+//  En BD se guarda con targetId: "*" (comodín — aplica a todos los dispositivos).
+//
+//  ── commissionType === 'national_device_delivered' ───────────────────────────
+//  • Filtro DB : company.id + type.id === 1 (SERVICIO_TECNICO)
+//                + is_national === true
+//                + statusHistory.toStatus.id === 8 (ENTREGADA) dentro del período.
+//                Sin filtro de sucursal, técnico ni tipo de dispositivo.
+//  • Condición helper: al menos un procedimiento con was_solved === true
+//  • Condición helper: revisadoAntes === false  (no es garantía)
+//  • Condición helper: suma(procedure_cost) >= NATIONAL_DEVICE_DELIVERED_MIN_PROCEDURE_COST
+//  • Se aplica UNA VEZ POR ORDEN (procedureId = 0).
+//  • valueType === 'fixed'     → amount = value
+//  • valueType === 'percentage'→ amount = suma(todos los procedure_cost) * (value/100)
+//
+//  En BD se guarda con targetId: "*" (comodín — aplica a todos los dispositivos nacionales).
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Commission } from '../../users-employees-events/schemas/employee-commission.schema';
@@ -51,8 +78,19 @@ export const ORDER_TYPE = {
     PARA_REPUESTOS: 3,
 } as const;
 
+// ── Umbrales mínimos de costo ─────────────────────────────────────────────────
+
 /** Monto mínimo de la suma de procedimientos para aplicar branch_all_delivered */
 export const BRANCH_ALL_DELIVERED_MIN_PROCEDURE_COST = 5;
+
+/** Monto mínimo de la suma de procedimientos para aplicar all_devices_delivered */
+export const ALL_DEVICES_DELIVERED_MIN_PROCEDURE_COST = 5;
+
+/**
+ * Monto mínimo de la suma de procedimientos para aplicar national_device_delivered.
+ * Solo aplica a órdenes con is_national === true.
+ */
+export const NATIONAL_DEVICE_DELIVERED_MIN_PROCEDURE_COST = 5;
 
 // ── Flags de comportamiento ───────────────────────────────────────────────────
 
@@ -71,7 +109,7 @@ export type CommissionPeriod = 'today' | 'week' | 'month';
 /** Descriptor de una query que el service debe ejecutar */
 export interface CommissionQueryDescriptor {
     period: CommissionPeriod;
-    commissionType: string;   // 'device_category' | 'branch_all_delivered' | …
+    commissionType: string;   // 'device_category' | 'branch_all_delivered' | 'all_devices_delivered' | 'national_device_delivered' | …
     targetId: string;         // valor de Commission.targetId (original, sin toUpperCase)
     filter: Record<string, any>;
     projection: Record<string, any>;
@@ -81,7 +119,7 @@ export interface CommissionEntry {
     orderId: number;
     orderNumber: number;
     deviceTypeName: string;
-    procedureId: number;           // 0 = comisión por sucursal
+    procedureId: number;           // 0 = comisión por sucursal / por todos los dispositivos
     procedureDescription: string;
     procedureCost: number;
     commissionRate: number;
@@ -155,7 +193,7 @@ export function gueRanges(now: Date): Record<CommissionPeriod, Date> {
     return { today: todayStart, week: weekStart, month: monthStart };
 }
 
-// ── Proyección compartida ─────────────────────────────────────────────────────
+// ── Proyecciones ──────────────────────────────────────────────────────────────
 
 const BASE_PROJECTION = {
     id: 1,
@@ -168,6 +206,17 @@ const BASE_PROJECTION = {
     'findings.procedures.performedBy': 1,
     'statusHistory.toStatus': 1,
     'statusHistory.changed_at': 1,
+};
+
+/**
+ * Proyección extendida para tipos que necesitan was_solved y revisadoAntes.
+ * Se usa en branch_all_delivered, all_devices_delivered y national_device_delivered.
+ */
+const SOLVED_PROJECTION = {
+    ...BASE_PROJECTION,
+    'findings.procedures.was_solved': 1,
+    revisadoAntes: 1,
+    is_national: 1,
 };
 
 // ── buildCommissionQueries ────────────────────────────────────────────────────
@@ -186,11 +235,10 @@ export function buildCommissionQueries(
     userId: string,
     commissions: Commission[],
 ): CommissionQueryDescriptor[] {
-
     const now = new Date();
     const ranges = gueRanges(now);
     const descriptors: CommissionQueryDescriptor[] = [];
-
+    //console.log(commissions)
     for (const commission of commissions) {
         if (!commission.active) continue;
 
@@ -200,6 +248,8 @@ export function buildCommissionQueries(
             const periodStart = ranges[period];
 
             // ── device_category ───────────────────────────────────────────────
+            // Aplica por procedimiento del técnico en órdenes finalizadas (status 7).
+            // targetId corresponde a device.type.name exacto.
             if (commission.commissionType === 'device_category') {
                 descriptors.push({
                     period,
@@ -222,6 +272,8 @@ export function buildCommissionQueries(
             }
 
             // ── branch_all_delivered ──────────────────────────────────────────
+            // Aplica una vez por orden entregada (status 8) en una sucursal dada.
+            // targetId corresponde a branch.name exacto.
             else if (commission.commissionType === 'branch_all_delivered') {
                 descriptors.push({
                     period,
@@ -231,6 +283,7 @@ export function buildCommissionQueries(
                         'company.id': companyId,
                         'branch.name': commission.targetId,
                         'type.id': ORDER_TYPE.SERVICIO_TECNICO,
+                        is_national: false,
                         statusHistory: {
                             $elemMatch: {
                                 'toStatus.id': ORDER_STATUS.ENTREGADA,
@@ -238,10 +291,65 @@ export function buildCommissionQueries(
                             },
                         },
                     },
-                    projection: {
-                        ...BASE_PROJECTION,
-                        'findings.procedures.was_solved': 1,
+                    projection: SOLVED_PROJECTION,
+                });
+            }
+
+            // ── all_devices_delivered ─────────────────────────────────────────
+            // Aplica una vez por orden entregada (status 8) sin importar sucursal,
+            // técnico ni tipo de dispositivo. targetId siempre debe ser "*".
+            // Condiciones adicionales evaluadas en calculateCommissions():
+            //   • al menos un procedimiento con was_solved === true
+            //   • revisadoAntes === false  (no es garantía)
+            //   • suma(procedure_cost) >= ALL_DEVICES_DELIVERED_MIN_PROCEDURE_COST
+            else if (commission.commissionType === 'all_devices_delivered') {
+                descriptors.push({
+                    period,
+                    commissionType: commission.commissionType,
+                    targetId: commission.targetId,   // "*"
+                    filter: {
+                        'company.id': companyId,
+                        'type.id': ORDER_TYPE.SERVICIO_TECNICO,
+                        is_national: false,
+                        statusHistory: {
+                            $elemMatch: {
+                                'toStatus.id': ORDER_STATUS.ENTREGADA,
+                                changed_at: { $gte: periodStart },
+                            },
+                        },
                     },
+                    projection: SOLVED_PROJECTION,
+                });
+            }
+
+            // ── national_device_delivered ─────────────────────────────────────
+            // Aplica una vez por orden entregada (status 8) donde is_national === true,
+            // sin importar sucursal, técnico ni tipo de dispositivo.
+            // targetId siempre debe ser "*".
+            // El filtro is_national se resuelve completamente en MongoDB;
+            // no se necesita verificación adicional en el helper.
+            // Condiciones adicionales evaluadas en calculateCommissions():
+            //   • al menos un procedimiento con was_solved === true
+            //   • revisadoAntes === false  (no es garantía)
+            //   • suma(procedure_cost) >= NATIONAL_DEVICE_DELIVERED_MIN_PROCEDURE_COST
+            else if (commission.commissionType === 'national_device_delivered') {
+
+                descriptors.push({
+                    period,
+                    commissionType: commission.commissionType,
+                    targetId: commission.targetId,   // "*"
+                    filter: {
+                        'company.id': companyId,
+                        'type.id': ORDER_TYPE.SERVICIO_TECNICO,
+                        is_national: true,
+                        statusHistory: {
+                            $elemMatch: {
+                                //'toStatus.id': ORDER_STATUS.ENTREGADA,
+                                changed_at: { $gte: periodStart },
+                            },
+                        },
+                    },
+                    projection: SOLVED_PROJECTION,
                 });
             }
 
@@ -258,9 +366,9 @@ export function buildCommissionQueries(
  * Calcula las comisiones a partir de los resultados de las queries ejecutadas
  * por el service. No filtra por fecha (MongoDB ya lo hizo).
  *
- * @param userId   UUID del técnico
- * @param commissions  Reglas de comisión del empleado
- * @param results  Resultados de las queries ejecutadas por el service
+ * @param userId      UUID del técnico
+ * @param commissions Reglas de comisión del empleado
+ * @param results     Resultados de las queries ejecutadas por el service
  */
 export function calculateCommissions(
     userId: string,
@@ -268,7 +376,9 @@ export function calculateCommissions(
     results: CommissionQueryResult[],
 ): CommissionPeriodSummary {
 
-    // Índice de comisiones activas por tipo+targetId para lookup O(1)
+
+    // Índice de comisiones activas por tipo+targetId para lookup O(1).
+    // all_devices_delivered y national_device_delivered usan targetId "*" como clave.
     const commissionIndex = new Map<string, Commission>();
     for (const c of commissions) {
         if (!c.active) continue;
@@ -282,8 +392,11 @@ export function calculateCommissions(
     };
 
     for (const result of results) {
+
         const { period, commissionType, targetId, orders } = result;
-        const commission = commissionIndex.get(`${commissionType}::${targetId.toUpperCase()}`);
+        const commission = targetId
+            ? commissionIndex.get(`${commissionType}::${targetId.toUpperCase()}`)
+            : undefined;
         if (!commission) continue;
 
         for (const order of orders) {
@@ -301,8 +414,9 @@ export function calculateCommissions(
                 return event ? new Date(event.changed_at) : null;
             };
 
-            // ── device_category: una entry por procedimiento del técnico ──────
-            //    fecha de referencia: primer evento TRABAJO_FINALIZADO (7)
+            // ── device_category ───────────────────────────────────────────────
+            // Una entry por procedimiento del técnico con cost > 0.
+            // Fecha de referencia: primer evento TRABAJO_FINALIZADO (7).
             if (commissionType === 'device_category') {
                 const referenceDate = firstEventOf(ORDER_STATUS.TRABAJO_FINALIZADO);
                 if (!referenceDate) continue;
@@ -339,23 +453,23 @@ export function calculateCommissions(
                 }
             }
 
-            // ── branch_all_delivered: una entry por orden ─────────────────────
-            //    fecha de referencia: primer evento ENTREGADA (8)
+            // ── branch_all_delivered ──────────────────────────────────────────
+            // Una entry por orden entregada en la sucursal indicada.
+            // Fecha de referencia: primer evento ENTREGADA (8).
             else if (commissionType === 'branch_all_delivered') {
                 const referenceDate = firstEventOf(ORDER_STATUS.ENTREGADA);
                 if (!referenceDate) continue;
 
-                // ── Validar condición de was_solved ───────────────────────────
                 const allProcedures = (order.findings ?? [])
                     .flatMap((f: any) => f.procedures ?? []);
 
+                // Validar condición de was_solved
                 const solvedCheck = BRANCH_ALL_DELIVERED_REQUIRE_ALL_SOLVED
                     ? allProcedures.length > 0 && allProcedures.every((p: any) => p.was_solved === true)
                     : allProcedures.some((p: any) => p.was_solved === true);
 
                 if (!solvedCheck) continue;
 
-                // ── Acumular costo total de la orden (para valueType percentage)
                 const totalProcedureCost = allProcedures.reduce(
                     (sum: number, p: any) => sum + (p.procedure_cost ?? 0), 0
                 );
@@ -376,6 +490,110 @@ export function calculateCommissions(
                         deviceTypeName,
                         procedureId: 0,
                         procedureDescription: `Comisión por sucursal: ${branchName}`,
+                        procedureCost: totalProcedureCost,
+                        commissionRate: commission.value,
+                        commissionValueType: commission.valueType,
+                        commissionAmount: Math.round(commissionAmount * 100) / 100,
+                        referenceDate,
+                        referenceDateLabel: 'Fecha entrega',
+                    });
+                }
+            }
+
+            // ── all_devices_delivered ─────────────────────────────────────────
+            // Una entry por orden entregada sin filtro de sucursal ni técnico.
+            // Fecha de referencia: primer evento ENTREGADA (8).
+            // Condiciones:
+            //   1. revisadoAntes === false  → la orden no es una garantía
+            //   2. Al menos un procedimiento con was_solved === true
+            //   3. Suma de procedure_cost >= ALL_DEVICES_DELIVERED_MIN_PROCEDURE_COST
+            else if (commissionType === 'all_devices_delivered') {
+                const referenceDate = firstEventOf(ORDER_STATUS.ENTREGADA);
+                if (!referenceDate) continue;
+
+                // 1. No es una revisión previa (garantía)
+                if (order.revisadoAntes === true) continue;
+
+                const allProcedures = (order.findings ?? [])
+                    .flatMap((f: any) => f.procedures ?? []);
+
+                // 2. Al menos un procedimiento solucionado
+                const hasSolvedProcedure = allProcedures.some((p: any) => p.was_solved === true);
+                if (!hasSolvedProcedure) continue;
+
+                // 3. Costo mínimo
+                const totalProcedureCost = allProcedures.reduce(
+                    (sum: number, p: any) => sum + (p.procedure_cost ?? 0), 0
+                );
+                if (totalProcedureCost < ALL_DEVICES_DELIVERED_MIN_PROCEDURE_COST) continue;
+
+                let commissionAmount = 0;
+                if (commission.valueType === 'fixed') {
+                    commissionAmount = commission.value;
+                } else if (commission.valueType === 'percentage') {
+                    commissionAmount = totalProcedureCost * (commission.value / 100);
+                }
+
+                if (commissionAmount > 0) {
+                    periodEntries[period].push({
+                        orderId: order.id,
+                        orderNumber: order.order_number,
+                        deviceTypeName,
+                        procedureId: 0,
+                        procedureDescription: `Comisión por entrega: todos los dispositivos`,
+                        procedureCost: totalProcedureCost,
+                        commissionRate: commission.value,
+                        commissionValueType: commission.valueType,
+                        commissionAmount: Math.round(commissionAmount * 100) / 100,
+                        referenceDate,
+                        referenceDateLabel: 'Fecha entrega',
+                    });
+                }
+            }
+
+            // ── national_device_delivered ─────────────────────────────────────
+            // Una entry por orden nacional entregada (is_national === true).
+            // MongoDB ya filtró is_national en el query; aquí solo se evalúan
+            // las condiciones de negocio que no pueden resolverse en BD.
+            // Fecha de referencia: primer evento ENTREGADA (8).
+            // Condiciones:
+            //   1. revisadoAntes === false  → la orden no es una garantía
+            //   2. Al menos un procedimiento con was_solved === true
+            //   3. Suma de procedure_cost >= NATIONAL_DEVICE_DELIVERED_MIN_PROCEDURE_COST
+            else if (commissionType === 'national_device_delivered') {
+                const referenceDate = firstEventOf(ORDER_STATUS.ENTREGADA);
+                if (!referenceDate) continue;
+
+                // 1. No es una revisión previa (garantía)
+                if (order.revisadoAntes === true) continue;
+
+                const allProcedures = (order.findings ?? [])
+                    .flatMap((f: any) => f.procedures ?? []);
+
+                // 2. Al menos un procedimiento solucionado
+                const hasSolvedProcedure = allProcedures.some((p: any) => p.was_solved === true);
+                if (!hasSolvedProcedure) continue;
+
+                // 3. Costo mínimo
+                const totalProcedureCost = allProcedures.reduce(
+                    (sum: number, p: any) => sum + (p.procedure_cost ?? 0), 0
+                );
+                if (totalProcedureCost < NATIONAL_DEVICE_DELIVERED_MIN_PROCEDURE_COST) continue;
+
+                let commissionAmount = 0;
+                if (commission.valueType === 'fixed') {
+                    commissionAmount = commission.value;
+                } else if (commission.valueType === 'percentage') {
+                    commissionAmount = totalProcedureCost * (commission.value / 100);
+                }
+
+                if (commissionAmount > 0) {
+                    periodEntries[period].push({
+                        orderId: order.id,
+                        orderNumber: order.order_number,
+                        deviceTypeName,
+                        procedureId: 0,
+                        procedureDescription: `Comisión por entrega: equipo nacional`,
                         procedureCost: totalProcedureCost,
                         commissionRate: commission.value,
                         commissionValueType: commission.valueType,

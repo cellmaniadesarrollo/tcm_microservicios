@@ -48,6 +48,8 @@ import { UpdateOrderNoteGatewayDto } from './dto/update-order-note-gateway.dto';
 import { processFileForUpload } from '../common/helpers/process-file.helper';
 import { SaveSearchHistoryDto } from './dto/save-Search-history-gateway.dto';
 import { MarkPotentialPurchaseGatewayDto } from './dto/mark-potential-purchase-gateway.dto';
+import { SaveOutboundDto } from './dto/save-outbound.dto';
+import { SaveInboundDto } from './dto/save-inbound.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -951,6 +953,90 @@ export class OrdersController {
           order_id,
           user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
+      ),
+    );
+  }
+  // GET /orders/geo/countries
+  @Get('geo/countries')
+  async getGeoCountries(@User() user: any) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_geo_countries' },
+        { internalToken: process.env.INTERNAL_SECRET, user },
+      ),
+    );
+  }
+
+  // GET /orders/geo/provinces/:countryId
+  @Get('geo/provinces/:countryId')
+  async getGeoProvinces(
+    @Param('countryId', ParseIntPipe) countryId: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_geo_provinces' },
+        { internalToken: process.env.INTERNAL_SECRET, country_id: countryId, user },
+      ),
+    );
+  }
+
+  // GET /orders/geo/cities/:provinceId
+  @Get('geo/cities/:provinceId')
+  async getGeoCities(
+    @Param('provinceId', ParseIntPipe) provinceId: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_geo_cities' },
+        { internalToken: process.env.INTERNAL_SECRET, province_id: provinceId, user },
+      ),
+    );
+  }
+
+  // POST /orders/:orderId/shipping/inbound
+  @Post(':orderId/shipping/inbound')
+  @Groups('CASHIERS')
+  async saveInbound(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: SaveInboundDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'save_order_inbound' },
+        { internalToken: process.env.INTERNAL_SECRET, orderId, dto, user },
+      ),
+    );
+  }
+
+  // POST /orders/:orderId/shipping/outbound
+  @Post(':orderId/shipping/outbound')
+  // @Groups('CASHIERS', 'TECHNICIANS') // retorno lo puede hacer el técnico también
+  async saveOutbound(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: SaveOutboundDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'save_order_outbound' },
+        { internalToken: process.env.INTERNAL_SECRET, orderId, dto, user },
+      ),
+    );
+  }
+
+  // GET /orders/:orderId/shipping
+  @Get(':orderId/shipping')
+  async getShipping(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_order_shipping' },
+        { internalToken: process.env.INTERNAL_SECRET, orderId, user },
       ),
     );
   }

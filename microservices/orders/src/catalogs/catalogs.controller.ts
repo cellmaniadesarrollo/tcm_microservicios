@@ -1,6 +1,6 @@
 import { Controller } from '@nestjs/common';
 import { CatalogsService } from './catalogs.service';
-import { MessagePattern } from '@nestjs/microservices';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 
 @Controller('catalogs')
 export class CatalogsController {
@@ -39,5 +39,23 @@ export class CatalogsController {
   @MessagePattern({ cmd: 'get_newdata_catalog_orders' })
   async listAllCatalog() {
     return this.catalogsService.getOrderCatalog();
+  }
+
+  // GET países → { id, name }
+  @MessagePattern({ cmd: 'get_geo_countries' })
+  async getCountries() {
+    return this.catalogsService.getCountries();
+  }
+
+  // GET provincias por país → { id, name }
+  @MessagePattern({ cmd: 'get_geo_provinces' })
+  async getProvinces(@Payload() payload: { country_id: number }) {
+    return this.catalogsService.getDivisionsByParent(null, payload.country_id, 1);
+  }
+
+  // GET ciudades por provincia → { id, name }
+  @MessagePattern({ cmd: 'get_geo_cities' })
+  async getCities(@Payload() payload: { province_id: number }) {
+    return this.catalogsService.getDivisionsByParent(payload.province_id, null, 2);
   }
 }
