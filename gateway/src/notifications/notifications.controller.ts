@@ -112,25 +112,39 @@ export class NotificationsController {
     return this.notificationsService.getFutureNotifications(page, limit);
   }
 
-  @Get('delivered')
-  async getDeliveredNotifications(
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-    @Query('includeArchived') includeArchived?: string,
-  ) {
-    const includeArchivedBool = includeArchived === 'true';
-    return this.notificationsService.getDeliveredNotifications(page, limit, includeArchivedBool);
-  }
+@Get('delivered')
+async getDeliveredNotifications(
+  @Query('page') page?: number,
+  @Query('limit') limit?: number,
+  @Query('includeArchived') includeArchived?: string,
+  @Query('onlyWithNotes') onlyWithNotes?: string,  // ✅ NUEVO PARÁMETRO
+) {
+  const includeArchivedBool = includeArchived === 'true';
+  const onlyWithNotesBool = onlyWithNotes === 'true';  // ✅ CONVERTIR A BOOLEAN
+  return this.notificationsService.getDeliveredNotifications(
+    page,
+    limit,
+    includeArchivedBool,
+    onlyWithNotesBool  // ✅ PASAR EL PARÁMETRO
+  );
+}
 
-  @Get('finished/three-months')
-  async getFinishedOrdersOverThreeMonths(
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
-    @Query('includeArchived') includeArchived?: string,
-  ) {
-    const includeArchivedBool = includeArchived === 'true';
-    return this.notificationsService.getFinishedOrdersOverThreeMonths(page, limit, includeArchivedBool);
-  }
+@Get('finished/three-months')
+async getFinishedOrdersOverThreeMonths(
+  @Query('page') page?: number,
+  @Query('limit') limit?: number,
+  @Query('includeArchived') includeArchived?: string,
+  @Query('onlyWithNotes') onlyWithNotes?: string,  // ✅ NUEVO PARÁMETRO
+) {
+  const includeArchivedBool = includeArchived === 'true';
+  const onlyWithNotesBool = onlyWithNotes === 'true';  // ✅ CONVERTIR A BOOLEAN
+  return this.notificationsService.getFinishedOrdersOverThreeMonths(
+    page,
+    limit,
+    includeArchivedBool,
+    onlyWithNotesBool  // ✅ PASAR EL PARÁMETRO
+  );
+}
 
   @Patch(':id/notes')
   async updateNotificationNotes(

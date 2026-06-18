@@ -135,12 +135,17 @@ export class NotificationsService {
     );
   }
 
-  async getDeliveredNotifications(page: number = 1, limit: number = 20, includeArchived: boolean = false) {
-    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchives: ${includeArchived}`);
+  async getDeliveredNotifications(
+    page: number = 1,
+    limit: number = 20,
+    includeArchived: boolean = false,
+    onlyWithNotes: boolean = false  // ✅ NUEVO PARÁMETRO
+  ) {
+    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_delivered_notifications' },
-        { page, limit, includeArchived }
+        { page, limit, includeArchived, onlyWithNotes }  // ✅ ENVIAR EL PARÁMETRO
       )
     );
   }
@@ -148,13 +153,14 @@ export class NotificationsService {
   async getFinishedOrdersOverThreeMonths(
     page: number = 1,
     limit: number = 20,
-    includeArchived: boolean = false
+    includeArchived: boolean = false,
+    onlyWithNotes: boolean = false  // ✅ NUEVO PARÁMETRO
   ) {
-    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}`);
+    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_finished_orders_over_three_months' },
-        { page, limit, includeArchived }
+        { page, limit, includeArchived, onlyWithNotes }  // ✅ ENVIAR EL PARÁMETRO
       )
     );
   }
