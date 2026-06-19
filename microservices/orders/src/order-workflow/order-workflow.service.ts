@@ -40,6 +40,7 @@ import { buildDateRangeUTC } from './helpers/date-range.helper';
 import { DeviceResponseDto } from '../devices/dto/device-response.dto';
 import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 import { DevicesService } from '../devices/devices.service';
+import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -424,7 +425,12 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.branch', 'branch')    // ← aquí sí
       .leftJoinAndSelect('o.company', 'company')  // ← aquí sí
       .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
-      .leftJoinAndSelect('o.potentialPurchase', 'potentialPurchase')
+      .leftJoinAndMapOne(
+        'o.potentialPurchase',           // dónde mapea en el objeto Order
+        OrderPotentialPurchase,          // entidad a joinear
+        'potentialPurchase',             // alias
+        'potentialPurchase.device_id = o.device_id AND o.device_id IS NOT NULL',
+      )
       .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.entry_date', 'DESC')
@@ -485,7 +491,12 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('device.imeis', 'imei')
       .leftJoinAndSelect('device.model', 'deviceModel')
       .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
-      .leftJoinAndSelect('o.potentialPurchase', 'potentialPurchase')
+      .leftJoinAndMapOne(
+        'o.potentialPurchase',
+        OrderPotentialPurchase,
+        'potentialPurchase',
+        'potentialPurchase.device_id = o.device_id AND o.device_id IS NOT NULL',
+      )
       .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
@@ -769,7 +780,12 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.technicians', 'technicians')
         .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
         .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
-        .leftJoinAndSelect('order.potentialPurchase', 'potentialPurchase')
+        .leftJoinAndMapOne(
+          'order.potentialPurchase',
+          OrderPotentialPurchase,
+          'potentialPurchase',
+          'potentialPurchase.device_id = order.device_id AND order.device_id IS NOT NULL',
+        )
         .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
         .leftJoinAndSelect('order.shipping', 'shipping')
         .leftJoinAndSelect('shipping.inboundOrigin', 'inboundOrigin')
@@ -1261,7 +1277,17 @@ export class OrderWorkflowService {
     user: { userId: string; companyId: string; branchId: string },
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [], // ← nuevo
   ): Promise<OrderDelivery> {
-
+    // ── Validación: comprobante obligatorio si no es EFECTIVO ─────────────
+    const EFECTIVO_ID = 1;
+    if (dto.amount > 0 && dto.paymentMethodId && dto.paymentMethodId !== EFECTIVO_ID) {
+      if (!files || files.length === 0) {
+        throw new RpcException(
+          new BadRequestException(
+            'Se requiere al menos un comprobante de pago adjunto cuando el método de pago no es EFECTIVO',
+          ),
+        );
+      }
+    }
     const result = await this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
