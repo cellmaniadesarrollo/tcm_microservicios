@@ -3,6 +3,7 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern } from '@nestjs/microservices';
 import { OrderPotentialPurchaseService } from './order-potential-purchase.service';
 import { CreateOrderPotentialPurchaseDto } from './dto/create-order-potential-purchase.dto';
+import { ListPotentialPurchasesDto } from './dto/list-potential-purchases.dto';
 
 @Controller()
 export class OrderPotentialPurchaseController {
@@ -29,5 +30,22 @@ export class OrderPotentialPurchaseController {
     @MessagePattern({ cmd: 'get_potential_purchase_by_order' })
     async getByOrderId(data: { order_id: number }) {
         return this.service.getByOrderId(data.order_id);
+    }
+
+    @MessagePattern({ cmd: 'list_potential_purchases' })
+    async listPotentialPurchases(data: {
+        companyId: string;
+        dto: ListPotentialPurchasesDto;
+        internalToken: string;
+    }) {
+        return this.service.listPotentialPurchases(data.companyId, data.dto);
+    }
+    @MessagePattern({ cmd: 'get_potential_purchase_full_data' })
+    async getFullData(data: {
+        id: number;
+        companyId: string;
+        internalToken: string;
+    }) {
+        return this.service.getPotentialPurchaseFullData(data.id, data.companyId);
     }
 }
