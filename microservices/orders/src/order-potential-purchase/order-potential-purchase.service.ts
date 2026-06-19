@@ -28,8 +28,6 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         private readonly orderRepo: Repository<Order>,
     ) { }
 
-    // ─── Backfill al iniciar el módulo ───────────────────────────────────────
-
     async onModuleInit() {
         await this.backfillDeviceIds();
     }
@@ -54,18 +52,12 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
                 await this.repo.save(record);
                 updated++;
             }
-            // Si la orden no tiene device, se deja en null — es válido
         }
 
         this.logger.log(`Backfill completado: ${updated} actualizados, ${nullRecords.length - updated} sin device (válido)`);
     }
 
-    // ─── Marcar como potencial ───────────────────────────────────────────────
-
     async markAsPotential(dto: CreateOrderPotentialPurchaseDto) {
-        if (dto.internalToken !== process.env.INTERNAL_SECRET) {
-            throw new UnauthorizedException('Token interno inválido');
-        }
 
         const order = await this.orderRepo.findOne({
             where: {
@@ -75,7 +67,9 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         });
 
         if (!order) {
-            throw new NotFoundException(`Orden #${dto.order_id} no encontrada`);
+            throw new RpcException(
+                new NotFoundException(`Orden #${dto.order_id} no encontrada`),
+            );
         }
 
         const existing = await this.repo.findOne({
@@ -83,14 +77,14 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         });
 
         if (existing) {
-            throw new ConflictException(
-                `La orden #${dto.order_id} ya está marcada como potencial compra`,
+            throw new RpcException(
+                new ConflictException(`La orden #${dto.order_id} ya está marcada como potencial compra`),
             );
         }
 
         const record = this.repo.create({
             order_id: dto.order_id,
-            device_id: order.device_id ?? undefined, // null si la orden no tiene device
+            device_id: order.device_id ?? undefined,
             marked_by_id: dto.user.userId,
             observations: dto.observations,
             is_potential: true,
@@ -99,18 +93,18 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         return this.repo.save(record);
     }
 
-    // ─── Sin cambios ─────────────────────────────────────────────────────────
-
     async unmarkAsPotential(order_id: number, user: { userId: string; companyId: string }, internalToken: string) {
         if (internalToken !== process.env.INTERNAL_SECRET) {
-            throw new UnauthorizedException('Token interno inválido');
+            throw new RpcException(
+                new UnauthorizedException('Token interno inválido'),
+            );
         }
 
         const record = await this.repo.findOne({ where: { order_id } });
 
         if (!record) {
-            throw new NotFoundException(
-                `No existe marca de potencial compra para la orden #${order_id}`,
+            throw new RpcException(
+                new NotFoundException(`No existe marca de potencial compra para la orden #${order_id}`),
             );
         }
 
@@ -125,7 +119,6 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         });
     }
 
-    // order-potential-purchase/order-potential-purchase.service.ts
     async listPotentialPurchases(
         companyId: string,
         dto: ListPotentialPurchasesDto,
@@ -146,20 +139,16 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
                 'pp.observations',
                 'pp.createdAt',
                 'pp.order_id',
-                // orden
                 'order.order_number',
-                // device
                 'device.device_id',
                 'device.serial_number',
                 'device.color',
                 'device.storage',
-                // modelo y marca
                 'model.models_id',
                 'model.models_name',
                 'model.models_img_url',
                 'brand.brands_id',
                 'brand.brands_name',
-                // quién marcó
                 'markedBy.id',
                 'markedBy.first_name',
                 'markedBy.last_name',
@@ -171,11 +160,11 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         if (search) {
             qb.andWhere(
                 `(
-        device.serial_number ILIKE :search OR
-        model.models_name   ILIKE :search OR
-        brand.brands_name   ILIKE :search OR
-        CAST(order.order_number AS TEXT) ILIKE :search
-      )`,
+                    device.serial_number ILIKE :search OR
+                    model.models_name    ILIKE :search OR
+                    brand.brands_name    ILIKE :search OR
+                    CAST(order.order_number AS TEXT) ILIKE :search
+                )`,
                 { search: `%${search}%` },
             );
         }
@@ -192,7 +181,7 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
             },
         };
     }
-    // order-potential-purchase/order-potential-purchase.service.ts
+
     async getPotentialPurchaseFullData(id: number, companyId: string) {
         const pp = await this.repo
             .createQueryBuilder('pp')
@@ -207,19 +196,14 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
             .where('pp.id = :id', { id })
             .andWhere('order.company_id = :companyId', { companyId })
             .select([
-                // potential purchase
                 'pp.id',
                 'pp.observations',
                 'pp.createdAt',
-
-                // orden
                 'order.id',
                 'order.order_number',
                 'order.entry_date',
                 'order.detalleIngreso',
                 'order.estimated_price',
-
-                // cliente (dueño del device)
                 'customer.id',
                 'customer.firstName',
                 'customer.lastName',
@@ -228,26 +212,18 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
                 'contacts.typeName',
                 'contacts.value',
                 'contacts.isPrimary',
-
-                // device
                 'device.device_id',
                 'device.serial_number',
                 'device.color',
                 'device.storage',
                 'device.observations',
-
-                // imeis
                 'imeis.imei_id',
                 'imeis.imei_number',
-
-                // modelo y marca
                 'model.models_id',
                 'model.models_name',
                 'model.models_img_url',
                 'brand.brands_id',
                 'brand.brands_name',
-
-                // quién marcó
                 'markedBy.id',
                 'markedBy.first_name',
                 'markedBy.last_name',
@@ -257,7 +233,9 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
             .getOne();
 
         if (!pp) {
-            throw new RpcException({ status: 404, message: 'Registro no encontrado' });
+            throw new RpcException(
+                new NotFoundException('Registro no encontrado'),
+            );
         }
 
         return pp;
