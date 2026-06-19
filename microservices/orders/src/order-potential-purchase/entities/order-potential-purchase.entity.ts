@@ -11,7 +11,7 @@ import {
 } from 'typeorm';
 import { Order } from '../../order-workflow/entities/order.entity';
 import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
-
+import { Device } from '../../devices/entities/device.entity';
 @Entity('order_potential_purchases')
 export class OrderPotentialPurchase {
 
@@ -36,7 +36,12 @@ export class OrderPotentialPurchase {
 
     @Column()
     marked_by_id!: string;
+    @ManyToOne(() => Device, { nullable: true, eager: true })
+    @JoinColumn({ name: 'device_id' })
+    device?: Device;
 
+    @Column({ nullable: true })
+    device_id?: number;
     // Observaciones opcionales para contexto futuro
     @Column({ type: 'text', nullable: true })
     observations?: string;
