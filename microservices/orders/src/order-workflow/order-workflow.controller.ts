@@ -15,6 +15,7 @@ import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 import { SaveInboundDto } from './dto/save-inbound.dto';
 import { SaveOutboundDto } from './dto/save-outbound.dto';
 import { OrderShippingService } from './order-shipping.service';
+import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
@@ -228,6 +229,23 @@ export class OrderWorkflowController {
   @MessagePattern({ cmd: 'get_order_shipping' })
   async getShipping(@Payload() payload: { orderId: number }) {
     return this.orderShippingService.findByOrder(payload.orderId);
+  }
+  @MessagePattern({ cmd: 'verify_order_payment' })
+  async verifyOrderPayment(@Payload() data: {
+    dto: VerifyOrderPaymentDto;
+    internalToken: string;
+  }) {
+    return this.orderWorkflowService.verifyOrderPayment(data.dto);
+  }
+
+
+  @MessagePattern({ cmd: 'get_payment_signed_urls' })
+  async getPaymentSignedUrls(@Payload() data: {
+    paymentId: number;
+    companyId: string;
+    internalToken: string;
+  }) {
+    return this.orderWorkflowService.getPaymentSignedUrls(data.paymentId, data.companyId);
   }
 }
 
