@@ -52,6 +52,8 @@ import { SaveOutboundDto } from './dto/save-outbound.dto';
 import { SaveInboundDto } from './dto/save-inbound.dto';
 import { ListPotentialPurchasesGatewayDto } from './dto/list-potential-purchases-gateway.dto';
 import { GetPotentialPurchaseFullDataGatewayDto } from './dto/get-potential-purchase-full-data-gateway.dto';
+import { VerifyOrderPaymentGatewayDto } from './dto/verify-order-payment-gateway.dto';
+import { GetPaymentSignedUrlsGatewayDto } from './dto/get-payment-signed-urls-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -1073,6 +1075,41 @@ export class OrdersController {
         {
           internalToken: process.env.INTERNAL_SECRET,
           id: dto.id,
+          companyId: user.companyId,
+        },
+      ),
+    );
+  }
+  @Patch('payments/:paymentId/verify')
+  async verifyPayment(
+    @Param() dto: VerifyOrderPaymentGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'verify_order_payment' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto: {
+            paymentId: dto.paymentId,
+            companyId: user.companyId,
+            verifiedById: user.sub,
+          },
+        },
+      ),
+    );
+  }
+  @Get('payments/:paymentId/signed-urls')
+  async getPaymentSignedUrls(
+    @Param() dto: GetPaymentSignedUrlsGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_payment_signed_urls' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          paymentId: dto.paymentId,
           companyId: user.companyId,
         },
       ),

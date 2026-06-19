@@ -133,6 +133,7 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
             .innerJoin('device.model', 'model')
             .innerJoin('model.brand', 'brand')
             .innerJoin('pp.markedBy', 'markedBy')
+            .leftJoin('device.imeis', 'imei')          // LEFT JOIN para no excluir devices sin IMEI
             .where('order.company_id = :companyId', { companyId })
             .select([
                 'pp.id',
@@ -152,6 +153,8 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
                 'markedBy.id',
                 'markedBy.first_name',
                 'markedBy.last_name',
+                'imei.imei_id',                        // incluir en select para que TypeORM hidrate la relación
+                'imei.imei_number',
             ])
             .orderBy('pp.createdAt', 'DESC')
             .skip(skip)
@@ -160,11 +163,11 @@ export class OrderPotentialPurchaseService implements OnModuleInit {
         if (search) {
             qb.andWhere(
                 `(
-                    device.serial_number ILIKE :search OR
-                    model.models_name    ILIKE :search OR
-                    brand.brands_name    ILIKE :search OR
-                    CAST(order.order_number AS TEXT) ILIKE :search
-                )`,
+                imei.imei_number          ILIKE :search OR
+                model.models_name         ILIKE :search OR
+                brand.brands_name         ILIKE :search OR
+                CAST(order.order_number AS TEXT) ILIKE :search
+            )`,
                 { search: `%${search}%` },
             );
         }
