@@ -75,6 +75,18 @@ export class OrderPayment {
 
     @Column({ type: 'uuid' })
     branch_id: string;
+    @Column({ default: false })
+    is_verified: boolean;
+
+    @ManyToOne(() => UserEmployeeCache, { nullable: true })
+    @JoinColumn({ name: 'verified_by_id' })
+    verifiedBy: UserEmployeeCache | null;
+
+    @Column({ nullable: true })
+    verified_by_id: string | null;
+
+    @Column({ type: 'timestamp', nullable: true })
+    verified_at: Date | null;
 
     @CreateDateColumn()
     createdAt: Date;

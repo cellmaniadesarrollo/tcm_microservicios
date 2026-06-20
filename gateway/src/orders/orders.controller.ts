@@ -50,6 +50,10 @@ import { SaveSearchHistoryDto } from './dto/save-Search-history-gateway.dto';
 import { MarkPotentialPurchaseGatewayDto } from './dto/mark-potential-purchase-gateway.dto';
 import { SaveOutboundDto } from './dto/save-outbound.dto';
 import { SaveInboundDto } from './dto/save-inbound.dto';
+import { ListPotentialPurchasesGatewayDto } from './dto/list-potential-purchases-gateway.dto';
+import { GetPotentialPurchaseFullDataGatewayDto } from './dto/get-potential-purchase-full-data-gateway.dto';
+import { VerifyOrderPaymentGatewayDto } from './dto/verify-order-payment-gateway.dto';
+import { GetPaymentSignedUrlsGatewayDto } from './dto/get-payment-signed-urls-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -924,6 +928,7 @@ export class OrdersController {
   }
 
   @Post('mark-potential-purchase')
+  @Groups('COMPRADOR')
   async markPotentialPurchase(
     @Body() body: MarkPotentialPurchaseGatewayDto,
     @User() user: any,
@@ -1037,6 +1042,76 @@ export class OrdersController {
       this.CustomerService.send(
         { cmd: 'get_order_shipping' },
         { internalToken: process.env.INTERNAL_SECRET, orderId, user },
+      ),
+    );
+  }
+  // orders/orders.controller.ts
+  @Post('potential-purchases/list')
+  @Groups('COMPRADOR') // ajusta a tus grupos
+  async listPotentialPurchases(
+    @Body() dto: ListPotentialPurchasesGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'list_potential_purchases' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          companyId: user.companyId,
+          dto,
+        },
+      ),
+    );
+  }
+  // orders/orders.controller.ts
+  @Get('potential-purchases/:id')
+  async getPotentialPurchaseFullData(
+    @Param() dto: GetPotentialPurchaseFullDataGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_potential_purchase_full_data' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          id: dto.id,
+          companyId: user.companyId,
+        },
+      ),
+    );
+  }
+  @Patch('payments/:paymentId/verify')
+  async verifyPayment(
+    @Param() dto: VerifyOrderPaymentGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'verify_order_payment' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          dto: {
+            paymentId: dto.paymentId,
+            companyId: user.companyId,
+            verifiedById: user.sub,
+          },
+        },
+      ),
+    );
+  }
+  @Get('payments/:paymentId/signed-urls')
+  async getPaymentSignedUrls(
+    @Param() dto: GetPaymentSignedUrlsGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_payment_signed_urls' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          paymentId: dto.paymentId,
+          companyId: user.companyId,
+        },
       ),
     );
   }

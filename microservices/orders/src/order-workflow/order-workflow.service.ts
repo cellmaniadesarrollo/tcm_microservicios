@@ -40,6 +40,8 @@ import { buildDateRangeUTC } from './helpers/date-range.helper';
 import { DeviceResponseDto } from '../devices/dto/device-response.dto';
 import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 import { DevicesService } from '../devices/devices.service';
+import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
+import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -299,7 +301,37 @@ export class OrderWorkflowService {
     );
   }
 
+  private async appendPaymentAttachmentFlag<T extends { id: number; payments?: any[] }>(
+    orders: T[],
+    orderIds: number[],
+  ): Promise<(T & { payments: (any & { has_attachments: boolean })[] })[]> {
+    if (!orderIds.length) return orders as any;
 
+    const paymentsWithAttachments = await this.attachmentRepository
+      .createQueryBuilder('a')
+      .select('a.entity_id', 'payment_id')
+      .where('a.entity_type = :type', { type: AttachmentEntityType.PAYMENT })
+      .andWhere('a.is_active = true')
+      .andWhere(
+        `a.entity_id IN (
+        SELECT p.id FROM order_payments p WHERE p.order_id IN (:...orderIds)
+      )`,
+        { orderIds },
+      )
+      .getRawMany<{ payment_id: number }>();
+
+    const paymentIdsWithAttachments = new Set(
+      paymentsWithAttachments.map((r) => r.payment_id),
+    );
+
+    return orders.map((order) => ({
+      ...order,
+      payments: order.payments?.map((payment) => ({
+        ...payment,
+        has_attachments: paymentIdsWithAttachments.has(payment.id),
+      })) ?? [],
+    })) as any;
+  }
 
 
   async listOrders(
@@ -317,7 +349,6 @@ export class OrderWorkflowService {
     } = dto;
     const skip = (page - 1) * limit;
 
-    // Convierte las fechas locales a rango UTC (America/Guayaquil)
     const { from: utcFrom, to: utcTo } = buildDateRangeUTC(dateFrom, dateTo);
 
     // ==================== QUERY 1: IDs paginados ====================
@@ -328,7 +359,6 @@ export class OrderWorkflowService {
       .leftJoin('device.model', 'deviceModel')
       .leftJoin('deviceModel.brand', 'deviceBrand')
       .leftJoin('device.imeis', 'imei')
-
       .select(['o.id', 'o.entry_date'])
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
@@ -345,7 +375,6 @@ export class OrderWorkflowService {
         } else {
           paginatedQb.andWhere('1 = 0');
         }
-
       } else {
         const isUUID =
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanSearch);
@@ -353,13 +382,10 @@ export class OrderWorkflowService {
 
         if (isUUID) {
           paginatedQb.andWhere('o.public_id = :publicId', { publicId: cleanSearch });
-
         } else if (isNumeric && cleanSearch.length === 15) {
           paginatedQb.andWhere('imei.imei_number = :imei', { imei: cleanSearch });
-
         } else if (isNumeric) {
           paginatedQb.andWhere('c.idNumber = :idNumber', { idNumber: cleanSearch });
-
         } else {
           const terms = cleanSearch.split(' ').filter(Boolean);
           terms.forEach((term, i) => {
@@ -421,33 +447,60 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.payments', 'payments')
       .leftJoinAndSelect('payments.paymentType', 'paymentType')
       .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
-      .leftJoinAndSelect('o.branch', 'branch')    // ← aquí sí
-      .leftJoinAndSelect('o.company', 'company')  // ← aquí sí
+      .leftJoinAndSelect('o.branch', 'branch')
+      .leftJoinAndSelect('o.company', 'company')
       .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
-      .leftJoinAndSelect('o.potentialPurchase', 'potentialPurchase')
+      .leftJoinAndMapOne(
+        'o.potentialPurchase',
+        OrderPotentialPurchase,
+        'potentialPurchase',
+        'potentialPurchase.device_id = o.device_id AND o.device_id IS NOT NULL',
+      )
       .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
       .where('o.id IN (:...ids)', { ids })
       .orderBy('o.entry_date', 'DESC')
       .getMany();
 
-    // if (search && search.trim() !== '') {
-    //   this.searchHistoryService.saveFromSearch({
-    //     companyId: user.companyId,
-    //     userId: user.userId,
-    //     searchTerm: search.trim(),
-    //     resultCount: total,
-    //     searchType: 'order',
-    //   });
-    // }
+    // ==================== QUERY 3: has_attachments por payment ====================
+    // Trae solo los entity_id (número) de attachments activos tipo PAYMENT
+    // que pertenezcan a algún pago de las órdenes de esta página.
+    // No trae URLs ni datos pesados, es una query liviana.
+    const paymentsWithAttachments = await this.attachmentRepository
+      .createQueryBuilder('a')
+      .select('a.entity_id', 'payment_id')
+      .where('a.entity_type = :type', { type: AttachmentEntityType.PAYMENT })
+      .andWhere('a.is_active = true')
+      .andWhere(
+        `a.entity_id IN (
+        SELECT p.id FROM order_payments p WHERE p.order_id IN (:...ids)
+      )`,
+        { ids },
+      )
+      .getRawMany<{ payment_id: number }>();
+
+    const paymentIdsWithAttachments = new Set(
+      paymentsWithAttachments.map((r) => r.payment_id),
+    );
+
+    // ==================== Mapeo final ====================
+    const mappedData = data.map((order) => ({
+      ...order,
+      payments: order.payments?.map((payment) => ({
+        ...payment,
+        has_attachments: paymentIdsWithAttachments.has(payment.id),
+      })),
+    }));
 
     return {
-      data,
+      data: mappedData,
       total,
       page,
       limit,
       totalPages: Math.ceil(total / limit),
     };
   }
+
+
 
   async listMyOrders(
     user: { companyId: string; branchId: string; userId: string },
@@ -485,13 +538,21 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('device.imeis', 'imei')
       .leftJoinAndSelect('device.model', 'deviceModel')
       .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
-      .leftJoinAndSelect('o.potentialPurchase', 'potentialPurchase')
+      .leftJoinAndSelect('o.payments', 'payments')
+      .leftJoinAndSelect('payments.paymentType', 'paymentType')
+      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
+      .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+      .leftJoinAndMapOne(
+        'o.potentialPurchase',
+        OrderPotentialPurchase,
+        'potentialPurchase',
+        'potentialPurchase.device_id = o.device_id AND o.device_id IS NOT NULL',
+      )
       .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
     // ── Filtro principal según myOrdersFilter ──────────────────────────────────
     switch (activeFilter) {
-
       case 'ingresadas':
         qb.andWhere('o.created_by_id = :userId', { userId: user.userId });
         qb.orderBy('o.entry_date', 'DESC');
@@ -531,17 +592,25 @@ export class OrderWorkflowService {
           'proc.finding_id = finding.id AND proc.performed_by_id = :userId AND proc.is_active = true',
           { userId: user.userId },
         );
-        // Evita duplicados cuando hay múltiples procedimientos del mismo técnico en la misma orden
         qb.groupBy(`
-          o.id,
-          c.id,
-          type.id,
-          status.id,
-          priority.id,
-          device.id,
-          deviceModel.id,
-          deviceBrand.id
-        `);
+        o.id,
+        c.id,
+        contact.id,
+        type.id,
+        status.id,
+        priority.id,
+        technicians.id,
+        device.id,
+        deviceModel.id,
+        deviceBrand.id,
+        imei.id,
+        payments.id,
+        paymentType.id,
+        paymentMethod.id,
+        receivedBy.id,
+        potentialPurchase.id,
+        potentialMarkedBy.id
+      `);
         qb.orderBy('o.entry_date', 'DESC');
         break;
 
@@ -571,12 +640,8 @@ export class OrderWorkflowService {
           break;
       }
 
-      if (utcFrom) {
-        qb.andWhere(`${dateColumn} >= :utcFrom`, { utcFrom });
-      }
-      if (utcTo) {
-        qb.andWhere(`${dateColumn} <= :utcTo`, { utcTo });
-      }
+      if (utcFrom) qb.andWhere(`${dateColumn} >= :utcFrom`, { utcFrom });
+      if (utcTo) qb.andWhere(`${dateColumn} <= :utcTo`, { utcTo });
     }
 
     // ── Búsqueda ───────────────────────────────────────────────────────────────
@@ -624,11 +689,8 @@ export class OrderWorkflowService {
       qb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
     }
 
-    // ── Paginación ─────────────────────────────────────────────────────────────
-    // Para 'ejecutadas' usamos paginación manual sobre subquery porque
-    // getManyAndCount() + groupBy no cuenta correctamente las filas agrupadas.
+    // ── Paginación para 'ejecutadas' ───────────────────────────────────────────
     if (activeFilter === 'ejecutadas') {
-      // Subquery que devuelve solo los IDs únicos de órdenes que cumplen todos los filtros
       const subQb = this.orderRepo
         .createQueryBuilder('o')
         .select('DISTINCT o.id', 'id')
@@ -645,11 +707,9 @@ export class OrderWorkflowService {
         )
         .where('o.company_id = :companyId', { companyId: user.companyId });
 
-      // Reaplica filtros de fecha sobre proc.createdAt
       if (utcFrom) subQb.andWhere('proc.createdAt >= :utcFrom', { utcFrom });
       if (utcTo) subQb.andWhere('proc.createdAt <= :utcTo', { utcTo });
 
-      // Reaplica filtros de tipo y estado
       if (orderTypeId && orderTypeId !== 0) {
         subQb.andWhere('o.order_type_id = :orderTypeId', { orderTypeId });
       }
@@ -657,12 +717,9 @@ export class OrderWorkflowService {
         subQb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
       }
 
-      // Reaplica búsqueda
       if (search && search.trim() !== '') {
         const cleanSearch = search.trim();
-        subQb
-          .leftJoin('o.customer', 'c')
-          .leftJoin('c.contacts', 'contact');
+        subQb.leftJoin('o.customer', 'c').leftJoin('c.contacts', 'contact');
 
         if (cleanSearch.startsWith('#')) {
           const orderNumber = cleanSearch.slice(1);
@@ -718,32 +775,30 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('device.imeis', 'imei')
         .leftJoinAndSelect('device.model', 'deviceModel')
         .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
-
+        .leftJoinAndSelect('o.payments', 'payments')
+        .leftJoinAndSelect('payments.paymentType', 'paymentType')
+        .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
+        .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
         .whereInIds(pagedIds)
         .orderBy('o.entry_date', 'DESC')
         .getMany();
 
-      return {
-        data,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      };
+      // ── has_attachments para 'ejecutadas' ──────────────────────────────────
+      const mappedData = await this.appendPaymentAttachmentFlag(data, pagedIds);
+
+      return { data: mappedData, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
-    // ── Paginación estándar para el resto de filtros ───────────────────────────
+    // ── Paginación estándar ────────────────────────────────────────────────────
     qb.skip(skip).take(limit);
 
     const [data, total] = await qb.getManyAndCount();
 
-    return {
-      data,
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    // ── has_attachments ────────────────────────────────────────────────────────
+    const orderIds = data.map((o) => o.id);
+    const mappedData = await this.appendPaymentAttachmentFlag(data, orderIds);
+
+    return { data: mappedData, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async getOrderFullData(
@@ -769,7 +824,12 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.technicians', 'technicians')
         .leftJoinAndSelect('order.notes', 'notes', 'notes.isDeleted = :deleted', { deleted: false })
         .leftJoinAndSelect('notes.createdBy', 'noteCreatedBy')
-        .leftJoinAndSelect('order.potentialPurchase', 'potentialPurchase')
+        .leftJoinAndMapOne(
+          'order.potentialPurchase',
+          OrderPotentialPurchase,
+          'potentialPurchase',
+          'potentialPurchase.device_id = order.device_id AND order.device_id IS NOT NULL',
+        )
         .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
         .leftJoinAndSelect('order.shipping', 'shipping')
         .leftJoinAndSelect('shipping.inboundOrigin', 'inboundOrigin')
@@ -1261,7 +1321,17 @@ export class OrderWorkflowService {
     user: { userId: string; companyId: string; branchId: string },
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [], // ← nuevo
   ): Promise<OrderDelivery> {
-
+    // ── Validación: comprobante obligatorio si no es EFECTIVO ─────────────
+    const EFECTIVO_ID = 1;
+    if (dto.amount > 0 && dto.paymentMethodId && dto.paymentMethodId !== EFECTIVO_ID) {
+      if (!files || files.length === 0) {
+        throw new RpcException(
+          new BadRequestException(
+            'Se requiere al menos un comprobante de pago adjunto cuando el método de pago no es EFECTIVO',
+          ),
+        );
+      }
+    }
     const result = await this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
@@ -2584,7 +2654,57 @@ export class OrderWorkflowService {
       return { success: true, device: newDevice };
     });
   }
+  // order-workflow.service.ts
+  async verifyOrderPayment(dto: VerifyOrderPaymentDto) {
+    const payment = await this.paymentRepository.findOne({
+      where: { id: dto.paymentId, company_id: dto.companyId },
+    });
 
+    if (!payment) throw new RpcException({ status: 404, message: 'Pago no encontrado' });
+    if (payment.is_verified) throw new RpcException({ status: 400, message: 'El pago ya fue verificado' });
+
+    await this.paymentRepository.update(dto.paymentId, {
+      is_verified: true,
+      verified_by_id: dto.verifiedById,
+      verified_at: new Date(),
+    });
+
+    return {
+      paymentId: dto.paymentId,
+      is_verified: true,
+      verified_at: new Date(),
+      verified_by_id: dto.verifiedById,
+    };
+  }
+
+  // order-workflow.service.ts
+  async getPaymentSignedUrls(paymentId: number, companyId: string): Promise<{ id: number; file_url: string }[]> {
+    const payment = await this.paymentRepository.findOne({
+      where: { id: paymentId, company_id: companyId },
+    });
+
+    if (!payment) throw new RpcException({ status: 404, message: 'Pago no encontrado' });
+
+    const attachments = await this.attachmentRepository.find({
+      where: {
+        entity_type: AttachmentEntityType.PAYMENT,
+        entity_id: paymentId,
+        is_active: true,
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    if (!attachments.length) return [];
+
+    const signed = await Promise.all(
+      attachments.map(async (att) => ({
+        id: att.id,
+        file_url: await this.awsS3Service.getPresignedUrl(att.file_url, 1800).catch(() => att.file_url),
+      })),
+    );
+
+    return signed;
+  }
 }
 
 function mapUser(u: any) {
