@@ -1,5 +1,6 @@
 {
   "compilerOptions": {
+    "resolveJsonModule": true, 
     "module": "commonjs", // Mantenemos CommonJS para este módulo/proyecto
     "target": "ES2023",
     "outDir": "./dist",
