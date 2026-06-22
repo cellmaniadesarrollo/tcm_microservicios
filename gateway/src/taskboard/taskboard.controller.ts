@@ -508,12 +508,12 @@ export class TaskboardController {
     return this.taskboardService.getCleaningStats(userId, currentYear, currentMonth);
   }
 
-@Get('calendar/tasks/:taskId/images/:imageId/url')
-async getCalendarImageUrl(
-  @Param('taskId') taskId: string,
-  @Param('imageId') imageId: string,
-) {
-  console.log(`📥 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
-  return this.taskboardService.getCalendarImageUrl(taskId, imageId);
-}
+  @Get('calendar/tasks/:taskId/images/:imageId/url')
+  async getCalendarImageUrl(
+    @Param('taskId') taskId: string,
+    @Param('imageId') imageId: string,
+  ) {
+    console.log(`📥 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
+    return this.taskboardService.getCalendarImageUrl(taskId, imageId);
+  }
 }

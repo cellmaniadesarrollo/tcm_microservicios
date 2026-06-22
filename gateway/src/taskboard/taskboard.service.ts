@@ -550,18 +550,18 @@ export class TaskboardService {
     return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.stats.cleaning' }, { userId, year, month }));
   }
 
-async getCalendarImageUrl(taskId: string, imageId: string) {
-  console.log(`📤 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
-  try {
-    // 🔥 Usar HTTP directo al microservicio (puerto 3001)
-    const response = await lastValueFrom(
-      this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images/${imageId}/url`)
-    );
-    console.log('📥 Respuesta del microservicio:', response.data);
-    return response.data;
-  } catch (error: any) {
-    console.error('❌ Error en getCalendarImageUrl:', error.message);
-    throw error;
+  async getCalendarImageUrl(taskId: string, imageId: string) {
+    console.log(`📤 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
+    try {
+      // 🔥 Usar HTTP directo al microservicio (puerto 3001)
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images/${imageId}/url`)
+      );
+      console.log('📥 Respuesta del microservicio:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getCalendarImageUrl:', error.message);
+      throw error;
+    }
   }
-}
 }
