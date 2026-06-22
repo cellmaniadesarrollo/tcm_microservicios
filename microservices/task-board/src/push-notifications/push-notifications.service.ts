@@ -55,6 +55,8 @@ export class PushNotificationsService {
 
   getVapidPublicKey(): string {
     try {
+      this.logger.log('🔍 Obteniendo clave VAPID pública...');
+      
       // Intentar leer de variable de entorno
       if (process.env.VAPID_PUBLIC_KEY) {
         this.logger.log('✅ Usando VAPID_PUBLIC_KEY del .env');
@@ -62,11 +64,13 @@ export class PushNotificationsService {
       }
       
       // Usar fallback
+      this.logger.warn('⚠️ No hay VAPID_PUBLIC_KEY en .env, usando fallback');
       this.logger.log('📢 Usando VAPID_PUBLIC_KEY de fallback');
       return PushNotificationsService.FALLBACK_PUBLIC_KEY;
       
     } catch (error) {
       this.logger.error('❌ Error obteniendo VAPID key:', error);
+      // 🔥 SIEMPRE devolver fallback
       return PushNotificationsService.FALLBACK_PUBLIC_KEY;
     }
   }
