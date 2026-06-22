@@ -1,5 +1,5 @@
 // gateway/src/taskboard/taskboard.controller.ts
-import { Controller, Post, Body, Get, Param, Patch, Delete, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Post, Body, Get, Put, Param, Patch, Delete, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TaskboardService } from './taskboard.service';
 
@@ -419,5 +419,101 @@ export class TaskboardController {
   @Get('push-notifications/subscriptions/:userId')
   async getUserPushSubscriptions(@Param('userId') userId: string) {
     return this.taskboardService.getUserPushSubscriptions(userId);
+  }
+
+  // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
+
+  @Post('calendar/tasks')
+  async createCalendarTask(@Body() data: any) {
+    return this.taskboardService.createCalendarTask(data);
+  }
+
+  @Get('calendar/users/:userId/tasks')
+  async getUserCalendarTasks(
+    @Param('userId') userId: string,
+    @Query('year') year: number,
+    @Query('month') month: number,
+  ) {
+    const currentYear = year || new Date().getFullYear();
+    const currentMonth = month !== undefined ? month : new Date().getMonth();
+    return this.taskboardService.getUserCalendarTasks(userId, currentYear, currentMonth);
+  }
+
+  @Get('calendar/monthly-tasks')
+  async getAllCalendarTasksForMonth(
+    @Query('year') year: number,
+    @Query('month') month: number,
+    @Query('userId') userId?: string,
+  ) {
+    const currentYear = year || new Date().getFullYear();
+    const currentMonth = month !== undefined ? month : new Date().getMonth();
+    return this.taskboardService.getAllCalendarTasksForMonth(currentYear, currentMonth, userId);
+  }
+
+  @Put('calendar/tasks/:id')
+  async updateCalendarTask( 
+    @Param('id') id: string,
+    @Body() data: any,
+  ) {
+    return this.taskboardService.updateCalendarTask(id, data);
+  }
+
+  @Delete('calendar/tasks/:id')
+  async deleteCalendarTask(@Param('id') id: string) {
+    return this.taskboardService.deleteCalendarTask(id);
+  }
+
+  @Put('calendar/tasks/:id/toggle')
+  async toggleCalendarTaskComplete(@Param('id') id: string) {
+    return this.taskboardService.toggleCalendarTaskComplete(id);
+  }
+
+  @Put('calendar/tasks/:id/complete')
+  async completeCalendarTaskWithPhoto(
+    @Param('id') id: string,
+    @Body() data: { completionPhotoUrl: string; completionNotes?: string },
+  ) {
+    return this.taskboardService.completeCalendarTaskWithPhoto(id, data);
+  }
+
+  @Get('calendar/users/:userId/tasks/today')
+  async getTodayCalendarTasks(@Param('userId') userId: string) {
+    return this.taskboardService.getTodayCalendarTasks(userId);
+  }
+
+  @Get('calendar/users/:userId/tasks/pending')
+  async getPendingCalendarTasks(@Param('userId') userId: string) {
+    return this.taskboardService.getPendingCalendarTasks(userId);
+  }
+
+  @Get('calendar/users/:userId/report')
+  async getUserCalendarReport(
+    @Param('userId') userId: string,
+    @Query('year') year: number,
+    @Query('month') month: number,
+  ) {
+    const currentYear = year || new Date().getFullYear();
+    const currentMonth = month !== undefined ? month : new Date().getMonth();
+    return this.taskboardService.getUserCalendarReport(userId, currentYear, currentMonth);
+  }
+
+  @Get('calendar/users/:userId/cleaning-stats')
+  async getCleaningStats(
+    @Param('userId') userId: string,
+    @Query('year') year: number,
+    @Query('month') month: number,
+  ) {
+    const currentYear = year || new Date().getFullYear();
+    const currentMonth = month !== undefined ? month : new Date().getMonth();
+    return this.taskboardService.getCleaningStats(userId, currentYear, currentMonth);
+  }
+
+  @Get('calendar/tasks/:taskId/images/:imageId/url')
+  async getCalendarImageUrl(
+    @Param('taskId') taskId: string,
+    @Param('imageId') imageId: string,
+  ) {
+    console.log(`📥 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
+    return this.taskboardService.getCalendarImageUrl(taskId, imageId);
   }
 }

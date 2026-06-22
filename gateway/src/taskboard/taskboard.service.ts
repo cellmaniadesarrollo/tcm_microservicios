@@ -492,4 +492,76 @@ export class TaskboardService {
       this.taskboardClient.send({ cmd: 'push-notifications.user-subscriptions' }, { userId })
     );
   }
+
+  // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
+
+  async createCalendarTask(data: any) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: createCalendarTask - title: ${data.title}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.create' }, data));
+  }
+
+  async getUserCalendarTasks(userId: string, year: number, month: number) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getUserCalendarTasks - userId: ${userId}, year: ${year}, month: ${month}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findByUser' }, { userId, year, month }));
+  }
+
+  async getAllCalendarTasksForMonth(year: number, month: number, userId?: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getAllCalendarTasksForMonth - year: ${year}, month: ${month}, userId: ${userId || 'todos'}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findAllForMonth' }, { year, month, userId }));
+  }
+
+  async updateCalendarTask(id: string, data: any) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: updateCalendarTask - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.update' }, { id, ...data }));
+  }
+
+  async deleteCalendarTask(id: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: deleteCalendarTask - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.delete' }, id));
+  }
+
+  async toggleCalendarTaskComplete(id: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: toggleCalendarTaskComplete - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.toggleComplete' }, id));
+  }
+
+  async completeCalendarTaskWithPhoto(id: string, data: { completionPhotoUrl: string; completionNotes?: string }) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: completeCalendarTaskWithPhoto - id: ${id}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.completeWithPhoto' }, { id, ...data }));
+  }
+
+  async getTodayCalendarTasks(userId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getTodayCalendarTasks - userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.today' }, userId));
+  }
+
+  async getPendingCalendarTasks(userId: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getPendingCalendarTasks - userId: ${userId}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.pending' }, userId));
+  }
+
+  async getUserCalendarReport(userId: string, year: number, month: number) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getUserCalendarReport - userId: ${userId}, year: ${year}, month: ${month}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.report.user' }, { userId, year, month }));
+  }
+
+  async getCleaningStats(userId: string, year: number, month: number) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getCleaningStats - userId: ${userId}, year: ${year}, month: ${month}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.stats.cleaning' }, { userId, year, month }));
+  }
+
+  async getCalendarImageUrl(taskId: string, imageId: string) {
+    console.log(`📤 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
+    try {
+      // 🔥 Usar HTTP directo al microservicio (puerto 3001)
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images/${imageId}/url`)
+      );
+      console.log('📥 Respuesta del microservicio:', response.data);
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getCalendarImageUrl:', error.message);
+      throw error;
+    }
+  }
 }
