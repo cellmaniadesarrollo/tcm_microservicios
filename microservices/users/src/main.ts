@@ -34,15 +34,38 @@ async function bootstrap() {
       },
     });
 
+    // Conectar RabbitMQ (PERO asegúrate de que RABBIT_URL apunte a 'rabbitmq')
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+        queue: 'users_queue',
+        queueOptions: { durable: false },
+      },
+    });
+
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+        queue: 'users_queue_sync',
+        queueOptions: { durable: true },
+        persistent: true,
+      },
+    });
+
     app.useGlobalInterceptors(new InternalAuthInterceptor());
 
-    // ✅ Forzar ejecución del orchestrator
+    // ✅ FORZAR EJECUCIÓN DEL ORCHESTRATOR (NUEVO)
+    console.log('🔴🔴🔴 [Main] Obteniendo orchestrator...');
     const orchestrator = app.get(KafkaListenersOrchestrator);
+    console.log('🔴🔴🔴 [Main] Orchestrator obtenido, ejecutando onModuleInit...');
     await orchestrator.onModuleInit();
-
+    console.log('🔴🔴🔴 [Main] onModuleInit ejecutado!');
+    
     // ✅ Iniciar todos los microservicios
     await app.startAllMicroservices();
-    console.log('✅ Microservicios iniciados (TCP:3001)');
+    console.log('✅ Microservicios iniciados (TCP:3001, RabbitMQ)');
 
     // ── 3. Cierra temporal y Express toma el puerto ──
     await new Promise<void>((resolve, reject) =>

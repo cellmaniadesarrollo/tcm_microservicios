@@ -1,7 +1,8 @@
-// src/calendar/calendar.module.ts
+// task-board/src/calendar/calendar.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
+// 👈 QUITA HttpModule
 import { CalendarController } from './calendar.controller';
 import { CalendarTcpController } from './calendar-tcp.controller';
 import { CalendarService } from './calendar.service';
@@ -12,6 +13,7 @@ import { EmployeeTask } from './entities/employee-task.entity';
   imports: [
     TypeOrmModule.forFeature([EmployeeTask]),
     ConfigModule,
+    // 👈 QUITA HttpModule
   ],
   controllers: [CalendarController, CalendarTcpController],
   providers: [

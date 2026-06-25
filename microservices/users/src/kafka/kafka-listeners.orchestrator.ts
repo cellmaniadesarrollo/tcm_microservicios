@@ -1,3 +1,4 @@
+// users/src/kafka/kafka-listeners.orchestrator.ts
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { KafkaConsumerService } from './kafka.consumer';
 import { CompaniesEventsListener } from '../companies/companies-events.listener';
@@ -27,6 +28,9 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
         this.kafkaConsumer.registerHandler('users.has-token', this.googleController.handleHasToken.bind(this.googleController));
         this.kafkaConsumer.registerHandler('users.revoke-token', this.googleController.handleRevokeToken.bind(this.googleController));
         this.kafkaConsumer.registerHandler('users.refresh-token', this.googleController.handleRefreshToken.bind(this.googleController));
+        
+        // 👈 NUEVO: Registrar handler para request-response
+        this.kafkaConsumer.registerHandler('users.requests', this.googleController.handleRequest.bind(this.googleController));
 
         console.log('✅ [KafkaOrchestrator] Handlers de Google Calendar registrados');
 

@@ -4,15 +4,14 @@ import { ConfigService } from '@nestjs/config';
 import { google } from 'googleapis';
 import { EmployeeTask } from './entities/employee-task.entity';
 import { KafkaProducerService } from '../kafka/kafka.producer';
-import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class GoogleCalendarService {
   private oauth2Client: any;
-ok
+
   constructor(
     private configService: ConfigService,
-    private kafkaProducer: KafkaProducerService, // 👈 Usar el Producer
+    private kafkaProducer: KafkaProducerService,
   ) {
     this.oauth2Client = new google.auth.OAuth2(
       this.configService.get<string>('GOOGLE_CLIENT_ID'),
@@ -25,32 +24,39 @@ ok
 
   getAuthUrl(userId: string): string {
     const scopes = ['https://www.googleapis.com/auth/calendar'];
-    return this.oauth2Client.generateAuthUrl({
+    const url = this.oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
       prompt: 'consent',
       state: userId,
+      redirect_uri: this.configService.get<string>('GOOGLE_REDIRECT_URI'),
     });
+    console.log(`🔍 [GoogleCalendar] URL generada: ${url}`);
+    return url;
   }
 
   async getTokensFromCode(code: string): Promise<any> {
     try {
+      console.log(`🔍 [GoogleCalendar] Recibido código: ${code.substring(0, 20)}...`);
       const { tokens } = await this.oauth2Client.getToken(code);
+      console.log('✅ [GoogleCalendar] Tokens obtenidos correctamente');
       return tokens;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error('❌ [GoogleCalendar] Error al obtener tokens:', errorMessage);
       throw new Error(`Error al obtener tokens de Google: ${errorMessage}`);
     }
   }
 
   /**
-   * ✅ OBTENER TOKEN VÍA KAFKA
+   * ✅ OBTENER TOKEN VÍA KAFKA (request-response)
    */
   private async getUserToken(userId: string): Promise<string> {
     try {
-      // Enviar mensaje a Kafka pidiendo el token
-      const response = await this.kafkaProducer.send<{ accessToken: string }>(
-        'users.get-token',
+      console.log(`🔍 [GoogleCalendar] Solicitando token para userId: ${userId}`);
+      const response = await this.kafkaProducer.request<{ accessToken: string }>(
+        'users.requests',
+        'GET_TOKEN',
         { userId }
       );
 
@@ -60,8 +66,10 @@ ok
         );
       }
 
+      console.log(`✅ [GoogleCalendar] Token obtenido para userId: ${userId}`);
       return response.accessToken;
     } catch (error: any) {
+      console.error(`❌ [GoogleCalendar] Error al obtener token:`, error.message);
       throw new UnauthorizedException(
         `Error al obtener token de Google: ${error.message}`
       );
@@ -69,7 +77,7 @@ ok
   }
 
   /**
-   * ✅ GUARDAR TOKEN VÍA KAFKA
+   * ✅ GUARDAR TOKEN VÍA KAFKA (request-response)
    */
   async saveUserTokens(userId: string, tokens: any): Promise<void> {
     try {
@@ -82,8 +90,12 @@ ok
       
       console.log(`📤 [GoogleCalendar] Enviando evento a Kafka:`, message);
       
-      await this.kafkaProducer.emit('users.save-token', 'SAVE_TOKEN', message);
-      console.log(`✅ [GoogleCalendar] Evento emitido para usuario ${userId}`);
+      await this.kafkaProducer.request(
+        'users.requests',
+        'SAVE_TOKEN',
+        message
+      );
+      console.log(`✅ [GoogleCalendar] Token guardado para usuario ${userId}`);
     } catch (error: any) {
       console.error(`❌ [GoogleCalendar] Error al guardar token:`, error.message);
       throw new Error(`Error al guardar token de Google: ${error.message}`);
@@ -91,43 +103,56 @@ ok
   }
 
   /**
-   * ✅ VERIFICAR SI EL USUARIO TIENE TOKEN VÍA KAFKA
+   * ✅ VERIFICAR SI EL USUARIO TIENE TOKEN - VÍA KAFKA (request-response)
    */
   async hasValidToken(userId: string): Promise<boolean> {
     try {
-      const response = await this.kafkaProducer.send<{ hasGoogleToken: boolean }>(
-        'users.has-token',
+      console.log(`🔍 [GoogleCalendar] Verificando token para userId: ${userId}`);
+      const response = await this.kafkaProducer.request<{ hasGoogleToken: boolean }>(
+        'users.requests',
+        'HAS_TOKEN',
         { userId }
       );
-      return response?.hasGoogleToken || false;
-    } catch {
+      const hasToken = response?.hasGoogleToken || false;
+      console.log(`✅ [GoogleCalendar] Usuario ${userId} ${hasToken ? 'TIENE' : 'NO TIENE'} token`);
+      return hasToken;
+    } catch (error: any) {
+      console.error(`❌ [GoogleCalendar] Error al verificar token:`, error.message);
       return false;
     }
   }
 
   /**
-   * ✅ REVOCAR TOKENS VÍA KAFKA
+   * ✅ REVOCAR TOKENS VÍA KAFKA (request-response)
    */
   async revokeTokens(userId: string): Promise<void> {
     try {
-      await this.kafkaProducer.send('users.revoke-token', { userId });
-      console.log(`[GoogleCalendar] Tokens revocados para usuario ${userId}`);
+      console.log(`🔍 [GoogleCalendar] Revocando tokens para userId: ${userId}`);
+      await this.kafkaProducer.request(
+        'users.requests',
+        'REVOKE_TOKEN',
+        { userId }
+      );
+      console.log(`✅ [GoogleCalendar] Tokens revocados para usuario ${userId}`);
     } catch (error: any) {
       console.error(`Error al revocar tokens: ${error.message}`);
     }
   }
 
   /**
-   * ✅ REFRESCAR TOKEN VÍA KAFKA (opcional)
+   * ✅ REFRESCAR TOKEN VÍA KAFKA (request-response)
    */
   async refreshToken(userId: string): Promise<string> {
     try {
-      const response = await this.kafkaProducer.send<{ accessToken: string }>(
-        'users.refresh-token',
+      console.log(`🔍 [GoogleCalendar] Refrescando token para userId: ${userId}`);
+      const response = await this.kafkaProducer.request<{ accessToken: string }>(
+        'users.requests',
+        'REFRESH_TOKEN',
         { userId }
       );
       return response?.accessToken;
     } catch (error: any) {
+      console.error(`❌ [GoogleCalendar] Error al refrescar token:`, error.message);
       throw new Error(`Error al refrescar token: ${error.message}`);
     }
   }
@@ -145,9 +170,9 @@ ok
 
   private getColorByPriority(priority: string): string {
     const colorMap: Record<string, string> = {
-      alta: '11', // Rojo
-      media: '5', // Amarillo
-      baja: '2', // Verde
+      alta: '11',
+      media: '5',
+      baja: '2',
     };
     return colorMap[priority] || '1';
   }
@@ -155,6 +180,7 @@ ok
   // ==================== CREAR EVENTO EN GOOGLE ====================
 
   async createEvent(userId: string, task: EmployeeTask): Promise<any> {
+    console.log(`🔍 [GoogleCalendar] Creando evento para userId: ${userId}, tarea: ${task.title}`);
     const calendar = await this.getCalendarClient(userId);
     
     const event = {
@@ -178,14 +204,18 @@ ok
         requestBody: event,
         sendUpdates: 'all',
       });
+      console.log(`✅ [GoogleCalendar] Evento CREADO! ID: ${response.data.id}`);
+      console.log(`🔗 [GoogleCalendar] Link: ${response.data.htmlLink}`);
       return response.data;
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
+      console.error(`❌ [GoogleCalendar] Error al crear evento:`, errorMessage);
       throw new Error(`Error al crear evento en Google Calendar: ${errorMessage}`);
     }
   }
 
   async syncMultipleTasks(userId: string, tasks: EmployeeTask[]): Promise<any[]> {
+    console.log(`🔍 [GoogleCalendar] Sincronizando ${tasks.length} tareas para userId: ${userId}`);
     const results: any[] = [];
     for (const task of tasks) {
       try {
@@ -207,6 +237,7 @@ ok
         });
       }
     }
+    console.log(`✅ [GoogleCalendar] Sincronización completada: ${results.filter(r => r.success).length} exitosas`);
     return results;
   }
 }
