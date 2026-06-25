@@ -326,6 +326,18 @@ export class OrdersRelayService {
                     },
                 );
                 break;
+
+            case 'device_updated':
+                await this.orderModel.findOneAndUpdate(
+                    { id: orderId },
+                    {
+                        $set: {
+                            device: payload.device,
+                            updatedAt: ts,
+                        },
+                    },
+                );
+                break;
             default:
                 console.warn(`⚠️ changed_scope desconocido: ${scope} | order: ${orderId}`);
         }

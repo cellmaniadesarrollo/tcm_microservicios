@@ -1,6 +1,6 @@
 import { Controller } from '@nestjs/common';
 import { OrderWorkflowService } from './order-workflow.service';
-import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
+import { Ctx, MessagePattern, Payload, RmqContext, RpcException } from '@nestjs/microservices';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { ListOrdersDto } from './dto/list-orders.dto';
 import { GetOrderFullDataDto } from './dto/get-order-full-data.dto';
@@ -23,9 +23,29 @@ export class OrderWorkflowController {
     private readonly orderShippingService: OrderShippingService) { }
 
   @MessagePattern({ cmd: 'async_orders_start' })
-  async onSyncStart(@Payload() payload: any) {
+  async onSyncStart(
+    @Payload() payload: any,
+    @Ctx() context: RmqContext,
+  ) {
     console.log('🔄 Sync órdenes solicitada | fromCache:', payload.fromCache ?? 'inicio');
-    return this.orderWorkflowService.findFullDataForSync(payload.fromCache);
+
+    const result = await this.orderWorkflowService.findFullDataForSync(payload.fromCache);
+    console.log(`📤 Respuesta lista | cantidad: ${result?.length ?? 0}`);
+
+    // ── Respuesta manual para clientes no-NestJS (Express/amqplib) ──
+    const originalMsg = context.getMessage();
+    const replyTo = originalMsg.properties.replyTo;
+
+    if (replyTo === 'inventory_orders_sync_reply') {
+      const ch = context.getChannelRef();
+      ch.sendToQueue(
+        'inventory_orders_sync_reply',
+        Buffer.from(JSON.stringify(result)),
+        { correlationId: originalMsg.properties.correlationId },
+      );
+    }
+
+    return result; // ← NestJS ClientProxy sigue funcionando normal
   }
 
 
@@ -79,7 +99,7 @@ export class OrderWorkflowController {
       data.dto.orderId,
       data.user,
     );
-    console.log(datas)
+    // console.log(datas.findings[0])
     return datas
   }
 

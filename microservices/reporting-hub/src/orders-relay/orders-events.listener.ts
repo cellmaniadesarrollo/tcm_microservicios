@@ -47,4 +47,4 @@ export class OrdersEventsListener {
         console.log(`🧾 [order.updated] scope: ${changed_scope} | order: ${order_id}`);
         await this.ordersRelayService.applyUpdate(order_id, changed_scope, payload, updatedAt);
     }
-}
+}  
