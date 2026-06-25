@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { InternalAuthInterceptor } from './interceptors/internal-auth.interceptor';
+import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 import * as http from 'http';
 
 async function bootstrap() {
@@ -33,31 +34,15 @@ async function bootstrap() {
       },
     });
 
-    // Conectar RabbitMQ
-    app.connectMicroservice<MicroserviceOptions>({
-      transport: Transport.RMQ,
-      options: {
-        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
-        queue: 'users_queue',
-        queueOptions: { durable: false },
-      },
-    });
-
-    app.connectMicroservice<MicroserviceOptions>({
-      transport: Transport.RMQ,
-      options: {
-        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
-        queue: 'users_queue_sync',
-        queueOptions: { durable: true },
-        persistent: true,
-      },
-    });
-
     app.useGlobalInterceptors(new InternalAuthInterceptor());
-    
+
+    // ✅ Forzar ejecución del orchestrator
+    const orchestrator = app.get(KafkaListenersOrchestrator);
+    await orchestrator.onModuleInit();
+
     // ✅ Iniciar todos los microservicios
     await app.startAllMicroservices();
-    console.log('✅ Microservicios iniciados (TCP:3001, RabbitMQ)');
+    console.log('✅ Microservicios iniciados (TCP:3001)');
 
     // ── 3. Cierra temporal y Express toma el puerto ──
     await new Promise<void>((resolve, reject) =>
