@@ -24,12 +24,13 @@ import { DevicesModule } from '../devices/devices.module';
 import { OrderShipping } from './entities/order-shipping.entity';
 import { OrderShippingService } from './order-shipping.service';
 import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
+import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
 
 @Module({
   imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module,
     TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
       OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment,
-      Attachment, OrderNote, OrderNoteLog, OrderShipping, OrderPotentialPurchase]),
+      Attachment, OrderNote, OrderNoteLog, OrderShipping, OrderPotentialPurchase, SpareAssignment]),
     BroadcastModule, SearchHistoryModule, DevicesModule],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService, OrderShippingService],

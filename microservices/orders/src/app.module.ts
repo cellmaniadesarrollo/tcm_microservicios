@@ -18,6 +18,8 @@ import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 import { SearchHistoryModule } from './search-history/search-history.module';
 import { OrderPotentialPurchaseModule } from './order-potential-purchase/order-potential-purchase.module';
+import { InventoryItemsModule } from './inventory-items/inventory-items.module';
+import { SpareAssignmentsModule } from './spare-assignments/spare-assignments.module';
 
 @Module({
   imports: [
@@ -35,6 +37,8 @@ import { OrderPotentialPurchaseModule } from './order-potential-purchase/order-p
     HealthModule,
     SearchHistoryModule,
     OrderPotentialPurchaseModule,
+    InventoryItemsModule,
+    SpareAssignmentsModule,
   ],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],
