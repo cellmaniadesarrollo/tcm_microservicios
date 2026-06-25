@@ -65,7 +65,10 @@ services:
           ms.client.billing.created \
           ms.client.billing.updated \
           ms.order.created \
-          ms.order.updated; do
+          ms.order.updated \
+          ms.inventory.spare.assigned \
+          ms.inventory.spare.cancelled \
+          ms.inventory.spare.returned; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic $$TOPIC \
             --partitions 1 --replication-factor 1
