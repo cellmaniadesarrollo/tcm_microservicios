@@ -84,6 +84,9 @@ services:
           ms.taskboard.created
           ms.taskboard.updated
           ms.taskboard.deleted
+          ms.inventory.spare.assigned 
+          ms.inventory.spare.cancelled 
+          ms.inventory.spare.returned
         "
 
         echo "⏳ Sincronizando tópicos en Kafka..."
