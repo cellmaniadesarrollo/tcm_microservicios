@@ -87,6 +87,13 @@ services:
           ms.inventory.spare.assigned 
           ms.inventory.spare.cancelled 
           ms.inventory.spare.returned
+          users.get-token
+          users.has-token
+          users.refresh-token
+          users.revoke-token
+          users.save-token
+          users.requests
+          taskboard.responses
         "
 
         echo "⏳ Sincronizando tópicos en Kafka..."
