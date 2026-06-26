@@ -496,8 +496,16 @@ export class TaskboardService {
   // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
 
   async createCalendarTask(data: any) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: createCalendarTask - title: ${data.title}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.create' }, data));
+    console.log(`📤 [Gateway] Enviando a TaskBoard (HTTP): createCalendarTask - title: ${data.title}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.post(`${this.taskboardHttpUrl}/calendar/tasks`, data)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en createCalendarTask:', error.message);
+      throw error;
+    }
   }
 
   async getUserCalendarTasks(userId: string, year: number, month: number) {

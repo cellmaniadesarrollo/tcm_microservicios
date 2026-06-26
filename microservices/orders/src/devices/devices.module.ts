@@ -8,9 +8,11 @@ import { DeviceIMEI } from './entities/device_imei.entity';
 import { FindingProcedure } from '../order-findings/entities/finding-procedure.entity';
 import { Attachment } from '../order-findings/entities/attachment.entity';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
+import { Order } from '../order-workflow/entities/order.entity';
+import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Device, DeviceAccount, DeviceIMEI, FindingProcedure, Attachment]), AwsS3Module],
+  imports: [TypeOrmModule.forFeature([Device, DeviceAccount, DeviceIMEI, FindingProcedure, Attachment, Order]), AwsS3Module, BroadcastModule],
   controllers: [DevicesController],
   providers: [DevicesService],
   exports: [DevicesService]

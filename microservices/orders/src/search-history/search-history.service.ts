@@ -9,7 +9,7 @@ import {
     SearchHistoryItemDto,
 } from './dto/search-history.dto';
 
-const MAX_LIMIT = 20;
+const MAX_LIMIT = 5;
 const IS_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 @Injectable()
@@ -30,6 +30,7 @@ export class SearchHistoryService {
      * Reglas:
      *  - Ignora si search es UUID (escaneo QR, no búsqueda manual)
      *  - Ignora si no hubo resultados
+     *  - Poda primero dejando MAX_LIMIT - 1 registros por grupo (hace espacio)
      *  - Guarda / actualiza en TODOS los grupos del usuario
      */
     async saveFromSearch(params: {
@@ -54,6 +55,12 @@ export class SearchHistoryService {
         });
 
         if (!groups.length) return;
+
+        // ── Podar ANTES del insert: dejar solo (MAX_LIMIT - 1) por grupo ─────────
+        // Así el nuevo registro ocupa el último slot sin superar el límite
+        await Promise.all(
+            groups.map((group) => this.pruneGroup(companyId, group.id, MAX_LIMIT - 1)),
+        );
 
         // ── Upsert en paralelo para cada grupo ───────────────────────────────────
         await Promise.all(
@@ -82,7 +89,7 @@ export class SearchHistoryService {
 
     // ── Lectura: por grupo (dropdown actual) ────────────────────────────────────
     async getByGroup(dto: GetGroupHistoryDto): Promise<SearchHistoryItemDto[]> {
-        const limit = Math.min(dto.limit ?? 10, MAX_LIMIT);
+        const limit = Math.min(dto.limit ?? MAX_LIMIT, MAX_LIMIT);
         return this.repo.find({
             where: { companyId: dto.companyId, groupId: dto.groupId },
             order: { searchedAt: 'DESC' },
@@ -93,7 +100,7 @@ export class SearchHistoryService {
 
     // ── Lectura: por usuario (modo futuro) ──────────────────────────────────────
     async getByUser(dto: GetUserHistoryDto): Promise<SearchHistoryItemDto[]> {
-        const limit = Math.min(dto.limit ?? 10, MAX_LIMIT);
+        const limit = Math.min(dto.limit ?? MAX_LIMIT, MAX_LIMIT);
         return this.repo.find({
             where: { companyId: dto.companyId, userId: dto.userId },
             order: { searchedAt: 'DESC' },
@@ -102,14 +109,20 @@ export class SearchHistoryService {
         });
     }
 
-    async pruneGroup(companyId: string, groupId: string, keep = 20): Promise<void> {
+    /**
+     * Elimina los registros más antiguos de un grupo dejando solo `keep` entradas.
+     * Se llama antes de cada insert para garantizar el límite máximo.
+     */
+    async pruneGroup(companyId: string, groupId: string, keep = MAX_LIMIT): Promise<void> {
         const toKeep = await this.repo.find({
             where: { companyId, groupId },
             order: { searchedAt: 'DESC' },
             take: keep,
             select: ['id'],
         });
+
         if (toKeep.length < keep) return;
+
         const keepIds = toKeep.map((r) => r.id);
         await this.repo
             .createQueryBuilder()
@@ -119,12 +132,8 @@ export class SearchHistoryService {
             .execute();
     }
 
-
-    // Agregar en search-history.service.ts
-    // (dentro de la clase SearchHistoryService, después de getByUser)
-
     /**
-     * Últimos 20 términos buscados por el usuario,
+     * Últimos MAX_LIMIT términos buscados por el usuario,
      * combinados entre todos los grupos a los que pertenece.
      *
      * Si buscó "ORD-001" en cashiers y technicians, aparece una sola vez
@@ -139,7 +148,7 @@ export class SearchHistoryService {
     }): Promise<{ searchTerm: string; groupName: string }[]> {
         const { userId, companyId } = params;
 
-        // Trae los grupos del usuario para poder hacer JOIN
+        // ── Obtener los grupos del usuario para el filtro ────────────────────────
         const groups = await this.groupCacheRepo.find({
             where: { employee: { id: userId } },
             select: ['id'],
@@ -150,7 +159,7 @@ export class SearchHistoryService {
         const groupIds = groups.map((g) => g.id);
 
         /**
-         * Query: de todos los grupos del usuario, los 20 registros
+         * Query: de todos los grupos del usuario, los MAX_LIMIT registros
          * más recientes. Se usa DISTINCT ON (search_term) para que
          * el mismo término no aparezca dos veces aunque esté en
          * varios grupos — queda con el grupo donde se buscó más
@@ -172,15 +181,21 @@ export class SearchHistoryService {
             .andWhere('h.group_id IN (:...groupIds)', { groupIds })
             .orderBy('h.search_term', 'ASC')   // requerido por DISTINCT ON
             .addOrderBy('h.searched_at', 'DESC')
-            .limit(5)
+            .limit(MAX_LIMIT)
             .getRawMany<{ searchTerm: string; groupName: string; searchedAt: Date }>();
 
-        // Reordenar por fecha descendente (DISTINCT ON necesitó el ORDER BY previo)
+        // ── Reordenar por fecha descendente ─────────────────────────────────────
+        // DISTINCT ON necesitó el ORDER BY previo por search_term,
+        // aquí restauramos el orden cronológico esperado por el cliente
         return rows
             .sort((a, b) => b.searchedAt.getTime() - a.searchedAt.getTime())
             .map(({ searchTerm, groupName }) => ({ searchTerm, groupName }));
     }
 
+    /**
+     * Elimina un término específico del historial de un usuario
+     * en todas las empresas y grupos donde aparezca.
+     */
     async deleteByTerm(params: {
         userId: string;
         companyId: string;

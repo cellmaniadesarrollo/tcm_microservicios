@@ -12,6 +12,8 @@ import { CheckWarrantyDto } from './dto/check-warranty.dto';
 import { FindingProcedure } from '../order-findings/entities/finding-procedure.entity';
 import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { Attachment, AttachmentEntityType } from '../order-findings/entities/attachment.entity';
+import { Order } from '../order-workflow/entities/order.entity';
+import { BroadcastService } from '../broadcast/broadcast.service';
 @Injectable()
 export class DevicesService {
   constructor(
@@ -28,6 +30,9 @@ export class DevicesService {
     private readonly findingProcedureRepository: Repository<FindingProcedure>,
     @InjectRepository(Attachment)
     private readonly attachmentRepository: Repository<Attachment>,
+    @InjectRepository(Order)
+    private readonly orderRepo: Repository<Order>,
+    private readonly broadcastService: BroadcastService,
   ) { }
 
   async createDevice(data: any) {
@@ -316,6 +321,60 @@ export class DevicesService {
     device.accounts = this.syncAccounts(device, dto.accounts ?? []);
 
     await this.deviceRepo.save(device);
+
+    // ── Cargar relaciones completas para el snapshot ──────────────────────
+    const deviceFull = await this.deviceRepo.findOne({
+      where: { device_id: device.device_id },
+      relations: ['model', 'model.brand', 'type', 'imeis', 'accounts'],
+    });
+
+    if (deviceFull) {
+      // ── Buscar todas las órdenes vinculadas a este device ────────────────
+      const ordersWithDevice = await this.orderRepo.find({
+        where: { device_id: device.device_id, company_id: user.companyId },
+        select: ['id'],
+      });
+
+      const deviceSnapshot = {
+        device_id: deviceFull.device_id,
+        serial_number: deviceFull.serial_number ?? null,
+        color: deviceFull.color ?? null,
+        storage: deviceFull.storage ?? null,
+        model: deviceFull.model ? {
+          models_id: deviceFull.model.models_id,
+          models_name: deviceFull.model.models_name,
+          models_img_url: deviceFull.model.models_img_url ?? null,
+          brand_id: deviceFull.model.brand?.brands_id ?? null,
+          brand_name: deviceFull.model.brand?.brands_name ?? null,
+        } : null,
+        type: deviceFull.type ? {
+          id: deviceFull.type.id,
+          name: deviceFull.type.name,
+        } : null,
+        imeis: deviceFull.imeis.map(i => ({
+          imei_id: i.imei_id,
+          imei_number: i.imei_number,
+        })),
+        accounts: deviceFull.accounts.map(a => ({
+          account_id: a.account_id,
+          username: a.username,
+          password: a.password ?? null,
+          account_type: a.account_type,
+        })),
+      };
+
+      // ── Emitir un evento por cada orden afectada ─────────────────────────
+      await Promise.all(
+        ordersWithDevice.map(order =>
+          this.broadcastService.publishOrderUpdated(
+            order.id,
+            'device_updated',
+            { device: deviceSnapshot },
+          )
+        )
+      );
+    }
+
     return this.mapToResponse(device);
   }
 

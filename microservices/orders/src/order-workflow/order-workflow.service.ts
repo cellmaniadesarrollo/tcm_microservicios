@@ -42,6 +42,7 @@ import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 import { DevicesService } from '../devices/devices.service';
 import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
+import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -77,6 +78,8 @@ export class OrderWorkflowService {
     private readonly broadcastService: BroadcastService,
     private readonly searchHistoryService: SearchHistoryService,
     private readonly devicesService: DevicesService,
+    @InjectRepository(SpareAssignment)
+    private readonly spareAssignmentRepository: Repository<SpareAssignment>
   ) { }
 
   async createOrder(
@@ -833,10 +836,9 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
         .leftJoinAndSelect('order.shipping', 'shipping')
         .leftJoinAndSelect('shipping.inboundOrigin', 'inboundOrigin')
-        .leftJoinAndSelect('inboundOrigin.parent', 'inboundOriginParent')       // cantón → provincia
-        .leftJoinAndSelect('inboundOriginParent.parent', 'inboundOriginRoot')   // provincia → raíz
+        .leftJoinAndSelect('inboundOrigin.parent', 'inboundOriginParent')
+        .leftJoinAndSelect('inboundOriginParent.parent', 'inboundOriginRoot')
         .leftJoinAndSelect('shipping.outboundDestination', 'outboundDestination')
-
         .leftJoinAndSelect('order.payments', 'payments')
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
@@ -855,7 +857,7 @@ export class OrderWorkflowService {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
       }
 
-      // ─── CAMBIO AUTOMÁTICO: INGRESADO → VISTA ───────────────────────────────
+      // ─── CAMBIO AUTOMÁTICO: INGRESADO → VISTA ─────────────────────────────
       const ESTADO_INGRESADO = 1;
       const ESTADO_VISTA = 2;
 
@@ -870,13 +872,11 @@ export class OrderWorkflowService {
           observation: 'Cambio automático al visualizar la orden',
         });
         await this.orderStatusHistoryRepository.save(historyEntry);
-
         await this.orderRepo.update(order.id, { current_status_id: ESTADO_VISTA });
 
         order.currentStatus = { id: ESTADO_VISTA, name: 'VISTA' } as OrderStatus;
         order.current_status_id = ESTADO_VISTA;
 
-        // ─── EMITIR CAMBIO DE ESTADO ─────────────────────────────────────────
         const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
         await this.emitNotification(
@@ -888,10 +888,7 @@ export class OrderWorkflowService {
         );
 
         await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
-          currentStatus: {
-            id: ESTADO_VISTA,
-            name: 'VISTA',
-          },
+          currentStatus: { id: ESTADO_VISTA, name: 'VISTA' },
           statusHistoryEntry: {
             id: historyEntry.id,
             fromStatus: { id: ESTADO_INGRESADO, name: 'INGRESADO' },
@@ -902,19 +899,46 @@ export class OrderWorkflowService {
           },
         });
       }
-      // ────────────────────────────────────────────────────────────────────────
+      // ──────────────────────────────────────────────────────────────────────
 
       // Ordenamiento en memoria de procedimientos dentro de cada finding
       order.findings?.forEach((finding) => {
         finding.procedures?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
       });
 
-      // ─── CARGA MANUAL DE ATTACHMENTS ────────────────────────────────────────
+      // ─── IDs necesarios ────────────────────────────────────────────────────
       const findingIds = order.findings?.length ? order.findings.map((f) => f.id) : [];
       const procedureIds = order.findings?.length
         ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
         : [];
       const paymentIds = order.payments?.length ? order.payments.map((p) => p.id) : [];
+
+      // ─── CARGA DE SPARE ASSIGNMENTS ───────────────────────────────────────
+      const spareAssignments = findingIds.length
+        ? await this.spareAssignmentRepository.find({
+          where: { finding_id: In(findingIds), status: 'active' },
+          order: { created_at: 'ASC' },
+        })
+        : [];
+
+      const spareMap = new Map<number, any[]>();
+      spareAssignments.forEach((s) => {
+        if (!spareMap.has(s.finding_id)) spareMap.set(s.finding_id, []);
+        spareMap.get(s.finding_id)!.push({
+          id: s.id,
+          movement_id: s.movement_id,
+          quantity: s.quantity,
+          sku: s.sku,
+          product_name: s.product_name,
+          unit_price: s.unit_price,
+          batch_number: s.batch_number,
+          status: s.status,
+          created_at: s.created_at,
+        });
+      });
+      // ──────────────────────────────────────────────────────────────────────
+
+      // ─── CARGA MANUAL DE ATTACHMENTS ──────────────────────────────────────
       const whereConditions: any[] = [
         { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
       ];
@@ -922,17 +946,13 @@ export class OrderWorkflowService {
       if (findingIds.length) {
         whereConditions.push({ entity_type: AttachmentEntityType.FINDING, entity_id: In(findingIds), is_active: true });
       }
-
       if (procedureIds.length) {
         whereConditions.push({ entity_type: AttachmentEntityType.PROCEDURE, entity_id: In(procedureIds), is_active: true });
       }
       if (paymentIds.length) {
-        whereConditions.push({
-          entity_type: AttachmentEntityType.PAYMENT,
-          entity_id: In(paymentIds),
-          is_active: true,
-        });
+        whereConditions.push({ entity_type: AttachmentEntityType.PAYMENT, entity_id: In(paymentIds), is_active: true });
       }
+
       const allAttachments = await this.attachmentRepository.find({
         where: whereConditions,
         order: { createdAt: 'ASC' },
@@ -949,14 +969,16 @@ export class OrderWorkflowService {
 
       order.findings?.forEach((finding) => {
         finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) || [];
+        (finding as any).spares = spareMap.get(finding.id) ?? [];
         finding.procedures?.forEach((proc) => {
           proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) || [];
         });
       });
+
       order.payments?.forEach((payment) => {
-        payment.attachments =
-          attachmentsMap.get(`${AttachmentEntityType.PAYMENT}_${payment.id}`) || [];
+        payment.attachments = attachmentsMap.get(`${AttachmentEntityType.PAYMENT}_${payment.id}`) || [];
       });
+
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       await this.enrichAttachmentsWithSignedUrls(order);
@@ -2260,10 +2282,10 @@ export class OrderWorkflowService {
 
 
     // Esto imprimirá una tabla clara en tu terminal con ambos campos
-    console.table(orders.map(o => ({
-      db_id: o.id,
-      public_id: o.public_id
-    })));
+    // console.table(orders.map(o => ({
+    //   db_id: o.id,
+    //   public_id: o.public_id
+    // })));
 
 
 
@@ -2638,8 +2660,7 @@ export class OrderWorkflowService {
       order.device_id = dto.newDeviceId;
       await manager.save(order);
 
-      // 2️⃣ Desvincular CUALQUIER otra fila que aún apunte al device viejo
-      //    (usamos QueryBuilder porque save() con undefined no genera SET NULL)
+      // 2️⃣ Reasignar CUALQUIER otra orden que aún apunte al device viejo
       await manager
         .createQueryBuilder()
         .update(Order)
@@ -2650,6 +2671,49 @@ export class OrderWorkflowService {
 
       // 3️⃣ Eliminar el device viejo (ya sin referencias)
       await this.devicesService.deleteDevice(dto.oldDeviceId, user, manager);
+
+      // 4️⃣ Cargar relaciones completas para el snapshot de la réplica
+      const deviceFull = await manager.findOne(Device, {
+        where: { device_id: dto.newDeviceId },
+        relations: ['model', 'model.brand', 'type', 'imeis', 'accounts'],
+      });
+
+      // 5️⃣ Broadcast a la réplica
+      if (deviceFull) {
+        await this.broadcastService.publishOrderUpdated(
+          dto.orderId,
+          'device_updated',
+          {
+            device: {
+              device_id: deviceFull.device_id,
+              serial_number: deviceFull.serial_number ?? null,
+              color: deviceFull.color ?? null,
+              storage: deviceFull.storage ?? null,
+              model: deviceFull.model ? {
+                models_id: deviceFull.model.models_id,
+                models_name: deviceFull.model.models_name,
+                models_img_url: deviceFull.model.models_img_url ?? null,
+                brand_id: deviceFull.model.brand?.brands_id ?? null,
+                brand_name: deviceFull.model.brand?.brands_name ?? null,
+              } : null,
+              type: deviceFull.type ? {
+                id: deviceFull.type.id,
+                name: deviceFull.type.name,
+              } : null,
+              imeis: deviceFull.imeis.map(i => ({
+                imei_id: i.imei_id,
+                imei_number: i.imei_number,
+              })),
+              accounts: deviceFull.accounts.map(a => ({
+                account_id: a.account_id,
+                username: a.username,
+                password: a.password ?? null,
+                account_type: a.account_type,
+              })),
+            },
+          },
+        );
+      }
 
       return { success: true, device: newDevice };
     });
