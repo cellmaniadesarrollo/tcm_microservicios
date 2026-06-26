@@ -48,9 +48,6 @@ export class GoogleCalendarService {
     }
   }
 
-  /**
-   * ✅ OBTENER TOKEN VÍA KAFKA (request-response)
-   */
   private async getUserToken(userId: string): Promise<string> {
     try {
       console.log(`🔍 [GoogleCalendar] Solicitando token para userId: ${userId}`);
@@ -76,9 +73,6 @@ export class GoogleCalendarService {
     }
   }
 
-  /**
-   * ✅ GUARDAR TOKEN VÍA KAFKA (request-response)
-   */
   async saveUserTokens(userId: string, tokens: any): Promise<void> {
     try {
       const message = {
@@ -102,9 +96,6 @@ export class GoogleCalendarService {
     }
   }
 
-  /**
-   * ✅ VERIFICAR SI EL USUARIO TIENE TOKEN - VÍA KAFKA (request-response)
-   */
   async hasValidToken(userId: string): Promise<boolean> {
     try {
       console.log(`🔍 [GoogleCalendar] Verificando token para userId: ${userId}`);
@@ -122,9 +113,6 @@ export class GoogleCalendarService {
     }
   }
 
-  /**
-   * ✅ REVOCAR TOKENS VÍA KAFKA (request-response)
-   */
   async revokeTokens(userId: string): Promise<void> {
     try {
       console.log(`🔍 [GoogleCalendar] Revocando tokens para userId: ${userId}`);
@@ -139,9 +127,6 @@ export class GoogleCalendarService {
     }
   }
 
-  /**
-   * ✅ REFRESCAR TOKEN VÍA KAFKA (request-response)
-   */
   async refreshToken(userId: string): Promise<string> {
     try {
       console.log(`🔍 [GoogleCalendar] Refrescando token para userId: ${userId}`);
@@ -181,17 +166,22 @@ export class GoogleCalendarService {
 
   async createEvent(userId: string, task: EmployeeTask): Promise<any> {
     console.log(`🔍 [GoogleCalendar] Creando evento para userId: ${userId}, tarea: ${task.title}`);
-    const calendar = await this.getCalendarClient(userId);
+    const calendarClient = await this.getCalendarClient(userId);
     
+    const startDate = new Date(task.dueDate);
+    startDate.setHours(10, 0, 0);
+    const endDate = new Date(startDate);
+    endDate.setHours(startDate.getHours() + 1);
+
     const event = {
       summary: task.title,
       description: task.description || 'Tarea del sistema',
       start: {
-        dateTime: task.dueDate.toISOString(),
+        dateTime: startDate.toISOString(),
         timeZone: 'America/Mexico_City',
       },
       end: {
-        dateTime: new Date(task.dueDate.getTime() + 3600000).toISOString(),
+        dateTime: endDate.toISOString(),
         timeZone: 'America/Mexico_City',
       },
       colorId: this.getColorByPriority(task.priority),
@@ -199,7 +189,7 @@ export class GoogleCalendarService {
     };
 
     try {
-      const response = await calendar.events.insert({
+      const response = await calendarClient.events.insert({
         calendarId: 'primary',
         requestBody: event,
         sendUpdates: 'all',
