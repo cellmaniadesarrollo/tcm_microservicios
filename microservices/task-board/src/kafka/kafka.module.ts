@@ -1,9 +1,17 @@
+// task-board/src/kafka/kafka.module.ts
 import { Global, Module } from '@nestjs/common';
-//import { KafkaProducerService } from './kafka.producer';
 import { KafkaConsumerService } from './kafka.consumer';
+import { KafkaProducerService } from './kafka.producer'; // 👈 Importar
+
 @Global()
 @Module({
-    providers: [KafkaConsumerService,],
-    exports: [KafkaConsumerService],
+  providers: [
+    KafkaConsumerService,
+    KafkaProducerService, // 👈 Agregar
+  ],
+  exports: [
+    KafkaConsumerService,
+    KafkaProducerService, // 👈 Exportar
+  ],
 })
-export class KafkaModule { }
+export class KafkaModule {}

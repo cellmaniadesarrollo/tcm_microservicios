@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { InternalAuthInterceptor } from './interceptors/internal-auth.interceptor';
+import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 import * as http from 'http';
 
 async function bootstrap() {
@@ -33,7 +34,7 @@ async function bootstrap() {
       },
     });
 
-    // Conectar RabbitMQ
+    // Conectar RabbitMQ (PERO asegúrate de que RABBIT_URL apunte a 'rabbitmq')
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.RMQ,
       options: {
@@ -54,6 +55,13 @@ async function bootstrap() {
     });
 
     app.useGlobalInterceptors(new InternalAuthInterceptor());
+
+    // ✅ FORZAR EJECUCIÓN DEL ORCHESTRATOR (NUEVO)
+    console.log('🔴🔴🔴 [Main] Obteniendo orchestrator...');
+    const orchestrator = app.get(KafkaListenersOrchestrator);
+    console.log('🔴🔴🔴 [Main] Orchestrator obtenido, ejecutando onModuleInit...');
+    await orchestrator.onModuleInit();
+    console.log('🔴🔴🔴 [Main] onModuleInit ejecutado!');
     
     // ✅ Iniciar todos los microservicios
     await app.startAllMicroservices();

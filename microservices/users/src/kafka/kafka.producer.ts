@@ -34,7 +34,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
         try {
             await this.producer.connect();
             console.log('✅ Kafka Producer conectado - ms-users');
-        } catch (error) {
+        } catch (error:any) {
             console.error('❌ Error conectando Kafka Producer:', error.message);
         }
     }
@@ -96,4 +96,4 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
         }
         return false;
     }
-}
+} 

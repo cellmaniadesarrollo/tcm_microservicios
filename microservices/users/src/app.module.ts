@@ -1,3 +1,4 @@
+// users/src/app.module.ts
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -12,9 +13,13 @@ import { BroadcastModule } from './broadcast/broadcast.module';
 import { CompaniesModule } from './companies/companies.module';
 import { HealthModule } from './health/health.module';
 import { KafkaModule } from './kafka/kafka.module';
+import { GoogleModule } from './google/google.module';
+import { GoogleController } from './google/google.controller';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
+
 @Module({
-  imports: [UsersModule,
+  imports: [
+    UsersModule,
     TypeOrmModule.forRoot({
       type: 'postgres',
       host: process.env.DB_HOST,
@@ -24,15 +29,20 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       entities: [User, Employee, UserGroup, Gender, Group],
-      synchronize: true, // Solo para desarrollo
+      synchronize: true,
     }),
     UsersModule,
     BroadcastModule,
     CompaniesModule,
     HealthModule,
     KafkaModule,
+    GoogleModule,
   ],
   controllers: [AppController],
-  providers: [AppService, KafkaListenersOrchestrator],
+  providers: [
+    AppService,
+    KafkaListenersOrchestrator,
+    GoogleController, // 👈 Agregado
+  ],
 })
-export class AppModule { }
+export class AppModule {}
