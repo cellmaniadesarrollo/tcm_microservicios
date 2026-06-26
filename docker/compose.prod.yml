@@ -11,6 +11,9 @@ services:
     container_name: rabbitmq
     networks:
       - backend
+    ports:
+      - "5672:5672"    # Puerto de comunicación de RabbitMQ (AMQP)
+      - "15672:15672"  # Puerto del Panel de Control (Management)
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 30s
