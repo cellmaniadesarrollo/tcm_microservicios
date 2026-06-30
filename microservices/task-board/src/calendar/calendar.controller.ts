@@ -21,12 +21,14 @@ import { CreateEmployeeTaskDto } from './dto/create-employee-task.dto';
 import { UpdateEmployeeTaskDto } from './dto/update-employee-task.dto';
 import { GetMonthTasksDto } from './dto/get-month-tasks.dto';
 import { CompleteTaskDto } from './dto/complete-task.dto';
+import { ConfigService } from '@nestjs/config';
 
 @Controller('calendar')
 export class CalendarController {
   constructor(
     private readonly calendarService: CalendarService,
     private readonly googleCalendarService: GoogleCalendarService,
+    private readonly configService: ConfigService,
   ) {
     console.log('✅✅✅ CalendarController INICIALIZADO ✅✅✅');
   }
@@ -214,18 +216,20 @@ export class CalendarController {
       await this.googleCalendarService.saveUserTokens(state, tokens);
       console.log('✅ [CALLBACK] Tokens guardados');
       
-      return res.json({
-        success: true,
-        message: 'Autenticación con Google exitosa',
-        userId: state,
-      });
+      // ✅ Redirigir al frontend
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+      const redirectUrl = `${frontendUrl}/taskboard/calendar?google_connected=true&userId=${state}`;
+      
+      console.log(`🔍 [CALLBACK] Redirigiendo a: ${redirectUrl}`);
+      return res.redirect(redirectUrl);
+      
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('❌ [CALLBACK] Error:', errorMessage);
-      return res.status(400).json({
-        success: false,
-        error: errorMessage,
-      });
+      
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+      const redirectUrl = `${frontendUrl}/taskboard/calendar?google_error=true&message=${encodeURIComponent(errorMessage)}`;
+      return res.redirect(redirectUrl);
     }
   }
 

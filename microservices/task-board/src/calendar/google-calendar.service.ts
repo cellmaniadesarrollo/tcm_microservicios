@@ -31,8 +31,9 @@ export class GoogleCalendarService {
       state: userId,
       redirect_uri: this.configService.get<string>('GOOGLE_REDIRECT_URI'),
     });
+    const cleanUrl = url.trim().replace(/\s/g, '');
     console.log(`🔍 [GoogleCalendar] URL generada: ${url}`);
-    return url;
+    return cleanUrl;
   }
 
   async getTokensFromCode(code: string): Promise<any> {
