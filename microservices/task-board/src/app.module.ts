@@ -11,6 +11,7 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { ImagesModule } from './images/images.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { CalendarModule } from './calendar/calendar.module';
 
 @Module({
   imports: [
@@ -31,7 +32,8 @@ import { NotificationsModule } from './notifications/notifications.module';
     LabelsModule,
     AwsS3Module,
     ImagesModule,
-    NotificationsModule
+    NotificationsModule,
+    CalendarModule
   ],
   controllers: [AppController],
   providers: [AppService],

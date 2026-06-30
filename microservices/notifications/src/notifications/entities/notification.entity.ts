@@ -136,6 +136,26 @@ export class Notification {
   @Prop({ type: Date, default: null, index: true })
   scheduledFor: Date;
 
+  // ============================================
+  // ✅ NUEVOS CAMPOS PARA NOTAS Y ARCHIVADO
+  // ============================================
+  
+  // ✅ Notas/observaciones del usuario sobre esta notificación específica
+  @Prop({ type: String, default: null })
+  notes: string;
+
+  // ✅ Marcar como archivada/oculta (no mostrar en listados normales)
+  @Prop({ type: Boolean, default: false, index: true })
+  isArchived: boolean;
+
+  // ✅ Fecha cuando se archivó
+  @Prop({ type: Date, default: null })
+  archivedAt: Date;
+
+  // ✅ Usuario que archivó la notificación
+  @Prop({ type: String, default: null })
+  archivedBy: string;
+
   @Prop({ type: Date, default: Date.now })
   createdAt: Date;
 
@@ -161,3 +181,8 @@ NotificationSchema.index({ createdById: 1, companyId: 1, createdAt: -1 });
 // 🆕 Índice para filtrar por fecha programada
 NotificationSchema.index({ scheduledFor: 1, createdAt: -1 });
 NotificationSchema.index({ scheduledFor: 1, read: 1 });
+
+// ✅ Nuevos índices para archivado
+NotificationSchema.index({ isArchived: 1, createdAt: -1 });
+NotificationSchema.index({ userId: 1, isArchived: 1, createdAt: -1 });
+NotificationSchema.index({ archivedAt: 1 });
