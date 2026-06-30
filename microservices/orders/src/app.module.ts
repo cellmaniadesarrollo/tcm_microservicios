@@ -19,7 +19,9 @@ import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator
 import { SearchHistoryModule } from './search-history/search-history.module';
 import { OrderPotentialPurchaseModule } from './order-potential-purchase/order-potential-purchase.module';
 import { InventoryItemsModule } from './inventory-items/inventory-items.module';
-import { SpareAssignmentsModule } from './spare-assignments/spare-assignments.module';
+import { SpareAssignmentsModule } from './spare-assignments/spare-assignments.module'; 
+import { ReportingHubModule } from './reporting-hub/reporting-hub.module';
+import { OrderValidationLockModule } from './order-validation-lock/order-validation-lock.module';
 
 @Module({
   imports: [
@@ -33,14 +35,16 @@ import { SpareAssignmentsModule } from './spare-assignments/spare-assignments.mo
       autoLoadEntities: true,
       synchronize: true,
     }), CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule,
-    MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, KafkaModule,
+    MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, ReportingHubModule,
     HealthModule,
     SearchHistoryModule,
     OrderPotentialPurchaseModule,
     InventoryItemsModule,
     SpareAssignmentsModule,
+    KafkaModule,
+    OrderValidationLockModule,
   ],
   controllers: [AppController],
-  providers: [AppService, KafkaListenersOrchestrator],
+  providers: [AppService],
 })
 export class AppModule { }

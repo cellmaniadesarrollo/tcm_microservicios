@@ -34,10 +34,11 @@ async function bootstrap() {
     });
     // ── 3. Interceptor global y microservicios ──
     app.useGlobalInterceptors(new InternalAuthInterceptor());
+
     await app.startAllMicroservices();
     console.log('✅ Microservicios RabbitMQ iniciados');
 
-    // ── 4. Iniciar Fastify en el puerto 3000 (único servidor) ──
+    // ── 4. Iniciar Fastify en el puerto 3000 (único servidor) ──a
     await app.listen(3000, '0.0.0.0');
     console.log('✅ NestJS Fastify escuchando en 0.0.0.0:3000');
 

@@ -10,9 +10,11 @@ import { Attachment } from '../order-findings/entities/attachment.entity';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { Order } from '../order-workflow/entities/order.entity';
 import { BroadcastModule } from '../broadcast/broadcast.module';
+import { OrderValidationLockModule } from '../order-validation-lock/order-validation-lock.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Device, DeviceAccount, DeviceIMEI, FindingProcedure, Attachment, Order]), AwsS3Module, BroadcastModule],
+  imports: [TypeOrmModule.forFeature([Device, DeviceAccount, DeviceIMEI, FindingProcedure,
+    Attachment, Order]), AwsS3Module, BroadcastModule, OrderValidationLockModule],
   controllers: [DevicesController],
   providers: [DevicesService],
   exports: [DevicesService]

@@ -12,7 +12,7 @@ async function bootstrap() {
       new FastifyAdapter()
     );
 
-    // ── 2. Conectar los microservicios de RabbitMQ ──
+    // ── 2. Queue principal (eventos HTTP / gateway) ──
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.RMQ,
       options: {
@@ -23,12 +23,23 @@ async function bootstrap() {
       },
     });
 
-    // ── 3. Interceptor global y microservicios ──
+    // ── 3. Queue de sincronización bulk (ms-orders → reporting-hub) ──
+    app.connectMicroservice<MicroserviceOptions>({
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+        queue: 'reporting_hub_queue_sync',
+        queueOptions: { durable: true },
+        persistent: true,
+      },
+    });
+
+    // ── 4. Interceptor global y microservicios ──
     app.useGlobalInterceptors(new InternalAuthInterceptor());
     await app.startAllMicroservices();
     console.log('✅ Microservicios RabbitMQ iniciados');
 
-    // ── 4. Iniciar Fastify en el puerto 3000 (único servidor) ──
+    // ── 5. Iniciar Fastify en el puerto 3000 (único servidor) ──
     await app.listen(3000, '0.0.0.0');
     console.log('✅ NestJS Fastify escuchando en 0.0.0.0:3000');
 
@@ -38,4 +49,4 @@ async function bootstrap() {
   }
 }
 
-bootstrap(); 
+bootstrap();

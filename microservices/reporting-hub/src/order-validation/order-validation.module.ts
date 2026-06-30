@@ -5,6 +5,7 @@ import { OrderValidationController } from './order-validation.controller';
 import { OrderValidationService } from './order-validation.service';
 import { OrderReplica, OrderReplicaSchema } from '../orders-relay/schemas/order-replica.schema';
 import { UserEmployeeCache, UserEmployeeCacheSchema } from '../users-employees-events/schemas/user-employee-cache.schema';
+import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
     imports: [
@@ -13,6 +14,7 @@ import { UserEmployeeCache, UserEmployeeCacheSchema } from '../users-employees-e
             { name: OrderReplica.name, schema: OrderReplicaSchema },
             { name: UserEmployeeCache.name, schema: UserEmployeeCacheSchema },
         ]),
+        BroadcastModule
     ],
     controllers: [OrderValidationController],
     providers: [OrderValidationService],

@@ -1,3 +1,4 @@
+// src/order-validation/order-validation.service.ts
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -5,11 +6,10 @@ import { OrderValidation, OrderValidationDocument } from './schemas/order-valida
 import { OrderReplica, OrderReplicaDocument } from '../orders-relay/schemas/order-replica.schema';
 import { RpcException } from '@nestjs/microservices';
 import { UserEmployeeCache, UserEmployeeCacheDocument } from '../users-employees-events/schemas/user-employee-cache.schema';
+import { BroadcastService } from '../broadcast/broadcast.service';
 
 const ENTREGADA_STATUS_ID = 8;
-
-// Zona horaria de la empresa. Muévelo a ConfigService si manejas multi-zona.
-const DEFAULT_TIMEZONE = 'America/Guayaquil'; // UTC-5, sin DST
+const DEFAULT_TIMEZONE = 'America/Guayaquil';
 
 @Injectable()
 export class OrderValidationService implements OnModuleInit {
@@ -24,7 +24,23 @@ export class OrderValidationService implements OnModuleInit {
 
         @InjectModel(UserEmployeeCache.name)
         private readonly userCacheModel: Model<UserEmployeeCacheDocument>,
+
+        private readonly broadcastService: BroadcastService,
     ) { }
+    async findValidationsForSync(fromCache: Date | null): Promise<{ order_id: number; is_checked: boolean; updatedAt: Date }[]> {
+        const filter = fromCache
+            ? { updatedAt: { $gt: new Date(fromCache) } }
+            : {};
+
+        const results = await this.validationModel
+            .find(filter)
+            .select('order_id is_checked updatedAt')
+            .sort({ updatedAt: 1 })
+            .lean<{ order_id: number; is_checked: boolean; updatedAt: Date }[]>()
+            .exec();
+
+        return results;
+    }
 
     // ─── Lifecycle Hook ───────────────────────────────────────────────────────
 
@@ -38,11 +54,11 @@ export class OrderValidationService implements OnModuleInit {
      * Busca todas las órdenes en estado ENTREGADA (id=8) y crea el registro
      * de validación para las que aún no lo tengan.
      * Se ejecuta una única vez al arrancar el módulo.
+     * El seed NO publica eventos Kafka — son datos históricos, no eventos nuevos.
      */
     private async seedDeliveredOrderValidations(): Promise<void> {
         this.logger.log('Verificando validaciones pendientes de órdenes ENTREGADAS...');
 
-        // 1. Traer id + statusHistory para extraer la fecha real de entrega
         const deliveredOrders = await this.orderReplicaModel
             .find({ 'currentStatus.id': ENTREGADA_STATUS_ID })
             .select('id statusHistory')
@@ -54,7 +70,6 @@ export class OrderValidationService implements OnModuleInit {
             return;
         }
 
-        // 2. Filtrar las que ya tienen validación
         const allOrderIds = deliveredOrders.map((o) => o.id);
 
         const existingIds = new Set(
@@ -76,8 +91,6 @@ export class OrderValidationService implements OnModuleInit {
 
         this.logger.log(`Creando validaciones para ${pending.length} orden(es)...`);
 
-        // 3. Agrupar por fecha de entrega real en zona horaria local.
-        //    Usa el último cambio a ENTREGADA del statusHistory; si no existe, fecha actual.
         const groupsByDate = new Map<string, typeof pending>();
 
         for (const order of pending) {
@@ -85,7 +98,6 @@ export class OrderValidationService implements OnModuleInit {
                 .reverse()
                 .find((h) => h.toStatus?.id === ENTREGADA_STATUS_ID);
 
-            // ✅ toDateKey convierte a zona local antes de extraer YYYY-MM-DD
             const deliveredAt = deliveredEntry?.changed_at ?? new Date();
             const dateKey = this.toDateKey(deliveredAt);
 
@@ -93,7 +105,6 @@ export class OrderValidationService implements OnModuleInit {
             groupsByDate.get(dateKey)!.push(order);
         }
 
-        // 4. Obtener el máximo sequential existente por fecha (seed puede correr parcialmente)
         const dateKeys = [...groupsByDate.keys()];
 
         const maxSeqResults = await this.validationModel.aggregate<{
@@ -106,7 +117,6 @@ export class OrderValidationService implements OnModuleInit {
 
         const maxSeqByDate = new Map(maxSeqResults.map((r) => [r._id, r.maxSeq]));
 
-        // 5. Construir documentos respetando el orden dentro de cada día
         const docs: Partial<OrderValidation>[] = [];
 
         for (const [dateKey, orders] of groupsByDate) {
@@ -124,20 +134,25 @@ export class OrderValidationService implements OnModuleInit {
             }
         }
 
-        // 6. Bulk insert
         const result = await this.validationModel.insertMany(docs, { ordered: false });
 
         this.logger.log(`✔ ${result.length} validación(es) creadas correctamente.`);
+        // ✅ Publicar evento por cada validación creada en el seed —
+        // el registro es nuevo independientemente de cuándo se entregó la orden.
+        await Promise.all(
+            docs.map((doc) =>
+                this.broadcastService.publishValidationCreated({
+                    order_id: doc.order_id!,
+                    daily_sequential: doc.daily_sequential!,
+                    validation_date_key: doc.validation_date_key!,
+                }),
+            ),
+        );
     }
 
     // ─── Create ───────────────────────────────────────────────────────────────
 
-    /**
-     * Crea el registro de validación cuando una orden pasa a estado ENTREGADA.
-     * Si ya existe (reintento de evento), simplemente lo ignora.
-     */
     async createForDeliveredOrder(orderId: number): Promise<void> {
-        // ✅ Usa la fecha local (zona horaria Ecuador) en lugar de UTC
         const dateKey = this.toDateKey(new Date());
 
         const last = await this.validationModel
@@ -159,6 +174,14 @@ export class OrderValidationService implements OnModuleInit {
             });
 
             this.logger.log(`Validación creada | orden ${orderId} | ${dateKey} | #${nextSeq}`);
+
+            // ✅ Publicar evento — orden recién entregada, validación nueva
+            await this.broadcastService.publishValidationCreated({
+                order_id: orderId,
+                daily_sequential: nextSeq,
+                validation_date_key: dateKey,
+            });
+
         } catch (err: any) {
             if (err?.code === 11000) {
                 this.logger.warn(`Validación ya existente para orden ${orderId}, se omite.`);
@@ -189,20 +212,35 @@ export class OrderValidationService implements OnModuleInit {
             throw new RpcException({ status: 404, message: `User ${user.sub} not found in cache` });
         }
 
+        const performer = {
+            id: userCache.id,
+            username: userCache.username,
+            first_name: userCache.first_name,
+            last_name: userCache.last_name ?? '',
+        };
+
         doc.is_checked = isChecked;
         doc.history.push({
             status_snapshot: isChecked,
-            performed_by: {
-                id: userCache.id,
-                username: userCache.username,
-                first_name: userCache.first_name,
-                last_name: userCache.last_name ?? '',
-            },
+            performed_by: performer,
             timestamp: new Date(),
         });
 
-        return doc.save();
+        const saved = await doc.save();
+
+        // ✅ Publicar evento — alguien marcó/desmarcó la validación
+        await this.broadcastService.publishValidationUpdated({
+            validation_id: validationId,
+            order_id: doc.order_id,
+            is_checked: isChecked,
+            performed_by: performer,
+            timestamp: new Date().toISOString(),
+        });
+
+        return saved;
     }
+
+    // ─── Query ────────────────────────────────────────────────────────────────
 
     async getOrderValidationStatus(id: string) {
         const orderId = Number(id);
@@ -214,10 +252,7 @@ export class OrderValidationService implements OnModuleInit {
             .exec();
 
         if (!validation) {
-            return {
-                found: false,
-                is_validated: false,
-            };
+            return { found: false, is_validated: false };
         }
 
         return {
@@ -227,17 +262,8 @@ export class OrderValidationService implements OnModuleInit {
         };
     }
 
-
     // ─── Helpers ──────────────────────────────────────────────────────────────
 
-    /**
-     * Convierte una fecha a string YYYY-MM-DD respetando la zona horaria local.
-     * `en-CA` produce exactamente ese formato sin necesidad de slice ni padding manual.
-     *
-     * Ejemplo con UTC-5 (Ecuador):
-     *   new Date('2026-05-14T00:18:00Z') → "2026-05-13"  ✅
-     *   new Date('2026-05-14T05:30:00Z') → "2026-05-14"  ✅
-     */
     private toDateKey(date: Date, tz: string = DEFAULT_TIMEZONE): string {
         return new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(date);
     }
