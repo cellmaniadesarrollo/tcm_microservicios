@@ -18,6 +18,7 @@ import { UsersEmployeesEventsService } from '../users-employees-events/users-emp
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 import { resolveUserSnapshot } from './helpers/user-snapshot.helper';
+import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
 
 @Injectable()
 export class OrderFindingsService {
@@ -42,6 +43,7 @@ export class OrderFindingsService {
     private readonly orderWorkflow: OrderWorkflowService,
     private readonly userCacheService: UsersEmployeesEventsService,
     private readonly broadcastService: BroadcastService,
+    private readonly orderValidationLockService: OrderValidationLockService,
   ) { }
 
   // ─── Helper privado para emitir notificaciones ────────────────────────────
@@ -76,7 +78,13 @@ export class OrderFindingsService {
     const { orderId, description } = dto;
     const order = await this.orderWorkflow.getOrderNotificationData(orderId, user.companyId);
 
-    if (!order) throw new NotFoundException('Orden no encontrada');
+    if (!order) {
+      throw new RpcException(new NotFoundException('Orden no encontrada'));
+    }
+
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(order.id);
+    // ──────────────────────────────────────────────────────────────────
 
     const finding = this.orderFindingRepository.create({
       order_id: order.id,
@@ -85,6 +93,7 @@ export class OrderFindingsService {
       is_active: true,
       is_resolved: false,
     });
+
 
     await this.orderFindingRepository.save(finding);
 
@@ -136,7 +145,13 @@ export class OrderFindingsService {
       where: { id: dto.findingId, is_active: true },
     });
 
-    if (!finding) throw new NotFoundException('Hallazgo no encontrado');
+    if (!finding) {
+      throw new RpcException(new NotFoundException('Hallazgo no encontrado'));
+    }
+
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(finding.order_id);
+    // ──────────────────────────────────────────────────────────────────
 
     const procedure = this.procedureRepository.create({
       finding_id: finding.id,
@@ -152,6 +167,7 @@ export class OrderFindingsService {
       client_approved: false,
       was_solved: false,
     });
+
 
     await this.procedureRepository.save(procedure);
 
@@ -243,7 +259,9 @@ export class OrderFindingsService {
         new NotFoundException('Hallazgo no encontrado o no pertenece a esta compañía'),
       );
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(finding.order_id);
+    // ──────────────────────────────────────────────────────────────────
     if (dto.is_active === false && finding.procedures?.some(p => p.is_active)) {
       throw new RpcException(
         new BadRequestException('No se puede desactivar un hallazgo con procedimientos activos'),
@@ -291,7 +309,9 @@ export class OrderFindingsService {
         new NotFoundException('Procedimiento no encontrado o acceso denegado'),
       );
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(procedure.finding.order_id);
+    // ──────────────────────────────────────────────────────────────────
     // if (procedure.client_approved && dto.client_approved === false) {
     //   throw new RpcException(
     //     new ForbiddenException('No se puede desaprobar un procedimiento ya aprobado por el cliente'),
@@ -353,7 +373,9 @@ export class OrderFindingsService {
         new NotFoundException('Hallazgo no encontrado o no pertenece a esta compañía'),
       );
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(finding.order_id);
+    // ──────────────────────────────────────────────────────────────────
     if (finding.procedures?.some(p => p.is_active)) {
       throw new RpcException(
         new BadRequestException('No se puede eliminar un hallazgo que tiene procedimientos activos'),
@@ -396,6 +418,9 @@ export class OrderFindingsService {
         new NotFoundException('Procedimiento no encontrado o acceso denegado'),
       );
     }
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(procedure.finding.order_id);
+    // ──────────────────────────────────────────────────────────────────
 
     if (procedure.client_approved) {
       throw new RpcException(
@@ -454,14 +479,16 @@ export class OrderFindingsService {
       orderId = procedure?.finding?.order_id;
     }
 
-    if (!isValidEntity) {
+    if (!isValidEntity || !orderId) {
       throw new RpcException(
         new NotFoundException(
           `Entidad ${dto.entityType} no encontrada o no pertenece a esta compañía`,
         ),
       );
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(orderId);
+    // ──────────────────────────────────────────────────────────────────
     const uploaded: Attachment[] = [];
 
     for (const file of files) {
@@ -551,7 +578,9 @@ export class OrderFindingsService {
     } else {
       throw new RpcException(new BadRequestException('Tipo de entidad inválido'));
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(orderId);
+    // ──────────────────────────────────────────────────────────────────
     attachment.is_active = false;
     await this.attachmentRepository.save(attachment);
 

@@ -5,6 +5,8 @@ import { OrderShipping } from './entities/order-shipping.entity';
 import { Order } from './entities/order.entity';
 import { SaveInboundDto } from './dto/save-inbound.dto';
 import { SaveOutboundDto } from './dto/save-outbound.dto';
+import { RpcException } from '@nestjs/microservices';
+import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
 
 @Injectable()
 export class OrderShippingService {
@@ -13,12 +15,19 @@ export class OrderShippingService {
         private readonly shippingRepo: Repository<OrderShipping>,
         @InjectRepository(Order)
         private readonly orderRepo: Repository<Order>,
+        private readonly orderValidationLockService: OrderValidationLockService,
     ) { }
 
     // ── Recepción ────────────────────────────────────────────────────────────
     async saveInbound(orderId: number, dto: SaveInboundDto): Promise<OrderShipping> {
         const order = await this.orderRepo.findOne({ where: { id: orderId } });
-        if (!order) throw new NotFoundException(`Order ${orderId} not found`);
+        if (!order) {
+            throw new RpcException(new NotFoundException(`Order ${orderId} not found`));
+        }
+
+        // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+        await this.orderValidationLockService.assertEditable(orderId);
+        // ──────────────────────────────────────────────────────────────────
 
         let shipping = await this.shippingRepo.findOne({ where: { order_id: orderId } });
 
@@ -48,8 +57,13 @@ export class OrderShippingService {
     // ── Retorno ──────────────────────────────────────────────────────────────
     async saveOutbound(orderId: number, dto: SaveOutboundDto): Promise<OrderShipping> {
         const shipping = await this.shippingRepo.findOne({ where: { order_id: orderId } });
-        if (!shipping) throw new NotFoundException(`No shipping record for order ${orderId}`);
+        if (!shipping) {
+            throw new RpcException(new NotFoundException(`No shipping record for order ${orderId}`));
+        }
 
+        // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+        await this.orderValidationLockService.assertEditable(orderId);
+        // ──────────────────────────────────────────────────────────────────
         Object.assign(shipping, {
             outbound_tracking: dto.outbound_tracking,
             outbound_courier: dto.outbound_courier,

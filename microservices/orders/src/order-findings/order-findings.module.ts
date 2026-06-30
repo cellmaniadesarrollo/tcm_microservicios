@@ -15,11 +15,12 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { OrderWorkflowModule } from '../order-workflow/order-workflow.module';
 import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
 import { BroadcastModule } from '../broadcast/broadcast.module';
+import { OrderValidationLockModule } from '../order-validation-lock/order-validation-lock.module';
 
 @Module({
   imports: [UsersEmployeesEventsModule, OrderWorkflowModule, NotificationsModule,
     AwsS3Module, TypeOrmModule.forFeature([Attachment, FindingProcedure, OrderFinding, Order, UserEmployeeCache
-    ]), BroadcastModule],
+    ]), BroadcastModule, OrderValidationLockModule],
   controllers: [OrderFindingsController],
   providers: [OrderFindingsService],
 })

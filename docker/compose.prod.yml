@@ -90,6 +90,8 @@ services:
           ms.inventory.spare.assigned 
           ms.inventory.spare.cancelled 
           ms.inventory.spare.returned
+          ms.reporting.validation.created
+          ms.reporting.validation.updated
           users.get-token
           users.has-token
           users.refresh-token

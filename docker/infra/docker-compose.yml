@@ -68,7 +68,9 @@ services:
           ms.order.updated \
           ms.inventory.spare.assigned \
           ms.inventory.spare.cancelled \
-          ms.inventory.spare.returned; do
+          ms.inventory.spare.returned \
+          ms.reporting.validation.created \
+          ms.reporting.validation.updated; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic $$TOPIC \
             --partitions 1 --replication-factor 1
