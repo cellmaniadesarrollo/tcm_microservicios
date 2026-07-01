@@ -5,7 +5,15 @@ import { TaskboardService } from './taskboard.service';
 
 @Controller('taskboard')
 export class TaskboardController {
-  constructor(private readonly taskboardService: TaskboardService) {}
+  private readonly taskBoardUrl: string;
+
+  constructor(private readonly taskboardService: TaskboardService) {
+    this.taskBoardUrl = process.env.TASK_BOARD_URL || 
+                         (process.env.NODE_ENV === 'production' 
+                           ? 'http://ms-task-board:3001' 
+                           : 'http://localhost:3005');
+    console.log(`🔍 [TaskboardController] TASK_BOARD_URL: ${this.taskBoardUrl}`);
+  }
 
   // ========== USERS (para buscar miembros) ==========
   
@@ -528,8 +536,9 @@ export class TaskboardController {
   async googleAuth(@Param('userId') userId: string) {
     console.log(`🔍 [Gateway] googleAuth - userId: ${userId}`);
     
-    // ✅ Redirigir a task-board en el puerto 3005 (expuesto al host)
-    const url = `http://localhost:3005/calendar/auth/google/${userId}`;
+    // ✅ Usar la variable de instancia
+    const url = `${this.taskBoardUrl}/calendar/auth/google/${userId}`;
+    console.log(`📤 [Gateway] Redirigiendo a: ${url}`);
     return { url, statusCode: 302 };
   }
 
@@ -544,7 +553,10 @@ export class TaskboardController {
     @Res() res: any,
   ) {
     console.log(`🔍 [Gateway] oauthCallback - code: ${code?.substring(0, 10)}..., state: ${state}`);
-    const callbackUrl = `http://ms-task-board:3001/calendar/oauth-callback?code=${code}&state=${state}`;
+    
+    // ✅ Usar la variable de instancia
+    const callbackUrl = `${this.taskBoardUrl}/calendar/oauth-callback?code=${code}&state=${state}`;
+    console.log(`📤 [Gateway] Redirigiendo a task-board: ${callbackUrl}`);
     return res.redirect(callbackUrl);
   }
 
