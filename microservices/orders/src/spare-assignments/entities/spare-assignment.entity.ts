@@ -3,16 +3,11 @@ import {
     Entity,
     PrimaryGeneratedColumn,
     Column,
-    ManyToOne,
-    JoinColumn,
-    CreateDateColumn,
-    UpdateDateColumn,
     Index,
 } from 'typeorm';
-import { OrderFinding } from '../../order-findings/entities/order-finding.entity';
 
 @Entity('spare_assignments')
-@Index(['finding_id'])
+@Index(['order_id'])
 @Index(['status'])
 export class SpareAssignment {
 
@@ -23,18 +18,12 @@ export class SpareAssignment {
     @Column({ type: 'varchar', unique: true })
     movement_id: string; // ObjectId del movimiento en MongoDB
 
-    // 🔗 Hallazgo
-    @ManyToOne(() => OrderFinding, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'finding_id' })
-    finding: OrderFinding;
-
     @Column()
-    finding_id: number;
+    order_id: number;
 
     @Column({ type: 'int' })
     quantity: number;
 
-    // Snapshot del repuesto al momento de asignación
     @Column({ type: 'varchar' })
     sku: string;
 
@@ -53,9 +42,10 @@ export class SpareAssignment {
     @Column({ type: 'timestamp', nullable: true })
     returned_at: Date | null;
 
-    @CreateDateColumn()
+    // ── Timestamps de la FUENTE DE VERDAD (Mongo), no de la réplica ──
+    @Column({ type: 'timestamp' })
     created_at: Date;
 
-    @UpdateDateColumn()
+    @Column({ type: 'timestamp' })
     updated_at: Date;
 }

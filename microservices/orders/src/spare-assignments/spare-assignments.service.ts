@@ -36,9 +36,9 @@ export class SpareAssignmentsService {
             const chunk = spares.slice(i, i + CHUNK_SIZE);
 
             const entities = chunk.map((spare) => {
-                const entity = this.repo.create({
+                return this.repo.create({
                     movement_id: String(spare._id ?? spare.movementId),
-                    finding_id: spare.findingId,
+                    order_id: spare.orderId,
                     quantity: spare.quantity,
                     sku: spare.spare?.sku,
                     product_name: spare.spare?.productName,
@@ -46,8 +46,9 @@ export class SpareAssignmentsService {
                     batch_number: spare.spare?.batchNumber,
                     status: spare.status ?? 'active',
                     returned_at: spare.returnedAt ?? null,
+                    created_at: spare.createdAt,
+                    updated_at: spare.updatedAt,
                 });
-                return entity;
             });
 
             await this.repo
@@ -67,62 +68,66 @@ export class SpareAssignmentsService {
 
         console.log(`✅ Sync spare assignments OK | Total: ${total}`);
     }
+
     async assignSpare(data: any): Promise<void> {
         const assignment = this.repo.create({
             movement_id: String(data.movementId),
-            finding_id: data.findingId,
+            order_id: data.orderId,
             quantity: data.quantity,
             sku: data.spare.sku,
             product_name: data.spare.productName,
             unit_price: data.spare.unitPrice,
             batch_number: data.spare.batchNumber,
             status: 'active',
+            created_at: data.createdAt ?? data.assignedAt,
+            updated_at: data.updatedAt ?? data.assignedAt,
         });
 
         await this.repo.save(assignment);
-        console.log(`✅ Repuesto asignado → finding: ${data.findingId} | sku: ${data.spare.sku}`);
+        console.log(`✅ Repuesto asignado → order: ${data.orderId} | sku: ${data.spare.sku}`);
     }
 
-    async cancelSpare(movementId: string): Promise<void> {
+    async cancelSpare(data: any): Promise<void> {
         await this.repo.update(
-            { movement_id: movementId },
-            { status: 'returned', returned_at: new Date() },
+            { movement_id: String(data.movementId) },
+            {
+                status: 'returned',
+                returned_at: data.returnedAt ?? new Date(),
+                updated_at: data.updatedAt,
+            },
         );
-        console.log(`🚫 Repuesto cancelado → movementId: ${movementId}`);
+        console.log(`🚫 Repuesto cancelado → movementId: ${data.movementId}`);
     }
 
     async returnSpare(data: any): Promise<void> {
-        const returnedAt = new Date();
-
         // ── Marcar el spare original como returned ────────────
         await this.repo.update(
             { movement_id: String(data.movementId) },
-            { status: 'returned', returned_at: returnedAt },
+            {
+                status: 'returned',
+                returned_at: data.returnedAt,
+                updated_at: data.updatedAt,
+            },
         );
 
         console.log(`↩️ Repuesto devuelto → movementId: ${data.movementId} | cantidad devuelta: ${data.returnedQuantity}`);
 
         if (!data.isTotal && data.remainingQuantity > 0 && data.newSpareId) {
-            // ── Devolución parcial: crear nuevo spare activo ──
-            // con el movementId del retorno (newSpareId viene del evento)
-            // pero el spare que queda activo usa el mismo movementId original
-            // para poder trazarlo; usamos newSpareId como movement_id del nuevo registro
             const newAssignment = this.repo.create({
-                movement_id: String(data.newSpareId),   // ObjectId del spare nuevo en Mongo
-                finding_id: data.findingId,
+                movement_id: String(data.newSpareId),
+                order_id: data.orderId,
                 quantity: data.remainingQuantity,
                 sku: data.spare.sku,
                 product_name: data.spare.productName,
                 unit_price: data.spare.unitPrice,
                 batch_number: data.spare.batchNumber,
                 status: 'active',
+                created_at: data.newSpareCreatedAt ?? data.returnedAt,
+                updated_at: data.newSpareUpdatedAt ?? data.returnedAt,
             });
 
             await this.repo.save(newAssignment);
-            console.log(`🔁 Spare parcial activo creado → finding: ${data.findingId} | cantidad restante: ${data.remainingQuantity}`);
+            console.log(`🔁 Spare parcial activo creado → order: ${data.orderId} | cantidad restante: ${data.remainingQuantity}`);
         }
     }
-
-
-
 }

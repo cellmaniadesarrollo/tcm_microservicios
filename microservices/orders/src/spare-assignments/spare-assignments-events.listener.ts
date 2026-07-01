@@ -30,19 +30,18 @@ export class SpareAssignmentsEventsListener {
             (eventType, data) => this.handleSpareReturned(eventType, data),
         );
     }
-
     private async handleSpareAssigned(eventType: string, data: any) {
-        console.log(`🔧 [${eventType}] Repuesto asignado → finding: ${data?.findingId}`);
+        console.log(`🔧 [${eventType}] Repuesto asignado → order: ${data?.orderId}`);
         await this.spareAssignmentsService.assignSpare(data);
     }
 
     private async handleSpareCancelled(eventType: string, data: any) {
         console.log(`🚫 [${eventType}] Repuesto cancelado → movementId: ${data?.movementId}`);
-        await this.spareAssignmentsService.cancelSpare(data.movementId);
+        await this.spareAssignmentsService.cancelSpare(data);
     }
 
     private async handleSpareReturned(eventType: string, data: any) {
         console.log(`↩️ [${eventType}] Repuesto devuelto → movementId: ${data?.movementId} | total: ${data?.isTotal}`);
         await this.spareAssignmentsService.returnSpare(data);
     }
-}
+} 
