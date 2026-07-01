@@ -2,6 +2,7 @@
 import { Controller, Post, Body, Get, Put, Param, Res, Patch, Delete, Query, UploadedFile, UseInterceptors, Redirect } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TaskboardService } from './taskboard.service';
+import { Response } from 'express';
 
 @Controller('taskboard')
 export class TaskboardController {
@@ -547,7 +548,7 @@ export class TaskboardController {
   async oauthCallback(
     @Query('code') code: string,
     @Query('state') state: string,
-    @Res() res: any,
+    @Res() res: Response,
   ) {
     console.log(`🔍 [Gateway] oauthCallback - code: ${code?.substring(0, 10)}..., state: ${state}`);
     const callbackUrl = `http://ms-task-board:3001/calendar/oauth-callback?code=${code}&state=${state}`;
