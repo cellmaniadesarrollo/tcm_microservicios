@@ -531,7 +531,7 @@ export class TaskboardController {
     // ✅ En producción usar el dominio, en desarrollo localhost
     const isProduction = process.env.NODE_ENV === 'production';
     const baseUrl = isProduction 
-      ? 'https://ms.teamcellmania.com:3005'  // 👈 Ajusta según tu dominio
+      ? 'http://ms.teamcellmania.com:3005'  // 👈 Ajusta según tu dominio
       : 'http://localhost:3005';
     
     const url = `${baseUrl}/calendar/auth/google/${userId}`;
