@@ -4,6 +4,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { HttpModule } from '@nestjs/axios';  // ← AGREGAR
 import { TaskboardController } from './taskboard.controller';
 import { TaskboardService } from './taskboard.service';
+import { GoogleRedirectController } from './google-redirect.controller';
 
 @Module({
   imports: [
@@ -35,7 +36,10 @@ import { TaskboardService } from './taskboard.service';
       },
     ]),
   ],
-  controllers: [TaskboardController],
+  controllers: [
+    TaskboardController,
+    GoogleRedirectController
+  ],
   providers: [TaskboardService],
   exports: [TaskboardService],
 })
