@@ -216,31 +216,22 @@ export class CalendarController {
       await this.googleCalendarService.saveUserTokens(state, tokens);
       console.log('✅ [CALLBACK] Tokens guardados');
       
-      // ✅ DETECCIÓN DE AMBIENTE
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL');
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      
-      // 🔥 Si es desarrollo → /taskboard/calendar, si es producción → /calendar
-      const redirectPath = isDevelopment ? '/taskboard/calendar' : '/calendar';
-      const redirectUrl = `${frontendUrl}${redirectPath}?google_connected=true&userId=${state}`;
-      
-      console.log(`🔍 [CALLBACK] Ambiente: ${isDevelopment ? 'DESARROLLO' : 'PRODUCCIÓN'}`);
-      console.log(`🔍 [CALLBACK] Redirigiendo a: ${redirectUrl}`);
-      return res.redirect(redirectUrl);
+      // ✅ DEVOLVER ÉXITO (NO redirigir)
+      return res.status(200).json({
+        success: true,
+        userId: state,
+        message: 'Tokens guardados correctamente'
+      });
       
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('❌ [CALLBACK] Error:', errorMessage);
       
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL');
-      const isDevelopment = process.env.NODE_ENV === 'development';
-      
-      // 🔥 También para errores
-      const redirectPath = isDevelopment ? '/taskboard/calendar' : '/calendar';
-      const redirectUrl = `${frontendUrl}${redirectPath}?google_error=true&message=${encodeURIComponent(errorMessage)}`;
-      
-      console.log(`🔍 [CALLBACK] Error - Redirigiendo a: ${redirectUrl}`);
-      return res.redirect(redirectUrl);
+      // ✅ DEVOLVER ERROR (NO redirigir)
+      return res.status(500).json({
+        success: false,
+        error: errorMessage
+      });
     }
   }
 
