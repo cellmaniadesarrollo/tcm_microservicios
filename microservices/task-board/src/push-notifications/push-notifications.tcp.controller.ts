@@ -8,11 +8,9 @@ import { SubscriptionDto } from './dto/subscription.dto';
 export class PushNotificationsTcpController {
   constructor(private readonly pushService: PushNotificationsService) {}
 
-  @MessagePattern({ cmd: 'push-notifications.vapid-public-key' })
-  async getVapidPublicKey() {
-    console.log('📥 [TCP] Solicitud de VAPID public key');
-    return { publicKey: this.pushService.getVapidPublicKey() };
-  }
+  // ❌ ELIMINAR ESTE HANDLER (ya no se usa)
+  // @MessagePattern({ cmd: 'push-notifications.vapid-public-key' })
+  // async getVapidPublicKey() { ... }
 
   @MessagePattern({ cmd: 'push-notifications.subscribe' })
   async subscribe(@Payload() data: { userId: string; subscription: SubscriptionDto }) {
