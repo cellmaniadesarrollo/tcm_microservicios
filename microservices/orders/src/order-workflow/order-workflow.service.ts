@@ -43,6 +43,7 @@ import { DevicesService } from '../devices/devices.service';
 import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
 import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
+import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -79,7 +80,8 @@ export class OrderWorkflowService {
     private readonly searchHistoryService: SearchHistoryService,
     private readonly devicesService: DevicesService,
     @InjectRepository(SpareAssignment)
-    private readonly spareAssignmentRepository: Repository<SpareAssignment>
+    private readonly spareAssignmentRepository: Repository<SpareAssignment>,
+    private readonly orderValidationLockService: OrderValidationLockService,
   ) { }
 
   async createOrder(
@@ -1079,24 +1081,30 @@ export class OrderWorkflowService {
       relations: ['currentStatus'],
     });
 
-    if (!order) throw new NotFoundException('Orden no encontrada');
-
+    if (!order) {
+      throw new RpcException(new NotFoundException('Orden no encontrada'));
+    }
+    // ─── BLOQUEO POR VALIDACIÓN ──────────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(order.id);
+    // ────────────────────────────────────────────────────────────────────────
     if (order.current_status_id === toStatusId) {
-      throw new BadRequestException('La orden ya tiene este estado');
+      throw new RpcException(new BadRequestException('La orden ya tiene este estado'));
     }
 
     const fromStatusId = order.current_status_id;
     const fromStatusName = order.currentStatus?.name ?? '';
 
     // ─── VALIDACIÓN DE REGRESIÓN DE ESTADOS ─────────────────────────────────
-    // Nunca se puede regresar a INGRESADO
     if (toStatusId === ESTADO_INGRESADO) {
-      throw new BadRequestException('No se puede regresar una orden al estado INGRESADO');
+      throw new RpcException(
+        new BadRequestException('No se puede regresar una orden al estado INGRESADO'),
+      );
     }
 
-    // Si la orden ya pasó de VISTA, no se puede regresar a VISTA
     if (toStatusId === ESTADO_VISTA && fromStatusId > ESTADO_VISTA) {
-      throw new BadRequestException('No se puede regresar una orden al estado VISTA');
+      throw new RpcException(
+        new BadRequestException('No se puede regresar una orden al estado VISTA'),
+      );
     }
     // ────────────────────────────────────────────────────────────────────────
 
@@ -1104,7 +1112,9 @@ export class OrderWorkflowService {
       where: { id: toStatusId },
     });
 
-    if (!toStatus) throw new NotFoundException('Estado destino no encontrado');
+    if (!toStatus) {
+      throw new RpcException(new NotFoundException('Estado destino no encontrado'));
+    }
 
     order.current_status_id = toStatusId;
     order.currentStatus = { id: toStatusId } as any;
@@ -1219,7 +1229,9 @@ export class OrderWorkflowService {
           new NotFoundException('Orden no encontrada o no pertenece a esta compañía'),
         );
       }
-
+      // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+      await this.orderValidationLockService.assertEditable(order.id);
+      // ──────────────────────────────────────────────────────────────────
       // 2. Validación de estado (regla de dominio común)
       // Ejemplo: no permitir pagos en órdenes ya entregadas o canceladas
       if (['ENTREGADA'].includes(order.currentStatus?.name ?? '')) {
@@ -1363,7 +1375,9 @@ export class OrderWorkflowService {
       if (!order) {
         throw new RpcException(new NotFoundException('Orden no encontrada o no pertenece a la empresa'));
       }
-
+      // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+      await this.orderValidationLockService.assertEditable(order.id);
+      // ──────────────────────────────────────────────────────────────────
       const deliveryExists = await manager.exists(OrderDelivery, {
         where: { order_id: dto.orderId },
       });
@@ -1842,7 +1856,9 @@ export class OrderWorkflowService {
         new NotFoundException('Orden no encontrada o no pertenece a la empresa'),
       );
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(order.id);
+    // ──────────────────────────────────────────────────────────────────
     const note = this.orderNoteRepository.create({
       order_id: dto.order_id,
       created_by_id: user.userId,
@@ -1904,6 +1920,9 @@ export class OrderWorkflowService {
         new ForbiddenException('No tienes permiso para eliminar esta nota'),
       );
     }
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(note.order.id);
+    // ──────────────────────────────────────────────────────────────────
 
     note.isDeleted = true;
     note.deletedAt = new Date();
@@ -1957,7 +1976,9 @@ export class OrderWorkflowService {
         new ForbiddenException('No tienes permiso para editar esta nota'),
       );
     }
-
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(note.order.id);
+    // ──────────────────────────────────────────────────────────────────
     const noteChanged = dto.note !== undefined && dto.note !== note.note;
     const publicChanged = dto.is_public !== undefined && dto.is_public !== note.is_public;
 
@@ -2639,7 +2660,6 @@ export class OrderWorkflowService {
     });
   }
 
-
   async linkDeviceToOrder(
     dto: LinkDeviceToOrderDto,
     user: { companyId: string },
@@ -2651,10 +2671,18 @@ export class OrderWorkflowService {
         where: { id: dto.orderId, company_id: user.companyId },
       });
 
-      if (!order) throw new Error('Order not found');
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+      await this.orderValidationLockService.assertEditable(order.id);
+      // ──────────────────────────────────────────────────────────────────
 
       const newDevice = await this.devicesService.findOneById(dto.newDeviceId, user);
-      if (!newDevice) throw new Error('Device de destino no encontrado');
+      if (!newDevice) {
+        throw new RpcException(new NotFoundException('Device de destino no encontrado'));
+      }
 
       // 1️⃣ Vincular el device existente a esta orden
       order.device_id = dto.newDeviceId;
@@ -2724,8 +2752,17 @@ export class OrderWorkflowService {
       where: { id: dto.paymentId, company_id: dto.companyId },
     });
 
-    if (!payment) throw new RpcException({ status: 404, message: 'Pago no encontrado' });
-    if (payment.is_verified) throw new RpcException({ status: 400, message: 'El pago ya fue verificado' });
+    if (!payment) {
+      throw new RpcException(new NotFoundException('Pago no encontrado'));
+    }
+
+    if (payment.is_verified) {
+      throw new RpcException(new BadRequestException('El pago ya fue verificado'));
+    }
+
+    // ─── BLOQUEO POR VALIDACIÓN ─────────────────────────────────────────
+    await this.orderValidationLockService.assertEditable(payment.order_id);
+    // ──────────────────────────────────────────────────────────────────
 
     await this.paymentRepository.update(dto.paymentId, {
       is_verified: true,
