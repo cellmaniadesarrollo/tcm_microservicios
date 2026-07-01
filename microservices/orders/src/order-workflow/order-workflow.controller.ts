@@ -202,7 +202,7 @@ export class OrderWorkflowController {
     dto: CreateOrderNoteDto;
     user: { userId: string; companyId: string; branchId: string };
   }) {
-    console.log(data)
+    //console.log(data)
     return this.orderWorkflowService.createOrderNote(data.dto, data.user);
   }
   //para rebuild test

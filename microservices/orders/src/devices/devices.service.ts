@@ -14,6 +14,7 @@ import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { Attachment, AttachmentEntityType } from '../order-findings/entities/attachment.entity';
 import { Order } from '../order-workflow/entities/order.entity';
 import { BroadcastService } from '../broadcast/broadcast.service';
+import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
 @Injectable()
 export class DevicesService {
   constructor(
@@ -33,6 +34,7 @@ export class DevicesService {
     @InjectRepository(Order)
     private readonly orderRepo: Repository<Order>,
     private readonly broadcastService: BroadcastService,
+    private readonly orderValidationLockService: OrderValidationLockService,
   ) { }
 
   async createDevice(data: any) {

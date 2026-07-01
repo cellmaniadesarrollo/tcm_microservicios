@@ -5,7 +5,12 @@ import { OrderValidationService } from './order-validation.service';
 @Controller('order-validation')
 export class OrderValidationController {
     constructor(private readonly orderValidationService: OrderValidationService) { }
+    @MessagePattern({ cmd: 'async_validations_start' })
+    async onSyncStart(@Payload() payload: { internalToken: string; fromCache: Date | null }) {
+        console.log('🔄 Solicitud de sincronización de validaciones recibida', payload);
 
+        return this.orderValidationService.findValidationsForSync(payload.fromCache);
+    }
     @MessagePattern({ cmd: 'toggle_order_validation' })
     async toggleOrderValidation(@Payload() data: {
         validationId: string;

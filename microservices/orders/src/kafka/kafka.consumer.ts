@@ -14,7 +14,7 @@ interface FailedMessage {
 }
 
 @Injectable()
-export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
+export class KafkaConsumerService implements OnModuleDestroy {
     private consumer: Consumer;
     private producer: Producer;
     private readonly kafka: Kafka;
@@ -27,7 +27,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
     constructor() {
         this.kafka = new Kafka({
-            clientId: 'ms-orders-consumer',
+            clientId: 'ms-orders-consumer12',
             brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092'],
             retry: {
                 initialRetryTime: 300,
@@ -41,7 +41,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.consumer = this.kafka.consumer({
-            groupId: 'ms-orders-consumer-group',
+            groupId: 'ms-orders-consumer-group12',
             sessionTimeout: 30000,
             heartbeatInterval: 3000,
             rebalanceTimeout: 30000,
@@ -65,7 +65,15 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
             await this.reconnect();
         });
     }
+    private isConnected = false;
 
+    async connect() {  // nuevo método explícito
+        if (this.isConnected) return;
+        await this.consumer.connect();
+        await this.producer.connect();
+        this.isConnected = true;
+        console.log('✅ Kafka Consumer conectado - reporting-hub');
+    }
     registerHandler(topic: string, handler: TopicHandler) {
         this.handlers.set(topic, handler);
         console.log(`📌 Handler registrado para topic: ${topic}`);

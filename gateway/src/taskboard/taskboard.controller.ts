@@ -1,5 +1,5 @@
 // gateway/src/taskboard/taskboard.controller.ts
-import { Controller, Post, Body, Get, Put, Param, Patch, Delete, Query, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Post, Body, Get, Put, Param, Res, Patch, Delete, Query, UploadedFile, UseInterceptors, Redirect } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TaskboardService } from './taskboard.service';
 
@@ -515,5 +515,91 @@ export class TaskboardController {
   ) {
     console.log(`📥 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
     return this.taskboardService.getCalendarImageUrl(taskId, imageId);
+  }
+
+  // ========== GOOGLE CALENDAR - AUTH ==========
+
+  /**
+   * Redirige al usuario a Google para autorizar Calendar
+   * Ejemplo: GET /taskboard/calendar/auth/google/5feee4d7...
+   */
+  @Get('calendar/auth/google/:userId')
+  @Redirect()
+  async googleAuth(@Param('userId') userId: string) {
+    console.log(`🔍 [Gateway] googleAuth - userId: ${userId}`);
+    
+    // ✅ Redirigir a task-board en el puerto 3005 (expuesto al host)
+    const url = `http://localhost:3005/calendar/auth/google/${userId}`;
+    return { url, statusCode: 302 };
+  }
+
+  /**
+   * Callback de Google después de la autorización
+   * Google redirige aquí con el código de autorización
+   */
+  @Get('calendar/oauth-callback')
+  async oauthCallback(
+    @Query('code') code: string,
+    @Query('state') state: string,
+    @Res() res: any,
+  ) {
+    console.log(`🔍 [Gateway] oauthCallback - code: ${code?.substring(0, 10)}..., state: ${state}`);
+    const callbackUrl = `http://ms-task-board:3001/calendar/oauth-callback?code=${code}&state=${state}`;
+    return res.redirect(callbackUrl);
+  }
+
+  /**
+   * Verificar si el usuario tiene Google Calendar conectado
+   * Ejemplo: GET /taskboard/calendar/auth/status/5feee4d7...
+   */
+  @Get('calendar/auth/status/:userId')
+  async getAuthStatus(@Param('userId') userId: string) {
+    return this.taskboardService.getAuthStatus(userId);
+  }
+
+  /**
+   * Desconectar Google Calendar
+   * Ejemplo: DELETE /taskboard/calendar/auth/5feee4d7...
+   */
+  @Delete('calendar/auth/:userId')
+  async disconnectGoogle(@Param('userId') userId: string) {
+    return this.taskboardService.disconnectGoogle(userId);
+  }
+
+  // ========== GOOGLE CALENDAR - SYNC ==========
+
+  /**
+   * Sincronizar tareas pendientes a Google Calendar
+   * Ejemplo: POST /taskboard/calendar/sync-pending/5feee4d7...
+   */
+  @Post('calendar/sync-pending/:userId')
+  async syncPendingTasks(@Param('userId') userId: string) {
+    return this.taskboardService.syncPendingTasks(userId);
+  }
+
+  /**
+   * Sincronizar tareas de un mes específico a Google Calendar
+   * Ejemplo: POST /taskboard/calendar/sync-month/5feee4d7...
+   * Body: { "year": 2026, "month": 6 }
+   */
+  @Post('calendar/sync-month/:userId')
+  async syncMonthTasks(
+    @Param('userId') userId: string,
+    @Body() body: { year: number; month: number }
+  ) {
+    return this.taskboardService.syncMonthTasks(userId, body.year, body.month);
+  }
+
+  /**
+   * Obtener eventos de Google Calendar
+   * Ejemplo: GET /taskboard/calendar/google-events/5feee4d7?timeMin=2026-06-01T00:00:00Z
+   */
+  @Get('calendar/google-events/:userId')
+  async getGoogleEvents(
+    @Param('userId') userId: string,
+    @Query('timeMin') timeMin?: string,
+    @Query('timeMax') timeMax?: string,
+  ) {
+    return this.taskboardService.getGoogleEvents(userId, timeMin, timeMax);
   }
 }
