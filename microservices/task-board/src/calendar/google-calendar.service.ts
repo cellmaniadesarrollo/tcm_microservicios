@@ -196,7 +196,7 @@ export class GoogleCalendarService {
       dateParts[0],
       dateParts[1] - 1,
       dateParts[2],
-      timeParts[0] || 10,
+      (timeParts[0] || 10) + 5,
       timeParts[1] || 0,
       timeParts[2] || 0
     );
