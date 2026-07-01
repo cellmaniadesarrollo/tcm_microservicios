@@ -114,4 +114,20 @@ export class ImagesController {
     await this.imagesService.deleteImage(data.imageId);
     return { success: true, message: 'Imagen eliminada correctamente' };
   }
+
+  @Get(':imageId/url')
+  async getImageUrlHttp(
+    @Param('taskId') taskId: string,
+    @Param('imageId') imageId: string,
+  ) {
+    console.log(`📥 HTTP getImageUrlHttp - taskId: ${taskId}, imageId: ${imageId}`);
+    try {
+      const url = await this.imagesService.getImageUrl(imageId);
+      console.log(`✅ URL generada: ${url}`);
+      return { success: true, url };
+    } catch (error: any) {
+      console.error(`❌ Error en getImageUrlHttp:`, error.message);
+      return { success: false, message: error.message };
+    }
+  }
 }

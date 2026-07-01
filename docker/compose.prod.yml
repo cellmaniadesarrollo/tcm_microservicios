@@ -92,6 +92,13 @@ services:
           ms.inventory.spare.returned
           ms.reporting.validation.created
           ms.reporting.validation.updated
+          users.get-token
+          users.has-token
+          users.refresh-token
+          users.revoke-token
+          users.save-token
+          users.requests
+          taskboard.responses
         "
 
         echo "⏳ Sincronizando tópicos en Kafka..."
@@ -400,7 +407,7 @@ services:
     container_name: ms-task-board
     restart: always
     ports:
-      - "3005:3000"
+      - "3005:3001"
     environment:
       - NODE_ENV=production  # Cambiado a production
       - PORT=3000
@@ -414,6 +421,12 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - GOOGLE_REDIRECT_URI=${GOOGLE_REDIRECT_URI}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
     networks:
@@ -424,7 +437,7 @@ services:
       init-kafka:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3001,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 15

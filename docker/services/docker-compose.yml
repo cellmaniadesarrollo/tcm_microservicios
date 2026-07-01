@@ -10,7 +10,7 @@ services:
     volumes:
       - ../../microservices/clients:/app
       - /app/node_modules
-    command: ["npm", "run", "start"]
+    command: ["npm", "run", "start:dev"]
     env_file: [../.env]
     environment:
       - NODE_ENV=development
@@ -39,7 +39,7 @@ services:
     volumes:
       - ../../microservices/users:/app
       - /app/node_modules
-    command: ["npm", "run", "start"]
+    command: ["npm", "run", "start:dev"]
     env_file: [../.env]
     environment:
       - NODE_ENV=development
@@ -63,7 +63,7 @@ services:
     volumes:
       - ../../microservices/subscriptions:/app
       - /app/node_modules 
-    command: ["npm", "run", "start"]
+    command: ["npm", "run", "start:dev"]
     env_file: [../.env]
     environment:
       - NODE_ENV=development

@@ -639,161 +639,321 @@ export class NotificationsService {
     return this.create(notification);
   }
 
-  async getDeliveredNotifications(page: number = 1, limit: number = 20) {
-    const skip = (page - 1) * limit;
-    
-    // Calcular fecha hace 1 mes
-    const oneMonthAgo = new Date();
-    oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-    
-    // ✅ Usar any[] para evitar errores de tipo
-    const pipeline: any[] = [
-      {
-        $match: {
-          currentStatus: 'ENTREGADA',
-          $or: [
-            { entityType: 'order' },
-            { entityType: 'ORDER' }
-          ]
-        }
-      },
-      {
-        $addFields: {
-          deliveryDate: {
-            $arrayElemAt: [
-              {
-                $map: {
-                  input: {
-                    $filter: {
-                      input: '$statusHistory',
-                      as: 'history',
-                      cond: { $eq: ['$$history.status', 'ENTREGADA'] }
-                    }
-                  },
-                  as: 'delivery',
-                  in: '$$delivery.changedAt'
-                }
-              },
-              0
-            ]
-          }
-        }
-      },
-      {
-        $match: {
-          deliveryDate: { $exists: true, $ne: null }
-        }
-      },
-      {
-        $match: {
-          deliveryDate: { $lte: oneMonthAgo }
-        }
-      },
-      {
-        $sort: { deliveryDate: -1 }  // ✅ Sin as const, funciona con any[]
-      },
-      {
-        $group: {
-          _id: '$entityId',  // Agrupar por orden para evitar duplicados
-          notification: { $first: '$$ROOT' }
-        }
-      },
-      {
-        $replaceRoot: { newRoot: '$notification' }
-      },
-      {
-        $sort: { deliveryDate: -1 }  // ✅ Sin as const
-      },
-      {
-        $facet: {
-          metadata: [
-            { $count: 'total' }
-          ],
-          notifications: [
-            { $skip: skip },
-            { $limit: limit }
+async getDeliveredNotifications(
+  page: number = 1,
+  limit: number = 20,
+  includeArchived: boolean = false,
+  onlyWithNotes: boolean = false
+) {
+  const skip = (page - 1) * limit;
+  
+  // Calcular fecha hace 1 mes
+  const oneMonthAgo = new Date();
+  oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+  
+  // ✅ Construir match base
+  const matchStage: any = {
+    currentStatus: 'ENTREGADA',
+    $or: [
+      { entityType: 'order' },
+      { entityType: 'ORDER' }
+    ]
+  };
+  
+  // ✅ Excluir archivadas a menos que se pida incluirlas
+  if (!includeArchived) {
+    matchStage.isArchived = { $ne: true };
+  }
+  
+  // ✅ Filtrar por notas si se solicita
+  if (onlyWithNotes) {
+    matchStage.notes = { $exists: true, $nin: [null, ''] };
+  }
+  
+  const pipeline: any[] = [
+    { $match: matchStage },
+    {
+      $addFields: {
+        deliveryDate: {
+          $arrayElemAt: [
+            {
+              $map: {
+                input: {
+                  $filter: {
+                    input: '$statusHistory',
+                    as: 'history',
+                    cond: { $eq: ['$$history.status', 'ENTREGADA'] }
+                  }
+                },
+                as: 'delivery',
+                in: '$$delivery.changedAt'
+              }
+            },
+            0
           ]
         }
       }
-    ];
+    },
+    {
+      $match: {
+        deliveryDate: { $exists: true, $ne: null }
+      }
+    },
+    {
+      $match: {
+        deliveryDate: { $lte: oneMonthAgo }
+      }
+    },
+    {
+      $sort: { deliveryDate: -1 }
+    },
+    {
+      $group: {
+        _id: '$entityId',
+        notification: { $first: '$$ROOT' }
+      }
+    },
+    {
+      $replaceRoot: { newRoot: '$notification' }
+    },
+    {
+      $sort: { deliveryDate: -1 }
+    },
+    {
+      $facet: {
+        metadata: [
+          { $count: 'total' }
+        ],
+        notifications: [
+          { $skip: skip },
+          { $limit: limit }
+        ]
+      }
+    }
+  ];
+  
+  const result = await this.notificationModel.aggregate(pipeline);
+  
+  const total = result[0]?.metadata[0]?.total || 0;
+  const notifications = result[0]?.notifications || [];
+  
+  console.log(`📊 Entregadas hace más de 1 mes: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
+  console.log(`📅 Fecha límite: ${oneMonthAgo.toISOString()}`);
+  
+  return {
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    notifications,
+  };
+}
+
+async getFinishedOrdersOverThreeMonths(
+  page: number = 1,
+  limit: number = 20,
+  includeArchived: boolean = false,
+  onlyWithNotes: boolean = false
+) {
+  const skip = (page - 1) * limit;
+  
+  // Calcular fecha hace 3 meses
+  const threeMonthsAgo = new Date();
+  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+  
+  // ✅ Construir query base
+  const query: any = {
+    currentStatus: 'TRABAJO FINALIZADO',
+    $or: [
+      { entityType: 'order' },
+      { entityType: 'ORDER' }
+    ]
+  };
+  
+  // ✅ Excluir archivadas a menos que se pida incluirlas
+  if (!includeArchived) {
+    query.isArchived = { $ne: true };
+  }
+  
+  // ✅ Filtrar por notas si se solicita
+  if (onlyWithNotes) {
+    query.notes = { $exists: true, $nin: [null, ''] };
+  }
+  
+  // Obtener todas las notificaciones con TRABAJO FINALIZADO
+  const allFinished = await this.notificationModel
+    .find(query)
+    .lean()
+    .exec();
+  
+  // Filtrar por fecha de finalización real (desde statusHistory) y agrupar por orden
+  const uniqueByOrder = new Map();
+  
+  allFinished.forEach(notification => {
+    // Buscar la entrada de TRABAJO FINALIZADO en statusHistory
+    const finishedEntry = notification.statusHistory?.find(
+      (entry: any) => entry.status === 'TRABAJO FINALIZADO'
+    );
     
-    const result = await this.notificationModel.aggregate(pipeline);
+    if (!finishedEntry) return;
     
-    const total = result[0]?.metadata[0]?.total || 0;
-    const notifications = result[0]?.notifications || [];
+    const finishedDate = new Date(finishedEntry.changedAt);
     
-    console.log(`📊 Entregadas hace más de 1 mes: ${total}`);
-    console.log(`📅 Fecha límite: ${oneMonthAgo.toISOString()}`);
+    // Solo incluir si tiene más de 3 meses
+    if (finishedDate > threeMonthsAgo) return;
     
-    return {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      notifications,
+    const orderId = notification.entityId;
+    const existing = uniqueByOrder.get(orderId);
+    
+    // Mantener solo una notificación por orden
+    if (!existing) {
+      uniqueByOrder.set(orderId, {
+        ...notification,
+        finishedDate: finishedDate
+      });
+    }
+  });
+  
+  // Convertir a array y ordenar por fecha de finalización (más antiguas primero)
+  const allNotifications = Array.from(uniqueByOrder.values())
+    .sort((a, b) => a.finishedDate.getTime() - b.finishedDate.getTime());
+  
+  // Aplicar paginación
+  const total = allNotifications.length;
+  const paginatedNotifications = allNotifications.slice(skip, skip + limit);
+  
+  console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
+  console.log(`📅 Fecha límite: ${threeMonthsAgo.toISOString()}`);
+  
+  return {
+    total,
+    page,
+    limit,
+    totalPages: Math.ceil(total / limit),
+    notifications: paginatedNotifications,
+  };
+}
+
+  async updateNotificationNotes(
+    notificationId: string,
+    userId: string,
+    notes: string
+  ): Promise<{ modifiedCount: number; orderId: string }> {
+    // 1. Obtener la notificación original
+    const notification = await this.notificationModel.findOne({ _id: notificationId });
+    
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+    
+    const orderId = notification.entityId;
+    
+    // 2. Actualizar notas en TODAS las notificaciones con el mismo entityId
+    const result = await this.notificationModel.updateMany(
+      { entityId: orderId },
+      { 
+        notes: notes || null, 
+        updatedAt: new Date() 
+      }
+    );
+    
+    console.log(`📝 Notas actualizadas en ${result.modifiedCount} notificaciones para la orden ${orderId} por usuario ${userId}`);
+    
+    return { 
+      modifiedCount: result.modifiedCount, 
+      orderId: orderId 
     };
   }
 
-  async getFinishedOrdersOverThreeMonths(
+  async archiveNotification(
+    notificationId: string,
+    userId: string,
+    archived: boolean
+  ): Promise<{ modifiedCount: number; orderId: string }> {
+    // 1. Obtener la notificación original para conocer su entityId
+    const notification = await this.notificationModel.findOne({ _id: notificationId });
+    
+    if (!notification) {
+      throw new Error('Notificación no encontrada');
+    }
+    
+    const orderId = notification.entityId;  // ← Este es el ID de la orden (ej: "46")
+    
+    // 2. Archivar TODAS las notificaciones con el mismo entityId
+    const result = await this.notificationModel.updateMany(
+      { 
+        entityId: orderId,
+        currentStatus: { $in: ['ENTREGADA', 'TRABAJO FINALIZADO'] }
+      },
+      {
+        isArchived: archived,
+        archivedAt: archived ? new Date() : null,
+        archivedBy: archived ? userId : null,
+        updatedAt: new Date()
+      }
+    );
+    
+    console.log(`${archived ? '📦 Archivadas' : '📂 Desarchivadas'} ${result.modifiedCount} notificaciones para la orden ${orderId} por usuario ${userId}`);
+    
+    return { 
+      modifiedCount: result.modifiedCount, 
+      orderId: orderId 
+    };
+  }
+
+  async getReviewedDeliveredOrders(
+    userId: string,
     page: number = 1,
     limit: number = 20
   ) {
     const skip = (page - 1) * limit;
     
-    // Calcular fecha hace 3 meses
-    const threeMonthsAgo = new Date();
-    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+    // Base del query
+    const baseQuery = {
+      userId: userId,
+      currentStatus: 'ENTREGADA',
+      $or: [
+        { entityType: 'order' },
+        { entityType: 'ORDER' }
+      ]
+    };
     
-    // Obtener todas las notificaciones con TRABAJO FINALIZADO
-    const allFinished = await this.notificationModel
-      .find({
-        currentStatus: 'TRABAJO FINALIZADO',
-        $or: [
-          { entityType: 'order' },
-          { entityType: 'ORDER' }
-        ]
-      })
-      .lean()
-      .exec();
+    // ✅ Query para notificaciones con notas (corregido)
+    const queryWithNotes = {
+      ...baseQuery,
+      notes: { $exists: true, $nin: [null, ''] }  // $nin en lugar de dos $ne
+    };
     
-    // Filtrar por fecha de finalización real (desde statusHistory) y agrupar por orden
+    // Query para notificaciones archivadas
+    const queryArchived = {
+      ...baseQuery,
+      isArchived: true
+    };
+    
+    // Ejecutar ambas consultas
+    const [notificationsWithNotes, notificationsArchived] = await Promise.all([
+      this.notificationModel.find(queryWithNotes).lean().exec(),
+      this.notificationModel.find(queryArchived).lean().exec()
+    ]);
+    
+    // Combinar y eliminar duplicados por entityId
+    const allNotifications = [...notificationsWithNotes, ...notificationsArchived];
     const uniqueByOrder = new Map();
     
-    allFinished.forEach(notification => {
-      // Buscar la entrada de TRABAJO FINALIZADO en statusHistory
-      const finishedEntry = notification.statusHistory?.find(
-        (entry: any) => entry.status === 'TRABAJO FINALIZADO'
-      );
-      
-      if (!finishedEntry) return;
-      
-      const finishedDate = new Date(finishedEntry.changedAt);
-      
-      // Solo incluir si tiene más de 3 meses
-      if (finishedDate > threeMonthsAgo) return;
-      
+    allNotifications.forEach(notification => {
       const orderId = notification.entityId;
-      const existing = uniqueByOrder.get(orderId);
-      
-      // Mantener solo una notificación por orden
-      if (!existing) {
-        uniqueByOrder.set(orderId, {
-          ...notification,
-          finishedDate: finishedDate
-        });
+      if (!uniqueByOrder.has(orderId)) {
+        uniqueByOrder.set(orderId, notification);
       }
     });
     
-    // Convertir a array y ordenar por fecha de finalización (más antiguas primero)
-    const allNotifications = Array.from(uniqueByOrder.values())
-      .sort((a, b) => a.finishedDate.getTime() - b.finishedDate.getTime());
+    const uniqueNotifications = Array.from(uniqueByOrder.values())
+      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     
-    // Aplicar paginación
-    const total = allNotifications.length;
-    const paginatedNotifications = allNotifications.slice(skip, skip + limit);
+    const total = uniqueNotifications.length;
+    const paginatedNotifications = uniqueNotifications.slice(skip, skip + limit);
     
-    console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total}`);
-    console.log(`📅 Fecha límite: ${threeMonthsAgo.toISOString()}`);
+    console.log(`📊 Órdenes entregadas revisadas: ${total}`);
     
     return {
       total,

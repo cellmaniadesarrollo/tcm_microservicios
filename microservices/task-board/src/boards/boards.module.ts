@@ -1,5 +1,5 @@
 // boards/boards.module.ts
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { BoardsService } from './boards.service';
@@ -15,6 +15,7 @@ import { Role } from './entities/role.entity';
 import { CustomPermission } from './entities/custom-permission.entity';
 import { BoardColumn } from './entities/board-column.entity';
 import { Task } from '../tasks/entities/task.entity';
+import { PushNotificationsModule } from '../push-notifications/push-notifications.module'; // ✅ Agregar
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { Task } from '../tasks/entities/task.entity';
         },
       },
     ]),
+    forwardRef(() => PushNotificationsModule), // ✅ Agregar con forwardRef
   ],
   controllers: [BoardsController],
   providers: [

@@ -79,25 +79,28 @@ export class BoardMembersService {
   }
 
   // ==================== OBTENER MIEMBROS ====================
-
   async getBoardMembers(boardId: string): Promise<any[]> {
+    // ✅ Consulta directa a la base de datos - SIN microservicios
     const members = await this.memberRepository.find({
       where: { boardId, active: true },
       relations: { role: true },
       order: { joinedAt: 'DESC' }
     });
 
-    const enrichedMembers = await Promise.all(
-      members.map(async (member) => {
-        const customPermissions = await this.customPermissionsService.getPermissions(member.id);
-        return {
-          ...member,
-          customPermissions,
-        };
-      })
-    );
-
-    return enrichedMembers;
+    // Retornar solo los datos que tenemos en la base de datos
+    return members.map(member => ({
+      id: member.id,
+      userId: member.userId,
+      roleId: member.roleId,
+      role: member.role ? {
+        id: member.role.id,
+        name: member.role.name,
+        permissions: member.role.permissions
+      } : null,
+      joinedAt: member.joinedAt,
+      invitedBy: member.invitedBy,
+      active: member.active,
+    }));
   }
 
   async getBoardMembersWithUserDetails(boardId: string): Promise<any[]> {
@@ -110,41 +113,26 @@ export class BoardMembersService {
     const membersWithDetails = await Promise.all(
       members.map(async (member) => {
         try {
+          // Intentar obtener usuario del microservicio
           const user = await lastValueFrom(
             this.usersClient.send({ cmd: 'get_user_by_id' }, member.userId)
           );
           return {
-            id: member.id,
-            userId: member.userId,
-            roleId: member.roleId,
-            role: member.role,
-            joinedAt: member.joinedAt,
-            invitedBy: member.invitedBy,
-            active: member.active,
+            ...member,
             user: user ? {
               id: user.id,
               name: user.name_user || user.name,
               email: user.email_user || user.email,
-              employee: user.employee
-            } : {
-              id: member.userId,
-              name: 'Usuario no encontrado',
-              email: null
-            }
+            } : null
           };
         } catch (error) {
-          console.error(`Error fetching user ${member.userId}:`, error);
+          // ✅ Si falla, devolver el miembro sin datos de usuario
+          console.warn(`⚠️ No se pudo obtener usuario ${member.userId}, usando datos básicos`);
           return {
-            id: member.id,
-            userId: member.userId,
-            roleId: member.roleId,
-            role: member.role,
-            joinedAt: member.joinedAt,
-            invitedBy: member.invitedBy,
-            active: member.active,
+            ...member,
             user: {
               id: member.userId,
-              name: 'Usuario no disponible',
+              name: 'Usuario',
               email: null
             }
           };

@@ -135,25 +135,139 @@ export class NotificationsService {
     );
   }
 
-  async getDeliveredNotifications(page: number = 1, limit: number = 20) {
-    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}`);
+  async getDeliveredNotifications(
+    page: number = 1,
+    limit: number = 20,
+    includeArchived: boolean = false,
+    onlyWithNotes: boolean = false  // ✅ NUEVO PARÁMETRO
+  ) {
+    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_delivered_notifications' },
-        { page, limit }
+        { page, limit, includeArchived, onlyWithNotes }  // ✅ ENVIAR EL PARÁMETRO
       )
     );
   }
 
   async getFinishedOrdersOverThreeMonths(
     page: number = 1,
-    limit: number = 20
+    limit: number = 20,
+    includeArchived: boolean = false,
+    onlyWithNotes: boolean = false  // ✅ NUEVO PARÁMETRO
   ) {
-    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}`);
+    console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_finished_orders_over_three_months' },
-        { page, limit }
+        { page, limit, includeArchived, onlyWithNotes }  // ✅ ENVIAR EL PARÁMETRO
+      )
+    );
+  }
+
+  async updateNotificationNotes(
+    notificationId: string,
+    userId: string,
+    notes: string
+  ) {
+    console.log(`📝 [Gateway] updateNotificationNotes - id: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'update_notification_notes' },
+        { notificationId, userId, notes }
+      )
+    );
+  }
+
+  async archiveNotification(
+    notificationId: string,
+    userId: string,
+    archived: boolean
+  ) {
+    console.log(`📦 [Gateway] archiveNotification - id: ${notificationId}, archived: ${archived}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'archive_notification' },
+        { notificationId, userId, archived }
+      )
+    );
+  }
+
+  async getReviewedDeliveredOrders(
+    userId: string,
+    page: number = 1,
+    limit: number = 20
+  ) {
+    console.log(`📤 [Gateway] getReviewedDeliveredOrders - userId: ${userId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_reviewed_delivered_orders' },
+        { userId, page, limit }
+      )
+    );
+  }
+
+  async createOrderObservation(data: {
+    orderId: string;
+    userId: string;
+    userName: string;
+    observation: string;
+  }) {
+    console.log(`📤 [Gateway] createOrderObservation - orderId: ${data.orderId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'create_order_observation' },
+        data
+      )
+    );
+  }
+
+  async getOrderObservations(orderId: string, page: number = 1, limit: number = 20) {
+    console.log(`📤 [Gateway] getOrderObservations - orderId: ${orderId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_order_observations' },
+        { orderId, page, limit }
+      )
+    );
+  }
+
+  async getUserObservations(userId: string, page: number = 1, limit: number = 20) {
+    console.log(`📤 [Gateway] getUserObservations - userId: ${userId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_user_observations' },
+        { userId, page, limit }
+      )
+    );
+  }
+
+  async updateOrderObservation(id: string, observation: string) {
+    console.log(`📤 [Gateway] updateOrderObservation - id: ${id}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'update_order_observation' },
+        { id, dto: { observation } }
+      )
+    );
+  }
+
+  async deleteOrderObservation(id: string) {
+    console.log(`📤 [Gateway] deleteOrderObservation - id: ${id}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'delete_order_observation' },
+        { id }
+      )
+    );
+  }
+
+  async deleteOrderObservationsByOrder(orderId: string) {
+    console.log(`📤 [Gateway] deleteOrderObservationsByOrder - orderId: ${orderId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'delete_order_observations_by_order' },
+        { orderId }
       )
     );
   }
