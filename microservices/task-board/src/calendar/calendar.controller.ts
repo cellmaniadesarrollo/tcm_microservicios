@@ -217,7 +217,7 @@ export class CalendarController {
       console.log('✅ [CALLBACK] Tokens guardados');
       
       // ✅ Redirigir al frontend
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL');
       const redirectUrl = `${frontendUrl}/taskboard/calendar?google_connected=true&userId=${state}`;
       
       console.log(`🔍 [CALLBACK] Redirigiendo a: ${redirectUrl}`);
@@ -227,7 +227,7 @@ export class CalendarController {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('❌ [CALLBACK] Error:', errorMessage);
       
-      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL');
       const redirectUrl = `${frontendUrl}/taskboard/calendar?google_error=true&message=${encodeURIComponent(errorMessage)}`;
       return res.redirect(redirectUrl);
     }
