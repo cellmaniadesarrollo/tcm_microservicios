@@ -216,10 +216,15 @@ export class CalendarController {
       await this.googleCalendarService.saveUserTokens(state, tokens);
       console.log('✅ [CALLBACK] Tokens guardados');
       
-      // ✅ Redirigir al frontend
+      // ✅ DETECCIÓN DE AMBIENTE
       const frontendUrl = this.configService.get<string>('FRONTEND_URL');
-      const redirectUrl = `${frontendUrl}/taskboard/calendar?google_connected=true&userId=${state}`;
+      const isDevelopment = process.env.NODE_ENV === 'development';
       
+      // 🔥 Si es desarrollo → /taskboard/calendar, si es producción → /calendar
+      const redirectPath = isDevelopment ? '/taskboard/calendar' : '/calendar';
+      const redirectUrl = `${frontendUrl}${redirectPath}?google_connected=true&userId=${state}`;
+      
+      console.log(`🔍 [CALLBACK] Ambiente: ${isDevelopment ? 'DESARROLLO' : 'PRODUCCIÓN'}`);
       console.log(`🔍 [CALLBACK] Redirigiendo a: ${redirectUrl}`);
       return res.redirect(redirectUrl);
       
@@ -228,7 +233,13 @@ export class CalendarController {
       console.error('❌ [CALLBACK] Error:', errorMessage);
       
       const frontendUrl = this.configService.get<string>('FRONTEND_URL');
-      const redirectUrl = `${frontendUrl}/taskboard/calendar?google_error=true&message=${encodeURIComponent(errorMessage)}`;
+      const isDevelopment = process.env.NODE_ENV === 'development';
+      
+      // 🔥 También para errores
+      const redirectPath = isDevelopment ? '/taskboard/calendar' : '/calendar';
+      const redirectUrl = `${frontendUrl}${redirectPath}?google_error=true&message=${encodeURIComponent(errorMessage)}`;
+      
+      console.log(`🔍 [CALLBACK] Error - Redirigiendo a: ${redirectUrl}`);
       return res.redirect(redirectUrl);
     }
   }
