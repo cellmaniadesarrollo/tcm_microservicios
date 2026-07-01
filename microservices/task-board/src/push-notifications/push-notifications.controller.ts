@@ -13,42 +13,24 @@ import {
 export class PushNotificationsController {
   constructor(private readonly pushService: PushNotificationsService) {}
 
-  // 🔥 Clave de fallback pública (misma que en el service)
-  private static readonly FALLBACK_PUBLIC_KEY = 'BLf2Zx_rk72r7g75lXZiHpEehfI0F3PzRqX8Q3JkL5YxVn9XaBcDeFgHiJkLmNoPqRsTuVwXyZ';
-
-  @Get('vapid-public-key')
-  async getVapidPublicKey(): Promise<{ publicKey: string }> {
-    try {
-      console.log('📢 [Controller] Solicitando clave VAPID pública');
-      const publicKey = this.pushService.getVapidPublicKey();
-      console.log('✅ [Controller] Clave obtenida exitosamente:', publicKey.substring(0, 20) + '...');
-      return { publicKey };
-    } catch (error) {
-      console.error('❌ [Controller] Error en getVapidPublicKey:', error);
-      // 🔥 SIEMPRE devolver fallback, NUNCA error 500
-      console.log('📢 [Controller] Usando clave de fallback');
-      return { publicKey: PushNotificationsController.FALLBACK_PUBLIC_KEY };
-    }
-  }
+  // ❌ ELIMINAR ESTE ENDPOINT (ya no se usa)
+  // @Get('vapid-public-key')
+  // async getVapidPublicKey() { ... }
 
   @Get('health')
   async healthCheck() {
     try {
-      const publicKey = this.pushService.getVapidPublicKey();
       const subscriptions = await this.pushService.getActiveSubscriptions();
       return {
         status: 'ok',
         message: 'Push notifications service running',
-        vapidKeyConfigured: !!publicKey,
-        vapidKeyPrefix: publicKey ? publicKey.substring(0, 20) + '...' : 'not configured',
         activeSubscriptions: subscriptions,
         timestamp: new Date().toISOString()
       };
-    } catch (error:any) {
+    } catch (error: any) {
       return {
         status: 'error',
         message: error.message,
-        vapidKeyConfigured: false,
         timestamp: new Date().toISOString()
       };
     }
@@ -73,7 +55,7 @@ export class PushNotificationsController {
       const result = await this.pushService.subscribe(userId, subscription);
       console.log(`✅ [Controller] Suscripción guardada para usuario: ${userId}`);
       return { success: true, data: result };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en subscribe:`, error);
       return { success: false, message: error.message || 'Error al suscribir' };
     }
@@ -92,7 +74,7 @@ export class PushNotificationsController {
       await this.pushService.unsubscribe(dto.userId, dto.endpoint);
       console.log(`✅ [Controller] Usuario desuscrito: ${dto.userId}`);
       return { success: true, message: 'Suscripción eliminada' };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en unsubscribe:`, error);
       return { success: false, message: error.message || 'Error al desuscribir' };
     }
@@ -106,7 +88,7 @@ export class PushNotificationsController {
       const count = await this.pushService.unsubscribeAll(userId);
       console.log(`✅ [Controller] ${count} suscripciones eliminadas para: ${userId}`);
       return { success: true, message: `${count} suscripciones eliminadas` };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en unsubscribeAll:`, error);
       return { success: false, message: error.message || 'Error al desuscribir' };
     }
@@ -117,9 +99,9 @@ export class PushNotificationsController {
     try {
       console.log(`📥 [Controller] Obteniendo suscripciones de: ${userId}`);
       const subscriptions = await this.pushService.getUserSubscriptions(userId);
-      console.log(`✅ [Controller] ${subscriptions.length} suscripciones encontradas para: ${userId}`);
+      console.log(`✅ [Controller] ${subscriptions.length} suscripciones encontradas`);
       return { success: true, data: subscriptions };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en getUserSubscriptions:`, error);
       return { success: false, data: [], message: error.message };
     }
@@ -141,7 +123,7 @@ export class PushNotificationsController {
       const sent = await this.pushService.sendToUser(dto.userId, dto);
       console.log(`✅ [Controller] Notificación enviada a: ${dto.userId} (${sent} dispositivos)`);
       return { success: sent > 0, sentCount: sent };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en sendNotification:`, error);
       return { success: false, message: error.message || 'Error al enviar notificación' };
     }
@@ -160,7 +142,7 @@ export class PushNotificationsController {
       const totalSent = await this.pushService.sendToMultipleUsers(dto.userIds, dto.notification);
       console.log(`✅ [Controller] Notificación enviada a ${totalSent} dispositivos`);
       return { success: true, totalSent, totalUsers: dto.userIds.length };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en sendToMultiple:`, error);
       return { success: false, message: error.message || 'Error al enviar notificaciones' };
     }
@@ -207,7 +189,7 @@ export class PushNotificationsController {
         totalMembers: targetMembers.length,
         boardId,
       };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en sendToBoard:`, error);
       return { success: false, message: error.message || 'Error al enviar notificación al board' };
     }
@@ -230,7 +212,7 @@ export class PushNotificationsController {
           userList: allUserIds,
         },
       };
-    } catch (error:any) {
+    } catch (error: any) {
       console.error(`❌ [Controller] Error en getStats:`, error);
       return { success: false, message: error.message };
     }

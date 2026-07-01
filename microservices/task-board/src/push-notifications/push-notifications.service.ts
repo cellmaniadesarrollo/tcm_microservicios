@@ -1,88 +1,84 @@
 // src/push-notifications/push-notifications.service.ts
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import * as webPush from 'web-push';
+import * as admin from 'firebase-admin';
 import { PushSubscription } from './entities/push-subscription.entity';
 import { SubscriptionDto, SendNotificationDto } from './dto/subscription.dto';
 import { BoardsService } from '../boards/boards.service';
 
 @Injectable()
-export class PushNotificationsService {
+export class PushNotificationsService implements OnModuleInit {
   private readonly logger = new Logger(PushNotificationsService.name);
-  
-  // Claves de fallback para que siempre funcione
-  private static readonly FALLBACK_PUBLIC_KEY = 'BLf2Zx_rk72r7g75lXZiHpEehfI0F3PzRqX8Q3JkL5YxVn9XaBcDeFgHiJkLmNoPqRsTuVwXyZ';
-  private static readonly FALLBACK_PRIVATE_KEY = 'VNlfcVVFB4V50tqKO8WFHHOhx_ZrabUkZ2BYVOnNg9A';
+  private fcm: admin.messaging.Messaging | null = null;
+  private firebaseInitialized = false;
 
   constructor(
     @InjectRepository(PushSubscription)
     private subscriptionRepository: Repository<PushSubscription>,
     @Inject(forwardRef(() => BoardsService))
     private boardsService: BoardsService,
-  ) {
-    this.initVapidKeys();
+  ) {}
+
+  // ==================== 🔥 FIREBASE INIT ====================
+
+  async onModuleInit() {
+    await this.initFirebase();
   }
 
-  private initVapidKeys() {
+  private async initFirebase() {
     try {
-      let publicKey = process.env.VAPID_PUBLIC_KEY;
-      let privateKey = process.env.VAPID_PRIVATE_KEY;
-      let subject = process.env.VAPID_SUBJECT || 'mailto:admin@teamcellmania.com';
-
-      // Si no hay claves en .env, usar las de fallback
-      if (!publicKey || !privateKey) {
-        this.logger.warn('⚠️ No se encontraron claves VAPID en .env. Usando claves de fallback.');
-        publicKey = PushNotificationsService.FALLBACK_PUBLIC_KEY;
-        privateKey = PushNotificationsService.FALLBACK_PRIVATE_KEY;
-        this.logger.log('📢 Usando clave pública de fallback');
+      if (admin.apps.length > 0) {
+        this.fcm = admin.messaging();
+        this.firebaseInitialized = true;
+        this.logger.log('✅ Firebase ya inicializado');
+        return;
       }
 
-      webPush.setVapidDetails(subject, publicKey, privateKey);
-      this.logger.log('✅ Claves VAPID configuradas correctamente');
+      if (process.env.FIREBASE_PROJECT_ID && 
+          process.env.FIREBASE_PRIVATE_KEY && 
+          process.env.FIREBASE_CLIENT_EMAIL) {
+        
+        const privateKey = process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n');
+        
+        admin.initializeApp({
+          credential: admin.credential.cert({
+            projectId: process.env.FIREBASE_PROJECT_ID,
+            privateKey: privateKey,
+            clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          }),
+        });
+        this.fcm = admin.messaging();
+        this.firebaseInitialized = true;
+        this.logger.log('✅ Firebase inicializado con variables de entorno');
+        return;
+      }
+
+      if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+        admin.initializeApp({
+          credential: admin.credential.applicationDefault(),
+        });
+        this.fcm = admin.messaging();
+        this.firebaseInitialized = true;
+        this.logger.log('✅ Firebase inicializado con APPLICATION_DEFAULT');
+        return;
+      }
+
+      this.logger.warn('⚠️ No se encontraron credenciales de Firebase.');
       
     } catch (error) {
-      this.logger.error('❌ Error configurando claves VAPID:', error);
-      // Intentar con claves de fallback
-      webPush.setVapidDetails(
-        'mailto:admin@teamcellmania.com',
-        PushNotificationsService.FALLBACK_PUBLIC_KEY,
-        PushNotificationsService.FALLBACK_PRIVATE_KEY,
-      );
-      this.logger.log('✅ Claves VAPID configuradas con fallback');
+      this.logger.error('❌ Error inicializando Firebase:', error);
+      this.firebaseInitialized = false;
     }
   }
 
-  getVapidPublicKey(): string {
-    try {
-      this.logger.log('🔍 Obteniendo clave VAPID pública...');
-      
-      // Intentar leer de variable de entorno
-      if (process.env.VAPID_PUBLIC_KEY) {
-        this.logger.log('✅ Usando VAPID_PUBLIC_KEY del .env');
-        return process.env.VAPID_PUBLIC_KEY;
-      }
-      
-      // Usar fallback
-      this.logger.warn('⚠️ No hay VAPID_PUBLIC_KEY en .env, usando fallback');
-      this.logger.log('📢 Usando VAPID_PUBLIC_KEY de fallback');
-      return PushNotificationsService.FALLBACK_PUBLIC_KEY;
-      
-    } catch (error) {
-      this.logger.error('❌ Error obteniendo VAPID key:', error);
-      // 🔥 SIEMPRE devolver fallback
-      return PushNotificationsService.FALLBACK_PUBLIC_KEY;
-    }
-  }
+  // ==================== 📱 SUSCRIPCIONES ====================
 
   async subscribe(userId: string, subscription: SubscriptionDto): Promise<PushSubscription> {
     this.logger.log(`📱 Suscribiendo usuario ${userId}`);
 
     const existing = await this.subscriptionRepository.findOne({
-      where: {
-        userId,
-        endpoint: subscription.endpoint,
-      },
+      where: { userId, endpoint: subscription.endpoint },
     });
 
     if (existing) {
@@ -91,7 +87,7 @@ export class PushNotificationsService {
       existing.active = true;
       existing.updatedAt = new Date();
       await this.subscriptionRepository.save(existing);
-      this.logger.log(`✅ Suscripción actualizada para usuario ${userId}`);
+      this.logger.log(`✅ Suscripción actualizada`);
       return existing;
     }
 
@@ -105,12 +101,12 @@ export class PushNotificationsService {
     newSubscription.updatedAt = new Date();
 
     await this.subscriptionRepository.save(newSubscription);
-    this.logger.log(`✅ Nueva suscripción guardada para usuario ${userId}`);
+    this.logger.log(`✅ Nueva suscripción guardada`);
     return newSubscription;
   }
 
   async unsubscribe(userId: string, endpoint: string): Promise<void> {
-    this.logger.log(`❌ Desactivando suscripción para usuario ${userId}`);
+    this.logger.log(`❌ Desactivando suscripción`);
     await this.subscriptionRepository.update(
       { userId, endpoint },
       { active: false, updatedAt: new Date() },
@@ -155,66 +151,16 @@ export class PushNotificationsService {
     return results.map(r => r.userId);
   }
 
-  // ==================== MÉTODOS DE BOARDS ====================
-
-  async getBoardMemberIds(boardId: string): Promise<string[]> {
-    this.logger.log(`🔍 Buscando miembros del board ${boardId}`);
-    
-    try {
-      const members = await this.boardsService.getMembers(boardId);
-      const memberIds = members.map(member => member.userId);
-      this.logger.log(`✅ Board ${boardId} tiene ${memberIds.length} miembros`);
-      return memberIds;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
-      this.logger.error(`❌ Error obteniendo miembros del board ${boardId}: ${errorMessage}`);
-      return [];
-    }
-  }
-
-  async sendToBoardMembers(
-    boardId: string,
-    notification: Omit<SendNotificationDto, 'userId'>,
-    excludeUserId?: string,
-  ): Promise<number> {
-    this.logger.log(`📨 Enviando notificación a miembros del board ${boardId}`);
-    
-    const memberIds = await this.getBoardMemberIds(boardId);
-    
-    if (memberIds.length === 0) {
-      this.logger.warn(`⚠️ No se encontraron miembros para el board ${boardId}`);
-      return 0;
-    }
-    
-    let targetMembers = memberIds;
-    if (excludeUserId) {
-      targetMembers = memberIds.filter(id => id !== excludeUserId);
-      this.logger.log(`📨 Excluyendo usuario ${excludeUserId}, quedan ${targetMembers.length} miembros`);
-    }
-    
-    if (targetMembers.length === 0) {
-      this.logger.warn(`⚠️ No hay miembros para notificar después de excluir`);
-      return 0;
-    }
-    
-    const fullNotification: SendNotificationDto = {
-      userId: '',
-      title: notification.title,
-      body: notification.body,
-      icon: notification.icon,
-      badge: notification.badge,
-      data: {
-        ...notification.data,
-        boardId,
-      },
-    };
-    
-    return this.sendToMultipleUsers(targetMembers, fullNotification);
-  }
+  // ==================== 🔥 ENVÍO DE NOTIFICACIONES ====================
 
   async sendToUser(userId: string, notification: SendNotificationDto): Promise<number> {
     this.logger.log(`📨 Enviando notificación a usuario ${userId}: ${notification.title}`);
-    
+
+    if (!this.firebaseInitialized || !this.fcm) {
+      this.logger.error('❌ Firebase no inicializado.');
+      return 0;
+    }
+
     const subscriptions = await this.subscriptionRepository.find({
       where: { userId, active: true },
     });
@@ -225,39 +171,53 @@ export class PushNotificationsService {
     }
 
     let sentCount = 0;
-    const payload = JSON.stringify({
-      title: notification.title,
-      body: notification.body,
-      icon: notification.icon || '/assets/icons/icon-192x192.png',
-      badge: notification.badge || '/assets/icons/badge-icon.png',
-      data: notification.data || {},
-      vibrate: [200, 100, 200],
-      tag: notification.data?.taskId ? `task_${notification.data.taskId}` : undefined,
-      requireInteraction: true,
-    });
 
     for (const subscription of subscriptions) {
       try {
-        const pushSubscription = {
-          endpoint: subscription.endpoint,
-          keys: {
-            p256dh: subscription.keys.p256dh,
-            auth: subscription.keys.auth,
+        const message: admin.messaging.Message = {
+          notification: {
+            title: notification.title,
+            body: notification.body,
+            imageUrl: notification.icon || undefined,
           },
+          data: {
+            ...notification.data,
+            type: 'notification',
+            timestamp: Date.now().toString(),
+          },
+          android: {
+            priority: 'high',
+            notification: {
+              sound: 'default',
+              clickAction: 'FLUTTER_NOTIFICATION_CLICK',
+            },
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: 'default',
+                contentAvailable: true,
+              },
+            },
+          },
+          token: subscription.endpoint,
         };
 
-        await webPush.sendNotification(pushSubscription, payload);
+        const response = await this.fcm.send(message);
         sentCount++;
-        this.logger.log(`✅ Notificación enviada a ${subscription.endpoint.substring(0, 50)}...`);
-      } catch (err) {
-        const error = err as { statusCode?: number; message?: string };
-        this.logger.error(`❌ Error enviando notificación: ${error.message || 'Error desconocido'}`);
-        if (error.statusCode === 410) {
+        this.logger.log(`✅ Notificación Firebase enviada`);
+
+      } catch (error: any) {
+        const errorCode = error?.code || 'unknown';
+        this.logger.error(`❌ Error Firebase: ${errorCode}`);
+
+        if (errorCode === 'messaging/registration-token-not-registered' ||
+            errorCode === 'messaging/invalid-registration-token') {
           await this.subscriptionRepository.update(
             { id: subscription.id },
             { active: false, updatedAt: new Date() },
           );
-          this.logger.warn(`⚠️ Suscripción expirada, desactivada`);
+          this.logger.warn(`⚠️ Token FCM expirado, desactivado`);
         }
       }
     }
@@ -266,34 +226,76 @@ export class PushNotificationsService {
   }
 
   async sendToMultipleUsers(userIds: string[], notification: SendNotificationDto): Promise<number> {
-    this.logger.log(`📨 Enviando notificación a ${userIds.length} usuarios`);
+    this.logger.log(`📨 Enviando a ${userIds.length} usuarios`);
     
     let totalSent = 0;
     for (const userId of userIds) {
       totalSent += await this.sendToUser(userId, notification);
     }
     
-    this.logger.log(`✅ Notificación enviada a ${totalSent} dispositivos`);
     return totalSent;
   }
 
-  async sendToAllExcept(
-    excludeUserId: string,
-    notification: SendNotificationDto,
-  ): Promise<number> {
-    this.logger.log(`📨 Enviando notificación a todos excepto ${excludeUserId}`);
-    
+  async sendToAllExcept(excludeUserId: string, notification: SendNotificationDto): Promise<number> {
+    this.logger.log(`📨 Enviando a todos excepto ${excludeUserId}`);
     const userIds = await this.getAllActiveUserIds();
     const filteredUserIds = userIds.filter(id => id !== excludeUserId);
-    
     return this.sendToMultipleUsers(filteredUserIds, notification);
   }
 
   async sendToAll(notification: SendNotificationDto): Promise<number> {
-    this.logger.log(`📨 Enviando notificación a TODOS los usuarios`);
-    
+    this.logger.log(`📨 Enviando a TODOS los usuarios`);
     const userIds = await this.getAllActiveUserIds();
     return this.sendToMultipleUsers(userIds, notification);
+  }
+
+  // ==================== MÉTODOS DE BOARDS ====================
+
+  async getBoardMemberIds(boardId: string): Promise<string[]> {
+    this.logger.log(`🔍 Buscando miembros del board ${boardId}`);
+    
+    try {
+      const members = await this.boardsService.getMembers(boardId);
+      return members.map(member => member.userId);
+    } catch (error) {
+      this.logger.error(`❌ Error obteniendo miembros: ${error}`);
+      return [];
+    }
+  }
+
+  async sendToBoardMembers(
+    boardId: string,
+    notification: Omit<SendNotificationDto, 'userId'>,
+    excludeUserId?: string,
+  ): Promise<number> {
+    this.logger.log(`📨 Enviando a miembros del board ${boardId}`);
+    
+    const memberIds = await this.getBoardMemberIds(boardId);
+    if (memberIds.length === 0) {
+      this.logger.warn(`⚠️ No hay miembros`);
+      return 0;
+    }
+    
+    let targetMembers = memberIds;
+    if (excludeUserId) {
+      targetMembers = memberIds.filter(id => id !== excludeUserId);
+    }
+    
+    if (targetMembers.length === 0) {
+      this.logger.warn(`⚠️ No hay miembros para notificar`);
+      return 0;
+    }
+    
+    const fullNotification: SendNotificationDto = {
+      userId: '',
+      title: notification.title,
+      body: notification.body,
+      icon: notification.icon,
+      badge: notification.badge,
+      data: { ...notification.data, boardId },
+    };
+    
+    return this.sendToMultipleUsers(targetMembers, fullNotification);
   }
 
   async cleanupExpiredSubscriptions(): Promise<number> {
@@ -307,27 +309,23 @@ export class PushNotificationsService {
     
     for (const subscription of activeSubscriptions) {
       try {
-        await webPush.sendNotification(
-          {
-            endpoint: subscription.endpoint,
-            keys: subscription.keys,
-          },
-          JSON.stringify({ title: 'ping', body: 'ping' }),
-        );
-      } catch (err) {
-        const error = err as { statusCode?: number; message?: string };
-        if (error.statusCode === 410) {
+        await this.fcm?.send({
+          token: subscription.endpoint,
+          data: { ping: 'true' },
+        }, true);
+      } catch (error: any) {
+        const errorCode = error?.code || 'unknown';
+        if (errorCode === 'messaging/registration-token-not-registered') {
           await this.subscriptionRepository.update(
             { id: subscription.id },
             { active: false, updatedAt: new Date() },
           );
           cleanedCount++;
-          this.logger.log(`🧹 Suscripción expirada limpiada: ${subscription.endpoint.substring(0, 50)}...`);
+          this.logger.log(`🧹 Token FCM expirado limpiado`);
         }
       }
     }
     
-    this.logger.log(`✅ Limpiadas ${cleanedCount} suscripciones expiradas`);
     return cleanedCount;
   }
 }
