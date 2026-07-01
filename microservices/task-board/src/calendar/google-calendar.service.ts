@@ -31,8 +31,9 @@ export class GoogleCalendarService {
       state: userId,
       redirect_uri: this.configService.get<string>('GOOGLE_REDIRECT_URI'),
     });
+    const cleanUrl = url.trim().replace(/\s/g, '');
     console.log(`🔍 [GoogleCalendar] URL generada: ${url}`);
-    return url;
+    return cleanUrl;
   }
 
   async getTokensFromCode(code: string): Promise<any> {
@@ -166,23 +167,72 @@ export class GoogleCalendarService {
 
   async createEvent(userId: string, task: EmployeeTask): Promise<any> {
     console.log(`🔍 [GoogleCalendar] Creando evento para userId: ${userId}, tarea: ${task.title}`);
+    console.log(`📋 [GoogleCalendar] dueDate: ${task.dueDate}, dueTime: ${task.dueTime}`);
+    
     const calendarClient = await this.getCalendarClient(userId);
     
-    const startDate = new Date(task.dueDate);
-    startDate.setHours(10, 0, 0);
-    const endDate = new Date(startDate);
-    endDate.setHours(startDate.getHours() + 1);
+    // 🔥 Convertir dueDate a string si es un objeto Date
+    let dateStr: string;
+    if (typeof task.dueDate === 'string') {
+      dateStr = task.dueDate;
+    } else if (task.dueDate instanceof Date) {
+      const d = task.dueDate;
+      dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    } else {
+      console.error('❌ [GoogleCalendar] dueDate no es string ni Date:', task.dueDate);
+      throw new Error('Formato de fecha inválido');
+    }
+    
+    const timeStr = task.dueTime || '10:00:00';
+    
+    console.log(`📋 [GoogleCalendar] dateStr: ${dateStr}, timeStr: ${timeStr}`);
+    
+    // Parsear fecha y hora
+    const dateParts = dateStr.split('-').map(Number);
+    const timeParts = timeStr.split(':').map(Number);
+    
+    // Crear fecha local (Ecuador UTC-5)
+    const startDate = new Date(
+      dateParts[0],
+      dateParts[1] - 1,
+      dateParts[2],
+      timeParts[0] || 10,
+      timeParts[1] || 0,
+      timeParts[2] || 0
+    );
+    
+    const endDate = new Date(startDate.getTime() + 3600000);
+
+    // 🔥 Formatear fecha y hora en formato ISO local SIN convertir a UTC
+    // Formato: 2026-06-30T18:00:00-05:00 (con zona horaria)
+    const formatLocalISO = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      // Zona horaria Ecuador: UTC-5
+      return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}-05:00`;
+    };
+
+    const startDateTime = formatLocalISO(startDate);
+    const endDateTime = formatLocalISO(endDate);
+
+    console.log(`🕐 Hora local: ${startDate.getHours()}:${startDate.getMinutes()}`);
+    console.log(`📅 Start Local ISO: ${startDateTime}`);
+    console.log(`📅 End Local ISO: ${endDateTime}`);
 
     const event = {
       summary: task.title,
       description: task.description || 'Tarea del sistema',
       start: {
-        dateTime: startDate.toISOString(),
-        timeZone: 'America/Mexico_City',
+        dateTime: startDateTime,
+        timeZone: 'America/Guayaquil',
       },
       end: {
-        dateTime: endDate.toISOString(),
-        timeZone: 'America/Mexico_City',
+        dateTime: endDateTime,
+        timeZone: 'America/Guayaquil',
       },
       colorId: this.getColorByPriority(task.priority),
       status: 'confirmed',

@@ -22,6 +22,7 @@ export class CalendarService {
     const task = this.employeeTaskRepository.create({
       ...createDto,
       dueDate,
+      dueTime: createDto.dueTime || null,
       day: dueDate.getDate(),
       month: dueDate.getMonth(),
       year: dueDate.getFullYear(),
@@ -75,7 +76,11 @@ export class CalendarService {
       task.dueDate = newDate;
     }
 
-    const { dueDate, ...updateData } = updateDto;
+    if (updateDto.dueTime !== undefined) {
+      task.dueTime = updateDto.dueTime || null;
+    }
+
+    const { dueDate, dueTime, ...updateData } = updateDto;
     Object.assign(task, updateData);
     
     return await this.employeeTaskRepository.save(task);

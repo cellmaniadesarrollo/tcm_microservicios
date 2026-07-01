@@ -572,4 +572,114 @@ export class TaskboardService {
       throw error;
     }
   }
+
+  // ========== GOOGLE CALENDAR - AUTENTICACIÓN ==========
+
+  /**
+   * Obtener URL de autorización de Google Calendar
+   */
+  async getAuthUrl(userId: string) {
+    console.log(`📤 [Gateway] getAuthUrl - userId: ${userId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/calendar/auth/google/${userId}`)
+      );
+      
+      // Si la respuesta es un string (redirección), devolverla
+      if (typeof response.data === 'string') {
+        return response.data;
+      }
+      
+      // Si es un objeto con authUrl
+      if (response.data && response.data.authUrl) {
+        return response.data.authUrl;
+      }
+      
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getAuthUrl:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Verificar si el usuario tiene Google Calendar conectado
+   */
+  async getAuthStatus(userId: string) {
+    console.log(`📤 [Gateway] getAuthStatus - userId: ${userId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/calendar/auth/status/${userId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getAuthStatus:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Desconectar Google Calendar
+   */
+  async disconnectGoogle(userId: string) {
+    console.log(`📤 [Gateway] disconnectGoogle - userId: ${userId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.delete(`${this.taskboardHttpUrl}/calendar/auth/${userId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en disconnectGoogle:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Sincronizar tareas pendientes a Google Calendar
+   */
+  async syncPendingTasks(userId: string) {
+    console.log(`📤 [Gateway] syncPendingTasks - userId: ${userId}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.post(`${this.taskboardHttpUrl}/calendar/sync-pending/${userId}`, {})
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en syncPendingTasks:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Sincronizar tareas de un mes específico a Google Calendar
+   */
+  async syncMonthTasks(userId: string, year: number, month: number) {
+    console.log(`📤 [Gateway] syncMonthTasks - userId: ${userId}, year: ${year}, month: ${month}`);
+    try {
+      const response = await lastValueFrom(
+        this.httpService.post(`${this.taskboardHttpUrl}/calendar/sync-month/${userId}`, { year, month })
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en syncMonthTasks:', error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Obtener eventos de Google Calendar
+   */
+  async getGoogleEvents(userId: string, timeMin?: string, timeMax?: string) {
+    console.log(`📤 [Gateway] getGoogleEvents - userId: ${userId}`);
+    try {
+      let url = `${this.taskboardHttpUrl}/calendar/google-events/${userId}`;
+      if (timeMin) url += `?timeMin=${encodeURIComponent(timeMin)}`;
+      if (timeMax) url += `${timeMin ? '&' : '?'}timeMax=${encodeURIComponent(timeMax)}`;
+      const response = await lastValueFrom(this.httpService.get(url));
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getGoogleEvents:', error.message);
+      throw error;
+    }
+  }
 }
