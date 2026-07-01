@@ -24,6 +24,9 @@ export class EmployeeTask {
   @Column({ name: 'due_date', type: 'date' })
   dueDate: Date;
 
+  @Column({ name: 'due_time', type: 'time', nullable: true })
+  dueTime: string | null;
+
   @Column({ type: 'int' })
   day: number;
 
