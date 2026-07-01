@@ -6,7 +6,7 @@ import { lastValueFrom } from 'rxjs';
 
 @Injectable()
 export class TaskboardService {
-  private taskboardHttpUrl: string;
+  private taskboardHttpUrl = 'http://ms-task-board:3001';
 
   constructor(
     @Inject('TASKBOARD_CLIENT')
@@ -14,13 +14,7 @@ export class TaskboardService {
     @Inject('USERS_CLIENT')
     private readonly usersClient: ClientProxy,
     private readonly httpService: HttpService,
-  ) {
-    this.taskboardHttpUrl = process.env.TASK_BOARD_URL || 
-                            (process.env.NODE_ENV === 'production' 
-                             ? 'http://ms-task-board:3001' 
-                             : 'http://localhost:3005');
-    console.log(`[TaskboardService] TASK_BOARD_URL: ${this.taskboardHttpUrl}`);
-  }
+  ) {}
 
   // ========== USERS (para buscar miembros) ==========
   
