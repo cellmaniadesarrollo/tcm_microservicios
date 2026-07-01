@@ -5,15 +5,7 @@ import { TaskboardService } from './taskboard.service';
 
 @Controller('taskboard')
 export class TaskboardController {
-  private readonly taskBoardUrl: string;
-
-  constructor(private readonly taskboardService: TaskboardService) {
-    this.taskBoardUrl = process.env.TASK_BOARD_URL || 
-                         (process.env.NODE_ENV === 'production' 
-                           ? 'http://ms-task-board:3001' 
-                           : 'http://localhost:3005');
-    console.log(`🔍 [TaskboardController] TASK_BOARD_URL: ${this.taskBoardUrl}`);
-  }
+  constructor(private readonly taskboardService: TaskboardService) {}
 
   // ========== USERS (para buscar miembros) ==========
   
@@ -536,8 +528,13 @@ export class TaskboardController {
   async googleAuth(@Param('userId') userId: string) {
     console.log(`🔍 [Gateway] googleAuth - userId: ${userId}`);
     
-    // ✅ Usar la variable de instancia
-    const url = `${this.taskBoardUrl}/calendar/auth/google/${userId}`;
+    // ✅ En producción usar el dominio, en desarrollo localhost
+    const isProduction = process.env.NODE_ENV === 'production';
+    const baseUrl = isProduction 
+      ? 'https://ms.teamcellmania.com:3005'  // 👈 Ajusta según tu dominio
+      : 'http://localhost:3005';
+    
+    const url = `${baseUrl}/calendar/auth/google/${userId}`;
     console.log(`📤 [Gateway] Redirigiendo a: ${url}`);
     return { url, statusCode: 302 };
   }
@@ -553,10 +550,7 @@ export class TaskboardController {
     @Res() res: any,
   ) {
     console.log(`🔍 [Gateway] oauthCallback - code: ${code?.substring(0, 10)}..., state: ${state}`);
-    
-    // ✅ Usar la variable de instancia
-    const callbackUrl = `${this.taskBoardUrl}/calendar/oauth-callback?code=${code}&state=${state}`;
-    console.log(`📤 [Gateway] Redirigiendo a task-board: ${callbackUrl}`);
+    const callbackUrl = `http://ms-task-board:3001/calendar/oauth-callback?code=${code}&state=${state}`;
     return res.redirect(callbackUrl);
   }
 
