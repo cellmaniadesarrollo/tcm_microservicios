@@ -493,6 +493,13 @@ export class TaskboardService {
     );
   }
 
+  async sendNotification(dto: any) {
+    console.log(`📤 [Gateway] Enviando comando a TaskBoard: send-to-user`);
+    return lastValueFrom(
+      this.taskboardClient.send({ cmd: 'push-notifications.send-to-user' }, dto)
+    );
+  }
+
   // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
 
   async createCalendarTask(data: any) {
