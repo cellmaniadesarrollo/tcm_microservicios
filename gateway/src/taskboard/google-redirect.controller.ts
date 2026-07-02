@@ -16,36 +16,51 @@ export class GoogleRedirectController {
     @Res() res: Response,
   ) {
     console.log(`🔍 [GoogleRedirect] Callback de Google`);
-    console.log(`  - code: ${code?.substring(0, 20)}...`);
-    console.log(`  - state: ${state}`);
+    console.log(`  - code: ${code?.substring(0, 20) || 'NO CODE'}...`);
+    console.log(`  - state: ${state || 'NO STATE'}`);
+    
+    const frontendUrl = process.env.FRONTEND_URL || 'https://ordenes.teamcellmania.com';
+    
+    // ✅ Si no hay code o state, redirigir con error
+    if (!code || !state) {
+      console.error('❌ [GoogleRedirect] Faltan parámetros');
+      return res.redirect(`${frontendUrl}/calendar?google_error=true&message=Parámetros%20faltantes`);
+    }
     
     try {
-      // ✅ EL GATEWAY LLAMA INTERNAMENTE al task-board
-      const taskBoardUrl = `http://ms-task-board:3001/calendar/oauth-callback?code=${code}&state=${state}`;
+      // ✅ Llamar al task-board
+      const taskBoardUrl = `http://ms-task-board:3001/calendar/oauth-callback?code=${encodeURIComponent(code)}&state=${encodeURIComponent(state)}`;
       console.log(`📤 Llamando internamente a task-board: ${taskBoardUrl}`);
       
       const response = await firstValueFrom(
         this.httpService.get(taskBoardUrl)
       );
       
-      console.log(`📥 Respuesta del task-board:`, response.data);
+      console.log(`📥 Respuesta del task-board: Status ${response.status}`);
+      console.log(`📥 Datos:`, response.data);
       
-      if (response.data.success) {
-        // ✅ Redirigir al frontend con éxito
-        const frontendUrl = process.env.FRONTEND_URL || 'https://ordenes.teamcellmania.com';
-        const redirectUrl = `${frontendUrl}/calendar?google_connected=true&userId=${state}`;
-        console.log(`📤 Redirigiendo al frontend: ${redirectUrl}`);
+      // ✅ Si el task-board dice que ya está conectado o éxito
+      if (response.data && response.data.success) {
+        const userId = response.data.userId || state;
+        const redirectUrl = `${frontendUrl}/calendar?google_connected=true&userId=${userId}`;
+        console.log(`📤 Redirigiendo al frontend con éxito: ${redirectUrl}`);
         return res.redirect(redirectUrl);
-      } else {
-        throw new Error(response.data.error || 'Error desconocido');
       }
+      
+      // ✅ Si el task-board dice que ya tiene token (alreadyConnected)
+      if (response.data && response.data.alreadyConnected) {
+        const redirectUrl = `${frontendUrl}/calendar?google_connected=true&userId=${response.data.userId || state}`;
+        console.log(`📤 Usuario ya conectado, redirigiendo: ${redirectUrl}`);
+        return res.redirect(redirectUrl);
+      }
+      
+      // ❌ Error
+      throw new Error(response.data?.error || 'Error desconocido');
       
     } catch (error: any) {
       console.error('❌ Error en callback:', error.message);
       
-      const frontendUrl = process.env.FRONTEND_URL || 'https://ordenes.teamcellmania.com';
       const errorUrl = `${frontendUrl}/calendar?google_error=true&message=${encodeURIComponent(error.message)}`;
-      
       console.log(`📤 Redirigiendo al frontend con error: ${errorUrl}`);
       return res.redirect(errorUrl);
     }

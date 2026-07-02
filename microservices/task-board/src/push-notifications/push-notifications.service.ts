@@ -151,6 +151,43 @@ export class PushNotificationsService implements OnModuleInit {
     return results.map(r => r.userId);
   }
 
+  async subscribeWithToken(userId: string, token: string): Promise<PushSubscription> {
+    this.logger.log(`📱 Suscribiendo usuario ${userId} con token FCM`);
+
+    // ✅ LIMPIAR EL TOKEN por si acaso
+    let cleanToken = token;
+    if (token && token.startsWith('https://fcm.googleapis.com/fcm/send/')) {
+      cleanToken = token.replace('https://fcm.googleapis.com/fcm/send/', '');
+      this.logger.log(`📤 Token limpiado (URL eliminada): ${cleanToken.substring(0, 30)}...`);
+    }
+
+    // Buscar si ya existe
+    const existing = await this.subscriptionRepository.findOne({
+      where: { userId, endpoint: cleanToken },
+    });
+
+    if (existing) {
+      existing.active = true;
+      existing.updatedAt = new Date();
+      await this.subscriptionRepository.save(existing);
+      this.logger.log(`✅ Suscripción actualizada`);
+      return existing;
+    }
+
+    // Crear nueva suscripción con el token limpio
+    const newSubscription = new PushSubscription();
+    newSubscription.userId = userId;
+    newSubscription.endpoint = cleanToken;  // ✅ SOLO EL TOKEN
+    newSubscription.keys = { p256dh: '', auth: '' };
+    newSubscription.active = true;
+    newSubscription.createdAt = new Date();
+    newSubscription.updatedAt = new Date();
+
+    await this.subscriptionRepository.save(newSubscription);
+    this.logger.log(`✅ Nueva suscripción FCM guardada`);
+    return newSubscription;
+  }
+
   // ==================== 🔥 ENVÍO DE NOTIFICACIONES ====================
 
   async sendToUser(userId: string, notification: SendNotificationDto): Promise<number> {
@@ -174,6 +211,22 @@ export class PushNotificationsService implements OnModuleInit {
 
     for (const subscription of subscriptions) {
       try {
+        let token = subscription.endpoint;
+        
+        // ✅ Si es una URL completa de FCM, extraer solo el token
+        if (token && token.startsWith('https://fcm.googleapis.com/fcm/send/')) {
+          token = token.replace('https://fcm.googleapis.com/fcm/send/', '');
+          this.logger.log(`📤 Token extraído de URL: ${token.substring(0, 20)}...`);
+        }
+        
+        // ✅ Validar que el token es válido
+        if (!token || token.startsWith('https://')) {
+          this.logger.warn(`⚠️ Token inválido: ${token?.substring(0, 30)}...`);
+          continue;
+        }
+
+        this.logger.log(`📤 Enviando con token: ${token.substring(0, 20)}...`);
+
         const message: admin.messaging.Message = {
           notification: {
             title: notification.title,
@@ -200,12 +253,12 @@ export class PushNotificationsService implements OnModuleInit {
               },
             },
           },
-          token: subscription.endpoint,
+          token: token,
         };
 
         const response = await this.fcm.send(message);
         sentCount++;
-        this.logger.log(`✅ Notificación Firebase enviada`);
+        this.logger.log(`✅ Notificación Firebase enviada: ${response}`);
 
       } catch (error: any) {
         const errorCode = error?.code || 'unknown';

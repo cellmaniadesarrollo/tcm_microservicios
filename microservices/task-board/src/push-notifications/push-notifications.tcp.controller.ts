@@ -13,11 +13,31 @@ export class PushNotificationsTcpController {
   // async getVapidPublicKey() { ... }
 
   @MessagePattern({ cmd: 'push-notifications.subscribe' })
-  async subscribe(@Payload() data: { userId: string; subscription: SubscriptionDto }) {
+  async subscribe(@Payload() data: { userId: string; subscription: SubscriptionDto; token?: string }) {
     console.log('📥 [TCP] Recibiendo suscripción para usuario:', data.userId);
-    console.log('📥 [TCP] Endpoint:', data.subscription?.endpoint?.substring(0, 50) + '...');
     
     try {
+      // ✅ Si es token FCM (solo string)
+      if (data.token && typeof data.token === 'string') {
+        // 🔥 LIMPIAR EL TOKEN: eliminar URL completa si existe
+        let cleanToken = data.token;
+        if (data.token.startsWith('https://fcm.googleapis.com/fcm/send/')) {
+          cleanToken = data.token.replace('https://fcm.googleapis.com/fcm/send/', '');
+          console.log(`📥 [TCP] Token limpiado: ${cleanToken.substring(0, 30)}...`);
+        }
+        
+        console.log('📥 [TCP] Token FCM recibido:', cleanToken.substring(0, 30) + '...');
+        const result = await this.pushService.subscribeWithToken(data.userId, cleanToken);
+        console.log('✅ [TCP] Suscripción FCM guardada:', result.id);
+        return result;
+      }
+      
+      // ✅ Si es suscripción web-push (objeto completo)
+      if (!data.subscription || !data.subscription.endpoint) {
+        throw new Error('Suscripción inválida');
+      }
+      
+      console.log('📥 [TCP] Endpoint:', data.subscription.endpoint.substring(0, 50) + '...');
       const result = await this.pushService.subscribe(data.userId, data.subscription);
       console.log('✅ [TCP] Suscripción guardada:', result.id);
       return result;
