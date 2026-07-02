@@ -422,6 +422,12 @@ export class TaskboardController {
     return this.taskboardService.getUserPushSubscriptions(userId);
   }
 
+  @Post('push-notifications/send')
+  async sendNotification(@Body() dto: any) {
+    console.log(`📥 [Gateway] Recibiendo solicitud de envío:`, dto);
+    return this.taskboardService.sendNotification(dto);
+  }
+
   // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
 
   @Post('calendar/tasks')
