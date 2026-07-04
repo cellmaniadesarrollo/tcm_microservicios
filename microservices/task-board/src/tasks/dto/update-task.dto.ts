@@ -28,4 +28,8 @@ export class UpdateTaskDto extends PartialType(CreateTaskDto) {
   @IsNumber()
   @IsOptional()
   order?: number;
+
+  @IsNumber()
+  @IsOptional()
+  orderId?: string | null;
 }

@@ -57,6 +57,10 @@ export class CreateTaskDto {
   order?: number;
 
   @IsNumber()
+  @IsOptional()
+  orderId?: string | null;
+
+  @IsNumber()
   @Min(0)
   @IsOptional()
   estimatedHours?: number;
