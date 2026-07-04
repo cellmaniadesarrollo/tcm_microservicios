@@ -86,6 +86,9 @@ export class Task {
   @Column({ name: 'parent_task_id', nullable: true })
   parentTaskId: string;
 
+  @Column({ name: 'order_id', nullable: true, type: 'int' })
+  orderId: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
