@@ -915,29 +915,23 @@ export class OrderWorkflowService {
         : [];
       const paymentIds = order.payments?.length ? order.payments.map((p) => p.id) : [];
 
-      // ─── CARGA DE SPARE ASSIGNMENTS ───────────────────────────────────────
-      const spareAssignments = findingIds.length
-        ? await this.spareAssignmentRepository.find({
-          where: { finding_id: In(findingIds), status: 'active' },
-          order: { created_at: 'ASC' },
-        })
-        : [];
-
-      const spareMap = new Map<number, any[]>();
-      spareAssignments.forEach((s) => {
-        if (!spareMap.has(s.finding_id)) spareMap.set(s.finding_id, []);
-        spareMap.get(s.finding_id)!.push({
-          id: s.id,
-          movement_id: s.movement_id,
-          quantity: s.quantity,
-          sku: s.sku,
-          product_name: s.product_name,
-          unit_price: s.unit_price,
-          batch_number: s.batch_number,
-          status: s.status,
-          created_at: s.created_at,
-        });
+      // ─── CARGA DE SPARE ASSIGNMENTS (ahora por orden, no por hallazgo) ────
+      const spareAssignments = await this.spareAssignmentRepository.find({
+        where: { order_id: order.id, status: 'active' },
+        order: { created_at: 'ASC' },
       });
+
+      const spares = spareAssignments.map((s) => ({
+        id: s.id,
+        movement_id: s.movement_id,
+        quantity: s.quantity,
+        sku: s.sku,
+        product_name: s.product_name,
+        unit_price: s.unit_price,
+        batch_number: s.batch_number,
+        status: s.status,
+        created_at: s.created_at,
+      }));
       // ──────────────────────────────────────────────────────────────────────
 
       // ─── CARGA MANUAL DE ATTACHMENTS ──────────────────────────────────────
@@ -968,10 +962,10 @@ export class OrderWorkflowService {
       });
 
       (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) || [];
+      (order as any).spares = spares;
 
       order.findings?.forEach((finding) => {
         finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) || [];
-        (finding as any).spares = spareMap.get(finding.id) ?? [];
         finding.procedures?.forEach((proc) => {
           proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) || [];
         });
@@ -984,7 +978,7 @@ export class OrderWorkflowService {
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       await this.enrichAttachmentsWithSignedUrls(order);
-
+      //console.log(order)
       return order;
 
     } catch (error) {
