@@ -42,7 +42,7 @@ import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 import { DevicesService } from '../devices/devices.service';
 import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
-import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
+import { SpareAssignment, SpareAssignmentStatus } from '../spare-assignments/entities/spare-assignment.entity';
 import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
 @Injectable()
 
@@ -917,7 +917,10 @@ export class OrderWorkflowService {
 
       // ─── CARGA DE SPARE ASSIGNMENTS (ahora por orden, no por hallazgo) ────
       const spareAssignments = await this.spareAssignmentRepository.find({
-        where: { order_id: order.id, status: 'active' },
+        where: {
+          order_id: order.id,
+          status: SpareAssignmentStatus.ACTIVE // 👈 Cambio aquí
+        },
         order: { created_at: 'ASC' },
       });
 
