@@ -978,7 +978,7 @@ export class OrderWorkflowService {
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       await this.enrichAttachmentsWithSignedUrls(order);
-      console.log(order)
+      //console.log(order)
       return order;
 
     } catch (error) {

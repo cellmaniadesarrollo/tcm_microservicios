@@ -22,7 +22,7 @@ async function bootstrap() {
         persistent: false,
       },
     });
-
+ 
     app.connectMicroservice<MicroserviceOptions>({
       transport: Transport.RMQ,
       options: {
