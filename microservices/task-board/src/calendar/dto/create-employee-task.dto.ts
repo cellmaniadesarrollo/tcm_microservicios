@@ -18,6 +18,10 @@ export class CreateEmployeeTaskDto {
   @IsNotEmpty()
   dueDate: string;
 
+  @IsOptional()
+  @IsString()
+  dueTime?: string;
+
   @IsEnum(['alta', 'media', 'baja'])
   @IsOptional()
   priority?: string;

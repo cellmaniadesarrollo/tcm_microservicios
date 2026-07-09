@@ -21,12 +21,14 @@ import { CreateEmployeeTaskDto } from './dto/create-employee-task.dto';
 import { UpdateEmployeeTaskDto } from './dto/update-employee-task.dto';
 import { GetMonthTasksDto } from './dto/get-month-tasks.dto';
 import { CompleteTaskDto } from './dto/complete-task.dto';
+import { ConfigService } from '@nestjs/config';
 
 @Controller('calendar')
 export class CalendarController {
   constructor(
     private readonly calendarService: CalendarService,
     private readonly googleCalendarService: GoogleCalendarService,
+    private readonly configService: ConfigService,
   ) {
     console.log('✅✅✅ CalendarController INICIALIZADO ✅✅✅');
   }
@@ -214,17 +216,21 @@ export class CalendarController {
       await this.googleCalendarService.saveUserTokens(state, tokens);
       console.log('✅ [CALLBACK] Tokens guardados');
       
-      return res.json({
+      // ✅ DEVOLVER ÉXITO (NO redirigir)
+      return res.status(200).json({
         success: true,
-        message: 'Autenticación con Google exitosa',
         userId: state,
+        message: 'Tokens guardados correctamente'
       });
+      
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('❌ [CALLBACK] Error:', errorMessage);
-      return res.status(400).json({
+      
+      // ✅ DEVOLVER ERROR (NO redirigir)
+      return res.status(500).json({
         success: false,
-        error: errorMessage,
+        error: errorMessage
       });
     }
   }
