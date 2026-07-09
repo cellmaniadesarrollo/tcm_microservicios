@@ -32,17 +32,20 @@ export class SpareAssignmentsEventsListener {
     }
 
     private async handleSpareAssigned(eventType: string, data: any) {
-        console.log(`🔧 [${eventType}] Repuesto asignado → finding: ${data?.findingId}`);
+        console.log(`🔧 [${eventType}] Repuesto asignado → order:\n${JSON.stringify(data, null, 2)}`);
         await this.spareAssignmentsService.assignSpare(data);
     }
 
+    // 👇 Reutilizado para el flujo de solicitud de cancelación (antes libre)
     private async handleSpareCancelled(eventType: string, data: any) {
-        console.log(`🚫 [${eventType}] Repuesto cancelado → movementId: ${data?.movementId}`);
-        await this.spareAssignmentsService.cancelSpare(data.movementId);
+        console.log(`🔄 [${eventType}] Actualización solicitud cancelación → movement: ${data?.movement_id} | status: ${data?.assignment_status}`);
+        await this.spareAssignmentsService.handleCancellationStatusUpdate(data);
     }
 
+    // 👇 Intacto — solo retornos directos de bodega
     private async handleSpareReturned(eventType: string, data: any) {
-        console.log(`↩️ [${eventType}] Repuesto devuelto → movementId: ${data?.movementId} | total: ${data?.isTotal}`);
+        console.log(`↩️ [${eventType}] Repuesto devuelto → movementId:\n${JSON.stringify(data, null, 2)}`);
         await this.spareAssignmentsService.returnSpare(data);
     }
+
 }

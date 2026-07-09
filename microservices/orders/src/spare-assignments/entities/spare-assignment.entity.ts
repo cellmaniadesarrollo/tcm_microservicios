@@ -1,40 +1,38 @@
 // src/spare-assignments/entities/spare-assignment.entity.ts
 import {
     Entity,
-    PrimaryGeneratedColumn,
+    PrimaryColumn,
     Column,
-    ManyToOne,
-    JoinColumn,
-    CreateDateColumn,
-    UpdateDateColumn,
     Index,
 } from 'typeorm';
-import { OrderFinding } from '../../order-findings/entities/order-finding.entity';
+
+export enum SpareAssignmentStatus {
+    ACTIVE = 'active',
+    CANCELLATION_REQUESTED = 'cancellation_requested',
+    RETURNED = 'returned',
+}
 
 @Entity('spare_assignments')
-@Index(['finding_id'])
+@Index(['order_id'])
 @Index(['status'])
 export class SpareAssignment {
 
-    @PrimaryGeneratedColumn()
-    id: number;
+    // _id del documento orderFindingSpare en Mongo (fuente de verdad).
+    // NO autoincremental: es determinístico, así que un truncate/reconciliación
+    // del bulk siempre reproduce el mismo id. Elimina el riesgo de que este
+    // valor "cambie de significado" entre syncs, a diferencia del serial de Postgres.
+    @PrimaryColumn({ type: 'varchar' })
+    id: string;
 
-    // Referencia al documento MongoDB (trazabilidad)
     @Column({ type: 'varchar', unique: true })
-    movement_id: string; // ObjectId del movimiento en MongoDB
-
-    // 🔗 Hallazgo
-    @ManyToOne(() => OrderFinding, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'finding_id' })
-    finding: OrderFinding;
+    movement_id: string;
 
     @Column()
-    finding_id: number;
+    order_id: number;
 
     @Column({ type: 'int' })
     quantity: number;
 
-    // Snapshot del repuesto al momento de asignación
     @Column({ type: 'varchar' })
     sku: string;
 
@@ -47,15 +45,22 @@ export class SpareAssignment {
     @Column({ type: 'int' })
     batch_number: number;
 
-    @Column({ type: 'varchar', enum: ['active', 'returned'], default: 'active' })
-    status: string;
+    @Column({
+        type: 'varchar',
+        enum: SpareAssignmentStatus,
+        default: SpareAssignmentStatus.ACTIVE,
+    })
+    status: SpareAssignmentStatus;
+
+    @Column({ type: 'uuid', nullable: true })
+    cancellation_request_id: string | null;
 
     @Column({ type: 'timestamp', nullable: true })
     returned_at: Date | null;
 
-    @CreateDateColumn()
+    @Column({ type: 'timestamp' })
     created_at: Date;
 
-    @UpdateDateColumn()
+    @Column({ type: 'timestamp' })
     updated_at: Date;
 }

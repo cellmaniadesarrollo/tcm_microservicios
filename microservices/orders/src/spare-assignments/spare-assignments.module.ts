@@ -7,10 +7,13 @@ import { SpareAssignmentsService } from './spare-assignments.service';
 import { SpareAssignmentsEventsListener } from './spare-assignments-events.listener';
 import { SpareAssignmentsController } from './spare-assignments.controller';
 import { SpareAssignmentsSyncController } from './spare-assignments-sync.controller';
+import { SpareCancellationRequest } from './entities/spare-cancellation-request.entity';
+import { BroadcastModule } from '../broadcast/broadcast.module';
+import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SpareAssignment]),
+    TypeOrmModule.forFeature([SpareAssignment, SpareCancellationRequest,UserEmployeeCache]),
     ClientsModule.register([
       {
         name: 'SPARE_ASSIGNMENTS_SYNC',
@@ -22,7 +25,8 @@ import { SpareAssignmentsSyncController } from './spare-assignments-sync.control
           persistent: true,
         },
       },
-    ]),  
+    ]),
+    BroadcastModule
   ],
   controllers: [SpareAssignmentsController, SpareAssignmentsSyncController],
   providers: [SpareAssignmentsService, SpareAssignmentsEventsListener],

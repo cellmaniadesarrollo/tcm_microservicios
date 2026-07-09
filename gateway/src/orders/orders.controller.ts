@@ -54,6 +54,7 @@ import { ListPotentialPurchasesGatewayDto } from './dto/list-potential-purchases
 import { GetPotentialPurchaseFullDataGatewayDto } from './dto/get-potential-purchase-full-data-gateway.dto';
 import { VerifyOrderPaymentGatewayDto } from './dto/verify-order-payment-gateway.dto';
 import { GetPaymentSignedUrlsGatewayDto } from './dto/get-payment-signed-urls-gateway.dto';
+import { CreateCancellationRequestGatewayDto } from './dto/create-cancellation-request-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -1111,6 +1112,27 @@ export class OrdersController {
           internalToken: process.env.INTERNAL_SECRET,
           paymentId: dto.paymentId,
           companyId: user.companyId,
+        },
+      ),
+    );
+  }
+  @Post(':orderId/spares/:spareAssignmentId/cancel')
+  // @Groups('CASHIERS', 'TECHNICIANS')
+  async cancelSpareAssignment(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Param('spareAssignmentId') spareAssignmentId: string,
+    @Body() dto: CreateCancellationRequestGatewayDto, // ahora solo valida `reason`
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'cancel_spare_assignment' },
+        {
+          internalToken: process.env.INTERNAL_SECRET,
+          orderId,
+          spareAssignmentId,
+          dto,
+          user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
       ),
     );
