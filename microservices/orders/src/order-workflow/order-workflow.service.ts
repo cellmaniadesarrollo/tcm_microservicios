@@ -849,6 +849,14 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
         .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
         .leftJoinAndSelect('procedures.performedBy', 'performedBy')
+        // ─── NUEVO: productos pendientes ────────────────────────────────
+        .leftJoinAndSelect('order.pendingProducts', 'pendingProducts', 'pendingProducts.deletedAt IS NULL')
+        .leftJoinAndSelect('pendingProducts.createdBy', 'pendingProductCreatedBy')
+
+        // ─── NUEVO: servicios extra ──────────────────────────────────────
+        .leftJoinAndSelect('order.extraServices', 'extraServices', 'extraServices.deletedAt IS NULL')
+        .leftJoinAndSelect('extraServices.serviceType', 'extraServiceType')
+        .leftJoinAndSelect('extraServices.createdBy', 'extraServiceCreatedBy')
         .where('order.id = :orderId', { orderId })
         .andWhere('order.company_id = :companyId', { companyId: user.companyId })
         .orderBy('findings.createdAt', 'ASC')

@@ -55,6 +55,10 @@ import { GetPotentialPurchaseFullDataGatewayDto } from './dto/get-potential-purc
 import { VerifyOrderPaymentGatewayDto } from './dto/verify-order-payment-gateway.dto';
 import { GetPaymentSignedUrlsGatewayDto } from './dto/get-payment-signed-urls-gateway.dto';
 import { CreateCancellationRequestGatewayDto } from './dto/create-cancellation-request-gateway.dto';
+import { CreateOrderPendingProductGatewayDto } from './dto/create-order-pending-product-gateway.dto';
+import { UpdateOrderPendingProductGatewayDto } from './dto/update-order-pending-product-gateway.dto';
+import { CreateOrderExtraServiceGatewayDto } from './dto/create-order-extra-service-gateway.dto';
+import { UpdateOrderExtraServiceGatewayDto } from './dto/update-order-extra-service-gateway.dto';
 @Controller('orders')
 @Auth()
 @Features('orders')
@@ -1135,6 +1139,95 @@ export class OrdersController {
           user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         },
       ),
+    );
+  }
+
+
+  // pending-products
+  @Post('pending-products')
+  async createPendingProduct(
+    @Body() dto: CreateOrderPendingProductGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'create_order_pending_product' },
+        { dto, user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId } },
+      ),
+    );
+  }
+
+  @Patch('pending-products/:id')
+  async updatePendingProduct(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderPendingProductGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'update_order_pending_product' },
+        { id, dto, user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId } },
+      ),
+    );
+  }
+
+  @Delete('pending-products/:id')
+  async deletePendingProduct(
+    @Param('id', ParseIntPipe) id: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'delete_order_pending_product' },
+        { id, user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId } },
+      ),
+    );
+  }
+
+  // extra-services
+  @Post('extra-services')
+  async createExtraService(
+    @Body() dto: CreateOrderExtraServiceGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'create_order_extra_service' },
+        { dto, user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId } },
+      ),
+    );
+  }
+
+  @Patch('extra-services/:id')
+  async updateExtraService(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateOrderExtraServiceGatewayDto,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'update_order_extra_service' },
+        { id, dto, user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId } },
+      ),
+    );
+  }
+
+  @Delete('extra-services/:id')
+  async deleteExtraService(
+    @Param('id', ParseIntPipe) id: number,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'delete_order_extra_service' },
+        { id, user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId } },
+      ),
+    );
+  }
+  @Get('service-types')
+  async listServiceTypes() {
+    return firstValueFrom(
+      this.CustomerService.send({ cmd: 'list_order_service_types' }, {}),
     );
   }
 }
