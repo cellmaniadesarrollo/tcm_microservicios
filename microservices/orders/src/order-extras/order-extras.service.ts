@@ -1,5 +1,5 @@
 // order-extras.service.ts
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { EntityManager, Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { OrderPendingProduct } from './entities/order-pending-product.entity';
@@ -10,7 +10,25 @@ import { CreateOrderExtraServiceDto } from './dto/create-order-extra-service.dto
 import { UpdateOrderExtraServiceDto } from './dto/update-order-extra-service.dto';
 import { OrderServiceType } from './entities/order-service-type.entity';
 import { OrderExtraService } from './entities/order-extra-service.entity';
+import { Attachment, AttachmentEntityType } from '../order-findings/entities/attachment.entity';
+import { CreateAttachmentDto } from '../order-findings/dto/create-attachment.dto';
+import { UpdateAttachmentDto } from '../order-findings/dto/update-attachment.dto';
+import { AwsS3Service } from '../aws-s3/aws-s3.service';
+
 type AuthUser = { userId: string; companyId: string };
+
+export type IncomingFile = {
+    buffer: string; // base64
+    originalname: string;
+    mimetype: string;
+    size: number;
+};
+
+const ATTACHMENT_PREFIX: Partial<Record<AttachmentEntityType, string>> = {
+    [AttachmentEntityType.PENDING_PRODUCT]: 'pending-product',
+    [AttachmentEntityType.EXTRA_SERVICE]: 'extra-service',
+};
+
 @Injectable()
 export class OrderExtrasService implements OnModuleInit {
     constructor(
@@ -20,28 +38,75 @@ export class OrderExtrasService implements OnModuleInit {
         private readonly extraServiceRepo: Repository<OrderExtraService>,
         @InjectRepository(OrderServiceType)
         private readonly serviceTypeRepo: Repository<OrderServiceType>,
+        @InjectRepository(Attachment)
+        private readonly attachmentRepo: Repository<Attachment>,
+        private readonly awsS3Service: AwsS3Service,
     ) { }
+
     async onModuleInit() {
-        console.log('¡El módulo se está iniciando!'); // Agrega este log para testear
         await this.seedServiceTypesIfEmpty();
     }
+
     // ════════════════════════════════════════════════
     // 📦 PENDING PRODUCTS
     // ════════════════════════════════════════════════
 
-    async createPendingProduct(dto: CreateOrderPendingProductDto, user: AuthUser) {
+    async createPendingProduct(
+        dto: CreateOrderPendingProductDto,
+        files: IncomingFile[],
+        user: AuthUser,
+    ) {
         return this.pendingProductRepo.manager.transaction(async (manager) => {
             const order = await this.validateOrderBelongsToCompany(manager, dto.order_id, user.companyId);
             const entity = this.buildPendingProductEntity(dto, order.id, user);
-            return manager.save(entity);
+            const saved = await manager.save(entity);
+
+            const attachments = await this.uploadAttachments(
+                manager,
+                files,
+                AttachmentEntityType.PENDING_PRODUCT,
+                saved.id,
+                user.userId,
+            );
+
+            return { ...saved, attachments };
         });
     }
 
-    async updatePendingProduct(id: number, dto: UpdateOrderPendingProductDto, user: AuthUser) {
+    async updatePendingProduct(
+        id: number,
+        dto: UpdateOrderPendingProductDto,
+        files: IncomingFile[],
+        removeAttachmentIds: number[],
+        user: AuthUser,
+    ) {
         return this.pendingProductRepo.manager.transaction(async (manager) => {
             const existing = await this.findOwnedPendingProduct(manager, id, user.companyId);
             Object.assign(existing, dto);
-            return manager.save(existing);
+            const saved = await manager.save(existing);
+
+            await this.removeAttachments(
+                manager,
+                removeAttachmentIds,
+                AttachmentEntityType.PENDING_PRODUCT,
+                saved.id,
+            );
+
+            const newAttachments = await this.uploadAttachments(
+                manager,
+                files,
+                AttachmentEntityType.PENDING_PRODUCT,
+                saved.id,
+                user.userId,
+            );
+
+            const attachments = await this.getSignedAttachments(
+                manager,
+                AttachmentEntityType.PENDING_PRODUCT,
+                saved.id,
+            );
+
+            return { ...saved, attachments, newAttachments };
         });
     }
 
@@ -94,16 +159,36 @@ export class OrderExtrasService implements OnModuleInit {
     // 🛠️ EXTRA SERVICES
     // ════════════════════════════════════════════════
 
-    async createExtraService(dto: CreateOrderExtraServiceDto, user: AuthUser) {
+    async createExtraService(
+        dto: CreateOrderExtraServiceDto,
+        files: IncomingFile[],
+        user: AuthUser,
+    ) {
         return this.extraServiceRepo.manager.transaction(async (manager) => {
             const order = await this.validateOrderBelongsToCompany(manager, dto.order_id, user.companyId);
             const serviceType = await this.validateServiceTypeExists(manager, dto.service_type_id);
             const entity = this.buildExtraServiceEntity(dto, order.id, serviceType.id, user);
-            return manager.save(entity);
+            const saved = await manager.save(entity);
+
+            const attachments = await this.uploadAttachments(
+                manager,
+                files,
+                AttachmentEntityType.EXTRA_SERVICE,
+                saved.id,
+                user.userId,
+            );
+
+            return { ...saved, attachments };
         });
     }
 
-    async updateExtraService(id: number, dto: UpdateOrderExtraServiceDto, user: AuthUser) {
+    async updateExtraService(
+        id: number,
+        dto: UpdateOrderExtraServiceDto,
+        files: IncomingFile[],
+        removeAttachmentIds: number[],
+        user: AuthUser,
+    ) {
         return this.extraServiceRepo.manager.transaction(async (manager) => {
             const existing = await this.findOwnedExtraService(manager, id, user.companyId);
 
@@ -120,7 +205,30 @@ export class OrderExtrasService implements OnModuleInit {
 
             existing.total_price = Number(existing.unit_price) * existing.quantity;
 
-            return manager.save(existing);
+            const saved = await manager.save(existing);
+
+            await this.removeAttachments(
+                manager,
+                removeAttachmentIds,
+                AttachmentEntityType.EXTRA_SERVICE,
+                saved.id,
+            );
+
+            const newAttachments = await this.uploadAttachments(
+                manager,
+                files,
+                AttachmentEntityType.EXTRA_SERVICE,
+                saved.id,
+                user.userId,
+            );
+
+            const attachments = await this.getSignedAttachments(
+                manager,
+                AttachmentEntityType.EXTRA_SERVICE,
+                saved.id,
+            );
+
+            return { ...saved, attachments, newAttachments };
         });
     }
 
@@ -184,6 +292,89 @@ export class OrderExtrasService implements OnModuleInit {
     }
 
     // ════════════════════════════════════════════════
+    // 📎 ATTACHMENTS — helpers compartidos (pending product / extra service)
+    // ════════════════════════════════════════════════
+
+    private async uploadAttachments(
+        manager: EntityManager,
+        files: IncomingFile[],
+        entityType: AttachmentEntityType,
+        entityId: number,
+        userId: string,
+    ): Promise<Attachment[]> {
+        if (!files?.length) return [];
+
+        const prefix = `${ATTACHMENT_PREFIX[entityType]}/${entityId}/`;
+        const saved: Attachment[] = [];
+
+        for (const file of files) {
+            const buffer = Buffer.from(file.buffer, 'base64');
+            const key = await this.awsS3Service.uploadBuffer(
+                buffer,
+                file.originalname,
+                file.mimetype,
+                prefix,
+            );
+
+            const attachment = manager.create(Attachment, {
+                entity_type: entityType,
+                entity_id: entityId,
+                file_name: file.originalname,
+                file_url: key,
+                file_type: file.mimetype,
+                uploaded_by_id: userId,
+                is_public: false,
+            });
+
+            saved.push(await manager.save(attachment));
+        }
+
+        return this.signAttachments(saved);
+    }
+
+    private async removeAttachments(
+        manager: EntityManager,
+        attachmentIds: number[],
+        entityType: AttachmentEntityType,
+        entityId: number,
+    ): Promise<void> {
+        if (!attachmentIds?.length) return;
+
+        // 🔒 Solo se pueden borrar attachments que pertenezcan a ESTA entidad puntual,
+        // evita que alguien mande un id de otra orden/servicio por error o malicia.
+        await manager
+            .createQueryBuilder()
+            .update(Attachment)
+            .set({ is_active: false })
+            .where('id IN (:...ids)', { ids: attachmentIds })
+            .andWhere('entity_type = :entityType', { entityType })
+            .andWhere('entity_id = :entityId', { entityId })
+            .execute();
+    }
+
+    private async getSignedAttachments(
+        manager: EntityManager,
+        entityType: AttachmentEntityType,
+        entityId: number,
+    ): Promise<Attachment[]> {
+        const attachments = await manager.find(Attachment, {
+            where: { entity_type: entityType, entity_id: entityId, is_active: true },
+            order: { createdAt: 'DESC' },
+        });
+
+        return this.signAttachments(attachments);
+    }
+
+    private async signAttachments(attachments: Attachment[]): Promise<Attachment[]> {
+        return Promise.all(
+            attachments.map(async (a) => ({
+                ...a,
+                file_url: await this.awsS3Service.getPresignedUrl(a.file_url),
+            })),
+        );
+    }
+
+    // ════════════════════════════════════════════════
     // 🌱 CATÁLOGO (no multitenant, compartido)
     // ════════════════════════════════════════════════
 
@@ -220,7 +411,6 @@ export class OrderExtrasService implements OnModuleInit {
         );
 
         await this.serviceTypeRepo.save(entities);
-        console.log(`✅ Seed de order_service_types completado (${entities.length} registros)`);
     }
 
     async listServiceTypes(): Promise<Array<{ id: number; name: string }>> {
@@ -229,5 +419,57 @@ export class OrderExtrasService implements OnModuleInit {
             select: ['id', 'name'],
             order: { name: 'ASC' },
         });
+    }
+
+    private async validateEntityExists(entityType: AttachmentEntityType, entityId: number, companyId: string) {
+        switch (entityType) {
+            case AttachmentEntityType.EXTRA_SERVICE: {
+                const exists = await this.extraServiceRepo.exist({ where: { id: entityId, company_id: companyId } });
+                if (!exists) throw new NotFoundException('Servicio extra no encontrado');
+                break;
+            }
+            case AttachmentEntityType.PENDING_PRODUCT: {
+                const exists = await this.pendingProductRepo.exist({ where: { id: entityId, company_id: companyId } });
+                if (!exists) throw new NotFoundException('Producto pendiente no encontrado');
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    async create(dto: CreateAttachmentDto, user: { userId: string; companyId: string }) {
+        await this.validateEntityExists(dto.entity_type, dto.entity_id, user.companyId);
+
+        const attachment = this.attachmentRepo.create({
+            ...dto,
+            uploaded_by_id: user.userId,
+            is_public: dto.is_public ?? true,
+        });
+        return this.attachmentRepo.save(attachment);
+    }
+
+    async update(id: number, dto: UpdateAttachmentDto, user: { userId: string; companyId: string }) {
+        const attachment = await this.attachmentRepo.findOne({ where: { id, is_active: true } });
+        if (!attachment) throw new NotFoundException('Adjunto no encontrado');
+
+        Object.assign(attachment, dto);
+        return this.attachmentRepo.save(attachment);
+    }
+
+    async softDelete(id: number, user: { userId: string; companyId: string }) {
+        const attachment = await this.attachmentRepo.findOne({ where: { id, is_active: true } });
+        if (!attachment) throw new NotFoundException('Adjunto no encontrado');
+
+        attachment.is_active = false;
+        return this.attachmentRepo.save(attachment);
+    }
+
+    async listByEntity(entityType: AttachmentEntityType, entityId: number) {
+        const attachments = await this.attachmentRepo.find({
+            where: { entity_type: entityType, entity_id: entityId, is_active: true },
+            order: { createdAt: 'DESC' },
+        });
+        return this.signAttachments(attachments);
     }
 }

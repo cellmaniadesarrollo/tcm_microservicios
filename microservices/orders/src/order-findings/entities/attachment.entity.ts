@@ -15,6 +15,8 @@ export enum AttachmentEntityType {
   PROCEDURE = 'PROCEDURE',
   ORDER = 'ORDER',
   PAYMENT = 'PAYMENT',
+  EXTRA_SERVICE = 'EXTRA_SERVICE',
+  PENDING_PRODUCT = 'PENDING_PRODUCT',
 }
 
 @Entity('attachments')
