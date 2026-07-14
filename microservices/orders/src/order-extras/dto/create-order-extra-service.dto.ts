@@ -16,4 +16,9 @@ export class CreateOrderExtraServiceDto {
 
     @IsOptional() @IsInt() @Min(1)
     quantity?: number;
+
+    @IsOptional()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(0)
+    purchase_price?: number | null;
 }
