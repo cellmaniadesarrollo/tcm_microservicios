@@ -849,11 +849,11 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
         .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
         .leftJoinAndSelect('procedures.performedBy', 'performedBy')
-        // ─── NUEVO: productos pendientes ────────────────────────────────
+        // ─── productos pendientes ────────────────────────────────
         .leftJoinAndSelect('order.pendingProducts', 'pendingProducts', 'pendingProducts.deletedAt IS NULL')
         .leftJoinAndSelect('pendingProducts.createdBy', 'pendingProductCreatedBy')
 
-        // ─── NUEVO: servicios extra ──────────────────────────────────────
+        // ─── servicios extra ──────────────────────────────────────
         .leftJoinAndSelect('order.extraServices', 'extraServices', 'extraServices.deletedAt IS NULL')
         .leftJoinAndSelect('extraServices.serviceType', 'extraServiceType')
         .leftJoinAndSelect('extraServices.createdBy', 'extraServiceCreatedBy')
@@ -922,12 +922,18 @@ export class OrderWorkflowService {
         ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
         : [];
       const paymentIds = order.payments?.length ? order.payments.map((p) => p.id) : [];
+      const pendingProductIds = order.pendingProducts?.length
+        ? order.pendingProducts.map((p) => p.id)
+        : [];
+      const extraServiceIds = order.extraServices?.length
+        ? order.extraServices.map((s) => s.id)
+        : [];
 
       // ─── CARGA DE SPARE ASSIGNMENTS (ahora por orden, no por hallazgo) ────
       const spareAssignments = await this.spareAssignmentRepository.find({
         where: {
           order_id: order.id,
-          status: SpareAssignmentStatus.ACTIVE // 👈 Cambio aquí
+          status: SpareAssignmentStatus.ACTIVE
         },
         order: { created_at: 'ASC' },
       });
@@ -959,6 +965,12 @@ export class OrderWorkflowService {
       if (paymentIds.length) {
         whereConditions.push({ entity_type: AttachmentEntityType.PAYMENT, entity_id: In(paymentIds), is_active: true });
       }
+      if (pendingProductIds.length) {
+        whereConditions.push({ entity_type: AttachmentEntityType.PENDING_PRODUCT, entity_id: In(pendingProductIds), is_active: true });
+      }
+      if (extraServiceIds.length) {
+        whereConditions.push({ entity_type: AttachmentEntityType.EXTRA_SERVICE, entity_id: In(extraServiceIds), is_active: true });
+      }
 
       const allAttachments = await this.attachmentRepository.find({
         where: whereConditions,
@@ -984,6 +996,14 @@ export class OrderWorkflowService {
 
       order.payments?.forEach((payment) => {
         payment.attachments = attachmentsMap.get(`${AttachmentEntityType.PAYMENT}_${payment.id}`) || [];
+      });
+
+      order.pendingProducts?.forEach((product) => {
+        (product as any).attachments = attachmentsMap.get(`${AttachmentEntityType.PENDING_PRODUCT}_${product.id}`) || [];
+      });
+
+      order.extraServices?.forEach((service) => {
+        (service as any).attachments = attachmentsMap.get(`${AttachmentEntityType.EXTRA_SERVICE}_${service.id}`) || [];
       });
 
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
@@ -1050,6 +1070,7 @@ export class OrderWorkflowService {
         }
       }
     }
+
     // ─── Attachments de PAYMENTS ─────────────────────────────────────────────
     for (const payment of order.payments ?? []) {
       if (payment.attachments?.length) {
@@ -1065,8 +1086,44 @@ export class OrderWorkflowService {
         }
       }
     }
+
+    // ─── Attachments de PENDING PRODUCTS ─────────────────────────────────────
+    for (const product of order.pendingProducts ?? []) {
+      const attachments = (product as any).attachments;
+      if (attachments?.length) {
+        for (const att of attachments) {
+          promises.push(
+            this.awsS3Service
+              .getPresignedUrl(att.file_url, 1800)
+              .then((signed) => { att.file_url = signed; })
+              .catch((err) => {
+                console.error(`[ERROR] Falló presigned PENDING_PRODUCT ${att.id}:`, err.message);
+              }),
+          );
+        }
+      }
+    }
+
+    // ─── Attachments de EXTRA SERVICES ───────────────────────────────────────
+    for (const service of order.extraServices ?? []) {
+      const attachments = (service as any).attachments;
+      if (attachments?.length) {
+        for (const att of attachments) {
+          promises.push(
+            this.awsS3Service
+              .getPresignedUrl(att.file_url, 1800)
+              .then((signed) => { att.file_url = signed; })
+              .catch((err) => {
+                console.error(`[ERROR] Falló presigned EXTRA_SERVICE ${att.id}:`, err.message);
+              }),
+          );
+        }
+      }
+    }
+
     await Promise.allSettled(promises);
   }
+
 
 
 
