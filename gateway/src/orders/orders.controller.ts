@@ -9,6 +9,7 @@ import {
   Post,
   Req,
   ParseIntPipe,
+  UseInterceptors,
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
@@ -61,6 +62,7 @@ import { UpdateOrderPendingProductGatewayDto } from './dto/update-order-pending-
 import { CreateOrderExtraServiceGatewayDto } from './dto/create-order-extra-service-gateway.dto';
 import { UpdateOrderExtraServiceGatewayDto } from './dto/update-order-extra-service-gateway.dto';
 import { OrdersGatewayService } from './orders.service';
+import { SanitizePurchasePriceInterceptor } from '../common/interceptors/sanitize-purchase-price.interceptor';
 
 @Controller('orders')
 @Auth()
@@ -161,7 +163,7 @@ export class OrdersController {
   async listMyOrders(@Body() dto: ListOrdersGatewayDto, @User() user: any) {
     return this.ordersGatewayService.listMyOrders(dto, toUserPayload(user));
   }
-
+  @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Post('find-one-order')
   async getOrderFullData(@Body() dto: GetOrderFullDataGatewayDto, @User() user: any) {
     return this.ordersGatewayService.getOrderFullData(dto, toUserPayload(user));
@@ -465,7 +467,7 @@ export class OrdersController {
   }
 
   // ---------- Productos pendientes ----------
-
+  @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Post('pending-products')
   async createPendingProduct(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
@@ -481,6 +483,7 @@ export class OrdersController {
       id_quality: formData.id_quality ? Number(formData.id_quality) : undefined,
       observations: formData.observations,
       sale_price: Number(formData.sale_price),
+      purchase_price: formData.purchase_price ? Number(formData.purchase_price) : undefined,
       quantity: formData.quantity ? Number(formData.quantity) : undefined,
     };
 
@@ -490,7 +493,7 @@ export class OrdersController {
       toUserPayload(user),
     );
   }
-
+  @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Patch('pending-products/:id')
   async updatePendingProduct(
     @Param('id', ParseIntPipe) id: number,
@@ -509,6 +512,7 @@ export class OrdersController {
       id_quality: formData.id_quality ? Number(formData.id_quality) : undefined,
       observations: formData.observations,
       sale_price: formData.sale_price ? Number(formData.sale_price) : undefined,
+      purchase_price: formData.purchase_price ? Number(formData.purchase_price) : undefined,
       quantity: formData.quantity ? Number(formData.quantity) : undefined,
     };
 
@@ -525,13 +529,14 @@ export class OrdersController {
     );
   }
 
+
   @Delete('pending-products/:id')
   async deletePendingProduct(@Param('id', ParseIntPipe) id: number, @User() user: any) {
     return this.ordersGatewayService.deletePendingProduct(id, toUserPayload(user));
   }
 
   // ---------- Servicios extra ----------
-
+  @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Post('extra-services')
   async createExtraService(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
@@ -542,6 +547,7 @@ export class OrdersController {
       service_type_id: Number(formData.service_type_id),
       description: formData.description,
       unit_price: Number(formData.unit_price),
+      purchase_price: formData.purchase_price ? Number(formData.purchase_price) : undefined,
       quantity: formData.quantity ? Number(formData.quantity) : undefined,
     };
 
@@ -551,7 +557,7 @@ export class OrdersController {
       toUserPayload(user),
     );
   }
-
+  @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Patch('extra-services/:id')
   async updateExtraService(
     @Param('id', ParseIntPipe) id: number,
@@ -565,6 +571,7 @@ export class OrdersController {
       service_type_id: formData.service_type_id ? Number(formData.service_type_id) : undefined,
       description: formData.description,
       unit_price: formData.unit_price ? Number(formData.unit_price) : undefined,
+      purchase_price: formData.purchase_price ? Number(formData.purchase_price) : undefined,
       quantity: formData.quantity ? Number(formData.quantity) : undefined,
     };
 

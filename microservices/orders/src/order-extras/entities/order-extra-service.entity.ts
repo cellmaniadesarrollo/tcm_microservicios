@@ -44,6 +44,9 @@ export class OrderExtraService {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   unit_price!: number;
 
+  @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+  purchase_price?: number | null;
+
   @Column({ type: 'int', default: 1 })
   quantity!: number;
 

@@ -18,6 +18,9 @@ export class CreateOrderPendingProductGatewayDto {
   @IsNumber()
   sale_price!: number;
 
+  @IsOptional() @IsNumber() @Min(0)
+  purchase_price?: number;
+
   @IsOptional() @IsInt() @Min(1)
   quantity?: number;
 }
