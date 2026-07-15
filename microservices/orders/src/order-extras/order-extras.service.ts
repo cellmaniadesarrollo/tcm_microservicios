@@ -150,6 +150,7 @@ export class OrderExtrasService implements OnModuleInit {
             id_quality: dto.id_quality,
             observations: dto.observations,
             sale_price: dto.sale_price,
+            purchase_price: dto.purchase_price ?? null,
             quantity: dto.quantity ?? 1,
             created_by_id: user.userId,
         });
@@ -200,6 +201,7 @@ export class OrderExtrasService implements OnModuleInit {
                 service_type_id: dto.service_type_id ?? existing.service_type_id,
                 description: dto.description ?? existing.description,
                 unit_price: dto.unit_price ?? existing.unit_price,
+                purchase_price: dto.purchase_price !== undefined ? dto.purchase_price : existing.purchase_price,
                 quantity: dto.quantity ?? existing.quantity,
             });
 
@@ -285,6 +287,7 @@ export class OrderExtrasService implements OnModuleInit {
             service_type_id: serviceTypeId,
             description: dto.description,
             unit_price: dto.unit_price,
+            purchase_price: dto.purchase_price ?? null,
             quantity,
             total_price: Number(dto.unit_price) * quantity,
             created_by_id: user.userId,

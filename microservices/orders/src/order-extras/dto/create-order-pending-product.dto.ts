@@ -19,6 +19,11 @@ export class CreateOrderPendingProductDto {
     @IsNumber()
     sale_price!: number;
 
+    @IsOptional()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    @Min(0)
+    purchase_price?: number | null;
+
     @IsOptional() @IsInt() @Min(1)
     quantity?: number;
 }

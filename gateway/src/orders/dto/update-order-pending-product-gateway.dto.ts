@@ -10,5 +10,6 @@ export class UpdateOrderPendingProductGatewayDto {
     @IsOptional() @IsInt() id_quality?: number;
     @IsOptional() @IsString() observations?: string;
     @IsOptional() @IsNumber() sale_price?: number;
+    @IsOptional() @IsNumber() @Min(0) purchase_price?: number;
     @IsOptional() @IsInt() @Min(1) quantity?: number;
 }
