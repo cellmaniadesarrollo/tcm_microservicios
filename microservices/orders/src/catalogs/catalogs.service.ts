@@ -9,6 +9,7 @@ import { OrderPriority } from './entities/order-priority.entity';
 import { OrderStatus } from './entities/order_status.entity';
 import { GeoDivision } from './entities/geo-division.entity';
 import { GeoCountry } from './entities/geo-country.entity';
+import { Cron } from '@nestjs/schedule';
 
 @Injectable()
 export class CatalogsService {
@@ -35,6 +36,17 @@ export class CatalogsService {
         private countryRepo: Repository<GeoCountry>,
 
     ) { }
+
+    // Se ejecuta todos los días a las 00:00 y 12:00
+    @Cron('0 0,12 * * *')
+    async handleScheduledSync() {
+        console.log('⏰ Ejecutando sincronización programada de catálogos...');
+        try {
+            await this.syncBranchModels();
+        } catch (err) {
+            console.error('❌ Error en sincronización programada:', err);
+        }
+    }
     async populateIfEmpty(): Promise<void> {
         const count = await this.deviceTypeRepo.count();
 
