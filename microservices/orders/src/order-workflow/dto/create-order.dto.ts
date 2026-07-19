@@ -33,5 +33,13 @@ export class CreateOrderDto {
   @IsNumber({ maxDecimalPlaces: 2 })
   estimated_price?: number;
   @IsBoolean()
-  revisadoAntes: boolean;
+  revisadoAntes?: boolean;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  agreed_price?: number;
+
+  @IsOptional()
+  @IsString()
+  price_agreement_observations?: string;
 }

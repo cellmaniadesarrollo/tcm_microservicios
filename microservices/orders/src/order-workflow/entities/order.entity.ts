@@ -33,6 +33,7 @@ import { OrderPotentialPurchase } from '../../order-potential-purchase/entities/
 import { OrderShipping } from './order-shipping.entity';
 import { OrderPendingProduct } from '../../order-extras/entities/order-pending-product.entity';
 import { OrderExtraService } from '../../order-extras/entities/order-extra-service.entity';
+import { OrderPriceAgreement } from './order-price-agreement.entity';
 
 @Entity('orders')
 @Index(['company_id', 'order_number'], { unique: true })
@@ -178,4 +179,7 @@ export class Order {
   pendingProducts!: OrderPendingProduct[];
   @OneToMany(() => OrderExtraService, (s) => s.order, { cascade: true })
   extraServices!: OrderExtraService[];
+
+  @OneToMany(() => OrderPriceAgreement, (agreement) => agreement.order, { cascade: true })
+  priceAgreements!: OrderPriceAgreement[];
 }

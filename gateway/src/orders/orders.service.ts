@@ -336,4 +336,15 @@ export class OrdersGatewayService {
     listServiceTypes() {
         return this.send('list_order_service_types');
     }
+
+    updateOrderPriceAgreement(orderId: number, dto: any, user: any) {
+        return this.send('update_order_price_agreement', { orderId, dto, user });
+    }
+
+    deleteOrderPriceAgreement(orderId: number, user: any) {
+        return this.send('delete_order_price_agreement', { orderId, user });
+    }
+    createOrderPriceAgreement(orderId: number, dto: any, user: any) {
+        return this.send('create_order_price_agreement', { orderId, dto, user });
+    }
 }
