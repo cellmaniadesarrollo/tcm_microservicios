@@ -44,6 +44,9 @@ import { OrderPotentialPurchase } from '../order-potential-purchase/entities/ord
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
 import { SpareAssignment, SpareAssignmentStatus } from '../spare-assignments/entities/spare-assignment.entity';
 import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
+import { OrderPriceAgreement } from './entities/order-price-agreement.entity';
+import { UpdateOrderPriceAgreementDto } from './dto/update-order-price-agreement.dto';
+import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement.dto';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -74,6 +77,9 @@ export class OrderWorkflowService {
     private readonly orderNoteRepository: Repository<OrderNote>,
     @InjectRepository(OrderNoteLog)
     private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
+
+
+
     private readonly notificationsService: NotificationsService,
     private readonly userCacheService: UsersEmployeesEventsService,
     private readonly broadcastService: BroadcastService,
@@ -180,7 +186,15 @@ export class OrderWorkflowService {
         branch_id: user.branchId,
         observation: 'CREACIÓN DE ORDEN',
       });
-
+      // 💰 2️⃣.5 GUARDAR ACUERDO DE PRECIO (opcional)
+      if (dto.agreed_price !== undefined && dto.agreed_price !== null) {
+        await manager.save(OrderPriceAgreement, {
+          order_id: savedOrder.id,
+          agreed_price: dto.agreed_price,
+          agreed_by_id: user.userId,
+          observations: dto.price_agreement_observations?.trim() || undefined,
+        });
+      }
       // 📎 Adjuntos (subida a S3)
       const attachments: Attachment[] = [];
 
@@ -857,6 +871,11 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('order.extraServices', 'extraServices', 'extraServices.deletedAt IS NULL')
         .leftJoinAndSelect('extraServices.serviceType', 'extraServiceType')
         .leftJoinAndSelect('extraServices.createdBy', 'extraServiceCreatedBy')
+        // ─── acuerdo de precio ──────────────────────────────────────
+        .leftJoinAndSelect('order.priceAgreements', 'priceAgreements')
+        .leftJoinAndSelect('priceAgreements.agreedBy', 'priceAgreementAgreedBy')
+        .leftJoinAndSelect('priceAgreements.lastEditedBy', 'priceAgreementLastEditedBy')
+
         .where('order.id = :orderId', { orderId })
         .andWhere('order.company_id = :companyId', { companyId: user.companyId })
         .orderBy('findings.createdAt', 'ASC')
@@ -1009,6 +1028,23 @@ export class OrderWorkflowService {
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       await this.enrichAttachmentsWithSignedUrls(order);
+      const latestPriceAgreement = order.priceAgreements?.length
+        ? order.priceAgreements[0]
+        : null;
+
+      (order as any).priceAgreement = latestPriceAgreement
+        ? {
+          id: latestPriceAgreement.id,
+          agreed_price: latestPriceAgreement.agreed_price,
+          observations: latestPriceAgreement.observations ?? null,
+          created_at: latestPriceAgreement.createdAt,
+          updated_at: latestPriceAgreement.updatedAt,
+          agreed_by: mapUser(latestPriceAgreement.agreedBy),
+          last_edited_by: latestPriceAgreement.lastEditedBy
+            ? mapUser(latestPriceAgreement.lastEditedBy)
+            : null,
+        }
+        : null;
       //console.log(order)
       return order;
 
@@ -2867,6 +2903,136 @@ export class OrderWorkflowService {
     );
 
     return signed;
+  }
+
+  async updateOrderPriceAgreement(
+    orderId: number,
+    dto: UpdateOrderPriceAgreementDto,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      // 🔒 Validar que la orden pertenece a la empresa
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // 🔒 Buscar el acuerdo de precio (asumimos uno por orden)
+      const agreement = await manager.findOne(OrderPriceAgreement, {
+        where: { order_id: orderId },
+        order: { createdAt: 'DESC' },
+      });
+
+      if (!agreement) {
+        throw new RpcException(
+          new NotFoundException('No existe un precio convenido para esta orden'),
+        );
+      }
+
+      if (dto.agreed_price === undefined && dto.observations === undefined) {
+        throw new RpcException(
+          new BadRequestException('No se enviaron campos para actualizar'),
+        );
+      }
+
+      if (dto.agreed_price !== undefined && dto.agreed_price !== null) {
+        agreement.agreed_price = dto.agreed_price;
+      }
+
+      if (dto.observations !== undefined) {
+        agreement.observations = dto.observations?.trim() || undefined;
+      }
+
+      agreement.last_edited_by_id = user.userId;
+
+      const saved = await manager.save(agreement);
+
+      this.handleBroadcast(orderId, 'updated');
+
+      return saved;
+    });
+  }
+
+  async deleteOrderPriceAgreement(
+    orderId: number,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      const agreement = await manager.findOne(OrderPriceAgreement, {
+        where: { order_id: orderId },
+      });
+
+      if (!agreement) {
+        throw new RpcException(
+          new NotFoundException('No existe un precio convenido para esta orden'),
+        );
+      }
+
+      await manager.remove(agreement);
+
+      this.handleBroadcast(orderId, 'updated');
+
+      return { success: true, orderId };
+    });
+  }
+  async createOrderPriceAgreement(
+    orderId: number,
+    dto: CreateOrderPriceAgreementDto,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      // 🔒 Validar que la orden pertenece a la empresa
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // 🔒 Evitar duplicados: si ya existe uno, no crear otro (usar update en su lugar)
+      const existing = await manager.findOne(OrderPriceAgreement, {
+        where: { order_id: orderId },
+      });
+
+      if (existing) {
+        throw new RpcException(
+          new BadRequestException(
+            'Ya existe un precio convenido para esta orden, usa la edición en su lugar',
+          ),
+        );
+      }
+
+      if (dto.agreed_price === undefined || dto.agreed_price === null) {
+        throw new RpcException(
+          new BadRequestException('El precio convenido es requerido'),
+        );
+      }
+
+      const agreement = manager.create(OrderPriceAgreement, {
+        order_id: orderId,
+        agreed_price: dto.agreed_price,
+        agreed_by_id: user.userId,
+        observations: dto.observations?.trim() || undefined,
+      });
+
+      const saved = await manager.save(agreement);
+
+      this.handleBroadcast(orderId, 'updated');
+
+      return saved;
+    });
   }
 }
 

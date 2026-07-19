@@ -16,6 +16,8 @@ import { SaveInboundDto } from './dto/save-inbound.dto';
 import { SaveOutboundDto } from './dto/save-outbound.dto';
 import { OrderShippingService } from './order-shipping.service';
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
+import { UpdateOrderPriceAgreementDto } from './dto/update-order-price-agreement.dto';
+import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement.dto';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
@@ -99,7 +101,7 @@ export class OrderWorkflowController {
       data.dto.orderId,
       data.user,
     );
-    // console.log(datas.findings[0])
+    console.log(datas)
     return datas
   }
 
@@ -266,6 +268,42 @@ export class OrderWorkflowController {
     internalToken: string;
   }) {
     return this.orderWorkflowService.getPaymentSignedUrls(data.paymentId, data.companyId);
+  }
+
+  @MessagePattern({ cmd: 'update_order_price_agreement' })
+  async updateOrderPriceAgreement(data: {
+    orderId: number;
+    dto: UpdateOrderPriceAgreementDto;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.updateOrderPriceAgreement(
+      data.orderId,
+      data.dto,
+      data.user,
+    );
+  }
+
+  @MessagePattern({ cmd: 'delete_order_price_agreement' })
+  async deleteOrderPriceAgreement(data: {
+    orderId: number;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.deleteOrderPriceAgreement(
+      data.orderId,
+      data.user,
+    );
+  }
+  @MessagePattern({ cmd: 'create_order_price_agreement' })
+  async createOrderPriceAgreement(data: {
+    orderId: number;
+    dto: CreateOrderPriceAgreementDto;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    return this.orderWorkflowService.createOrderPriceAgreement(
+      data.orderId,
+      data.dto,
+      data.user,
+    );
   }
 }
 

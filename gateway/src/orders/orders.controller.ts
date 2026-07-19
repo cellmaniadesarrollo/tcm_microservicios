@@ -63,6 +63,8 @@ import { CreateOrderExtraServiceGatewayDto } from './dto/create-order-extra-serv
 import { UpdateOrderExtraServiceGatewayDto } from './dto/update-order-extra-service-gateway.dto';
 import { OrdersGatewayService } from './orders.service';
 import { SanitizePurchasePriceInterceptor } from '../common/interceptors/sanitize-purchase-price.interceptor';
+import { UpdateOrderPriceAgreementGatewayDto } from './dto/update-order-price-agreement.gateway.dto';
+import { CreateOrderPriceAgreementGatewayDto } from './dto/create-order-price-agreement.gateway.dto';
 
 @Controller('orders')
 @Auth()
@@ -90,6 +92,8 @@ export class OrdersController {
       patron: formData.patron,
       password: formData.password,
       estimated_price: formData.estimated_price ? Number(formData.estimated_price) : undefined,
+      agreed_price: formData.agreed_price ? Number(formData.agreed_price) : undefined,
+      price_agreement_observations: formData.price_agreement_observations || undefined,
     };
 
     return this.ordersGatewayService.createOrder(
@@ -596,5 +600,44 @@ export class OrdersController {
   @Get('service-types')
   async listServiceTypes() {
     return this.ordersGatewayService.listServiceTypes();
+  }
+
+  @Patch(':orderId/price-agreement')
+  @Groups('CASHIERS')
+  async updateOrderPriceAgreement(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() body: UpdateOrderPriceAgreementGatewayDto,
+    @User() user: any,
+  ) {
+    return this.ordersGatewayService.updateOrderPriceAgreement(
+      orderId,
+      body,
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
+  }
+
+  @Delete(':orderId/price-agreement')
+  @Groups('CASHIERS')
+  async deleteOrderPriceAgreement(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @User() user: any,
+  ) {
+    return this.ordersGatewayService.deleteOrderPriceAgreement(
+      orderId,
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
+  }
+  @Post(':orderId/price-agreement')
+  @Groups('CASHIERS')
+  async createOrderPriceAgreement(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() body: CreateOrderPriceAgreementGatewayDto,
+    @User() user: any,
+  ) {
+    return this.ordersGatewayService.createOrderPriceAgreement(
+      orderId,
+      body,
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
   }
 }

@@ -35,4 +35,12 @@ export class CreateOrderGatewayDto {
     @IsOptional()
     @IsNumber({ maxDecimalPlaces: 2 })
     estimated_price?: number;
+
+    @IsOptional()
+    @IsNumber({ maxDecimalPlaces: 2 })
+    agreed_price?: number;
+
+    @IsOptional()
+    @IsString()
+    price_agreement_observations?: string;
 }
