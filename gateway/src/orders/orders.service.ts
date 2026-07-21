@@ -347,4 +347,7 @@ export class OrdersGatewayService {
     createOrderPriceAgreement(orderId: number, dto: any, user: any) {
         return this.send('create_order_price_agreement', { orderId, dto, user });
     }
+    getEmployeesBasic(user: any) {
+        return this.send('get_employees_basic', { user });
+    }
 }

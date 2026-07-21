@@ -14,6 +14,7 @@ import { IdType } from '../catalogs/entities/id-type.entity';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { PersonType } from '../catalogs/entities/person-type.entity';
 import { Gender } from '../catalogs/entities/gender.entity';
+import { backfillMissingCustomerPersonalData } from './helpers/customer-personal-data.helper';
 
 @Injectable()
 export class BillingService {
@@ -44,7 +45,13 @@ export class BillingService {
 
 
     ) { }
-
+    async onModuleInit() {
+        try {
+            await backfillMissingCustomerPersonalData(this.customerRepo, this.pivotRepo);
+        } catch (err) {
+            this.logger.error('Error en backfill de customers (gender/birthDate):', err);
+        }
+    }
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
     async create(data: any) {
         try {
@@ -54,26 +61,37 @@ export class BillingService {
             if (!data?.customerId)
                 throw new RpcException(new BadRequestException('customerId es requerido'));
 
-            // Verificar que el cliente pertenece a la empresa
             const customer = await this.customerRepo.findOne({
                 where: { id: data.customerId, company: { id: data.user.companyId } },
+                relations: { gender: true },
             });
             if (!customer)
                 throw new RpcException(new BadRequestException('Cliente no encontrado en esta empresa'));
 
-            // Crear BillingData con TODOS los campos nuevos
+            // 👇 Completa gender/birthDate en el customer SOLO si están vacíos (inline, sin helper)
+            let customerChanged = false;
+            if (!customer.gender && data.genderId) {
+                customer.gender = { id: data.genderId } as any;
+                customerChanged = true;
+            }
+            if (!customer.birthDate && data.birthdate) {
+                const parsed = new Date(data.birthdate);
+                if (!isNaN(parsed.getTime())) {
+                    customer.birthDate = parsed;
+                    customerChanged = true;
+                }
+            }
+            if (customerChanged) {
+                await this.customerRepo.save(customer);
+            }
+
             const billing = this.billingRepo.create({
                 company: { id: data.user.companyId },
-
                 idType: { id: data.idTypeId },
                 idNumber: data.idNumber,
-
-                // ← NUEVOS CAMPOS OBLIGATORIOS
                 personType: { id: data.personTypeId },
                 mainEmail: data.mainEmail,
                 address: data.address,
-
-                // ← NUEVOS CAMPOS OPCIONALES
                 tradeName: data.tradeName,
                 firstName: data.firstName,
                 lastName: data.lastName,
@@ -87,7 +105,6 @@ export class BillingService {
 
             const billingSaved = await this.billingRepo.save(billing);
 
-            // Vincular al cliente en la tabla pivote (se mantiene igual)
             const pivot = this.pivotRepo.create({
                 customer: { id: data.customerId },
                 billingData: { id: billingSaved.id },
@@ -96,16 +113,13 @@ export class BillingService {
 
             await this.pivotRepo.save(pivot);
 
-            // Retorno con todas las relaciones nuevas
             const customerBillingWithRelations = await this.billingRepo.findOne({
                 where: { id: billingSaved.id },
                 relations: {
                     idType: true,
-                    gender: true,           // ← nuevo
-                    personType: true,       // ← nuevo
-                    customerLinks: {
-                        customer: true,
-                    },
+                    gender: true,
+                    personType: true,
+                    customerLinks: { customer: true },
                 },
             });
             try {
@@ -113,17 +127,14 @@ export class BillingService {
             } catch (eventError) {
                 console.error('Error publicando evento CLIENT_CREATED:', eventError);
             }
-            return customerBillingWithRelations
+            return customerBillingWithRelations;
         } catch (error) {
             console.log(error);
-
             if (error instanceof QueryFailedError && (error.driverError as any)?.code === '23505')
                 throw new RpcException(
                     new ForbiddenException('Ya existe un dato de facturación con este documento en la empresas'),
                 );
-
             if (error instanceof RpcException) throw error;
-
             throw new RpcException(new InternalServerErrorException('Error al crear dato de facturación'));
         }
     }
@@ -329,12 +340,31 @@ export class BillingService {
             // ── Buscar o crear Customer mínimo ────────────────────────────
             let customer = await this.customerRepo
                 .createQueryBuilder('c')
+                .leftJoinAndSelect('c.gender', 'gender')
                 .where('c.idNumber = :idNumber', { idNumber: data.idNumber })
                 .andWhere('c.companyId = :companyId', { companyId: data.user.companyId })
                 .getOne();
 
             if (customer) {
                 logger.log(`Customer ya existe id: ${customer.id}`);
+
+                // 👇 Completa inline si el customer ya existía pero le faltan datos
+                let customerChanged = false;
+                if (!customer.gender && data.genderId) {
+                    customer.gender = { id: data.genderId } as any;
+                    customerChanged = true;
+                }
+                if (!customer.birthDate && data.birthdate) {
+                    const parsed = new Date(data.birthdate);
+                    if (!isNaN(parsed.getTime())) {
+                        customer.birthDate = parsed;
+                        customerChanged = true;
+                    }
+                }
+                if (customerChanged) {
+                    customer = await this.customerRepo.save(customer);
+                    logger.log(`Customer ${customer.id} actualizado con gender/birthDate faltantes`);
+                }
             } else {
                 const emailContactType = await this.contactTypeRepo.findOne({
                     where: { name: 'EMAIL' },
@@ -346,6 +376,8 @@ export class BillingService {
                     idNumber: data.idNumber,
                     firstName: data.firstName ?? data.businessName?.split(' ')[0] ?? 'S/N',
                     lastName: data.lastName ?? data.businessName?.split(' ').slice(1).join(' ') ?? 'S/N',
+                    gender: data.genderId ? { id: data.genderId } : undefined,
+                    birthDate: data.birthdate ? new Date(data.birthdate) : undefined, // 👈 nombre correcto + conversión
                     isActive: true,
                     contacts: data.mainEmail && emailContactType
                         ? [{
@@ -358,9 +390,7 @@ export class BillingService {
 
                 customer = await this.customerRepo.save(newCustomer);
                 somethingWasCreated = true;
-
                 await this.publishMinimalCustomerCreated(customer.id);
-
                 logger.log(`Cliente mínimo creado id: ${customer.id}`);
             }
 
@@ -478,8 +508,31 @@ export class BillingService {
             // ── Retornar resultado actualizado ────────────────────────────
             const result = await this.billingRepo.findOne({
                 where: { id: existingBilling.id },
-                relations: { idType: true, personType: true, customerLinks: { customer: true } },
+                relations: { idType: true, personType: true, customerLinks: { customer: { gender: true } } },
             });
+
+            // 👇 Completa inline gender/birthDate en los customers vinculados (sin helper)
+            if (result?.customerLinks?.length) {
+                for (const link of result.customerLinks) {
+                    const c = link.customer;
+                    let changed = false;
+
+                    if (!c.gender && data.genderId) {
+                        c.gender = { id: data.genderId } as any;
+                        changed = true;
+                    }
+                    if (!c.birthDate && data.birthdate) {
+                        const parsed = new Date(data.birthdate);
+                        if (!isNaN(parsed.getTime())) {
+                            c.birthDate = parsed;
+                            changed = true;
+                        }
+                    }
+                    if (changed) {
+                        await this.customerRepo.save(c);
+                    }
+                }
+            }
 
             // ── Emitir evento Kafka ───────────────────────────────────────
             try {

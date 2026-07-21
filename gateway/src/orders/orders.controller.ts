@@ -640,4 +640,8 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+  @Get('employees-basic')
+  async getEmployeesBasic(@User() user: any) {
+    return this.ordersGatewayService.getEmployeesBasic(user);
+  }
 }

@@ -31,4 +31,8 @@ export class UsersEmployeesEventsController {
     async list(@Payload() data: any) {
         return this.cacheService.findTechniciansByOrderType(data.user, data.orderTypeId);
     }
+    @MessagePattern({ cmd: 'get_employees_basic' })
+    async listBasic(@Payload() data: any) {
+        return this.cacheService.findAllEmployeesBasic(data.user);
+    }
 }
