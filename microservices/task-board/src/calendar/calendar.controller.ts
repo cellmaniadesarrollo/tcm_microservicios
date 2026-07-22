@@ -1,4 +1,5 @@
-// src/calendar/calendar.controller.ts
+// ms-task-board/src/calendar/calendar.controller.ts
+
 import {
   Controller,
   Get,
@@ -13,6 +14,7 @@ import {
   HttpStatus,
   Res,
   BadRequestException,
+  // ❌ ELIMINAR: UseInterceptors
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { CalendarService } from './calendar.service';
@@ -24,6 +26,7 @@ import { CompleteTaskDto } from './dto/complete-task.dto';
 import { ConfigService } from '@nestjs/config';
 
 @Controller('calendar')
+// ❌ ELIMINAR: @UseInterceptors(InternalAuthInterceptor)
 export class CalendarController {
   constructor(
     private readonly calendarService: CalendarService,
@@ -50,6 +53,7 @@ export class CalendarController {
   @Post('tasks')
   @HttpCode(HttpStatus.CREATED)
   async createTask(@Body() createDto: CreateEmployeeTaskDto) {
+    // ✅ createDto.companyId viene en el body desde el gateway
     const task = await this.calendarService.createTask(createDto);
     
     if (createDto.userId) {
@@ -76,12 +80,29 @@ export class CalendarController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Query() monthDto: GetMonthTasksDto,
   ) {
-    return await this.calendarService.getTasksByUser(userId, monthDto);
+    // ✅ Extraer companyId del DTO (viene como query param)
+    if (!monthDto.companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getTasksByUser(
+      userId, 
+      monthDto.companyId, 
+      monthDto
+    );
   }
 
   @Get('monthly-tasks')
   async getAllTasksForMonth(@Query() monthDto: GetMonthTasksDto) {
-    return await this.calendarService.getAllTasksForMonth(monthDto);
+    // ✅ Extraer companyId del DTO (viene como query param)
+    if (!monthDto.companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getAllTasksForMonth(
+      monthDto.companyId, 
+      monthDto
+    );
   }
 
   @Put('tasks/:id')
@@ -89,19 +110,42 @@ export class CalendarController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateDto: UpdateEmployeeTaskDto,
   ) {
-    return await this.calendarService.updateTask(id, updateDto);
+    // ✅ Extraer companyId del body (viene del gateway)
+    if (!updateDto.companyId) {
+      throw new BadRequestException('companyId es requerido en el body');
+    }
+    
+    return await this.calendarService.updateTask(
+      id, 
+      updateDto.companyId, 
+      updateDto
+    );
   }
 
   @Delete('tasks/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async deleteTask(@Param('id', ParseUUIDPipe) id: string) {
-    await this.calendarService.deleteTask(id);
+  async deleteTask(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    await this.calendarService.deleteTask(id, companyId);
     return { message: 'Tarea eliminada correctamente' };
   }
 
   @Put('tasks/:id/toggle')
-  async toggleComplete(@Param('id', ParseUUIDPipe) id: string) {
-    return await this.calendarService.toggleComplete(id);
+  async toggleComplete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.toggleComplete(id, companyId);
   }
 
   @Put('tasks/:id/complete')
@@ -109,22 +153,52 @@ export class CalendarController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() completeDto: CompleteTaskDto,
   ) {
-    return await this.calendarService.completeTaskWithPhoto(id, completeDto);
+    // ✅ Extraer companyId del body (viene del gateway)
+    if (!completeDto.companyId) {
+      throw new BadRequestException('companyId es requerido en el body');
+    }
+    
+    return await this.calendarService.completeTaskWithPhoto(
+      id, 
+      completeDto.companyId, 
+      completeDto
+    );
   }
 
   @Get('users/:userId/tasks/today')
-  async getTodayTasks(@Param('userId', ParseUUIDPipe) userId: string) {
-    return await this.calendarService.getTodayTasks(userId);
+  async getTodayTasks(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getTodayTasks(userId, companyId);
   }
 
   @Get('users/:userId/tasks/pending')
-  async getPendingTasks(@Param('userId', ParseUUIDPipe) userId: string) {
-    return await this.calendarService.getPendingTasks(userId);
+  async getPendingTasks(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getPendingTasks(userId, companyId);
   }
 
   @Get('users/:userId/tasks/completed-with-photo')
-  async getCompletedTasksWithPhoto(@Param('userId', ParseUUIDPipe) userId: string) {
-    return await this.calendarService.getCompletedTasksWithPhoto(userId);
+  async getCompletedTasksWithPhoto(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getCompletedTasksWithPhoto(userId, companyId);
   }
 
   @Get('users/:userId/report')
@@ -132,8 +206,18 @@ export class CalendarController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
+    @Query('companyId') companyId: string,
   ) {
-    return await this.calendarService.getUserReport(userId, year, month);
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getUserReport(
+      userId, 
+      companyId, 
+      year, 
+      month
+    );
   }
 
   @Get('users/:userId/cleaning-stats')
@@ -141,18 +225,42 @@ export class CalendarController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
+    @Query('companyId') companyId: string,
   ) {
-    return await this.calendarService.getCleaningStats(userId, year, month);
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getCleaningStats(
+      userId, 
+      companyId, 
+      year, 
+      month
+    );
   }
 
   @Get('boards/:boardId/tasks')
-  async getBoardTasks(@Param('boardId', ParseUUIDPipe) boardId: string) {
-    return await this.calendarService.getTasksByBoard(boardId);
+  async getBoardTasks(
+    @Param('boardId', ParseUUIDPipe) boardId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getTasksByBoard(boardId, companyId);
   }
 
   @Get('tasks/related/:taskId')
-  async getTasksByTask(@Param('taskId', ParseUUIDPipe) taskId: string) {
-    return await this.calendarService.getTasksByTask(taskId);
+  async getTasksByTask(
+    @Param('taskId', ParseUUIDPipe) taskId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
+    return await this.calendarService.getTasksByTask(taskId, companyId);
   }
 
   @Get('users/:userId/tasks/range')
@@ -160,15 +268,22 @@ export class CalendarController {
     @Param('userId', ParseUUIDPipe) userId: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
+    @Query('companyId') companyId: string,
   ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
     return await this.calendarService.getTasksByDateRange(
       userId,
+      companyId,
       new Date(startDate),
       new Date(endDate),
     );
   }
 
   // ==================== GOOGLE CALENDAR - AUTH ====================
+  // ⚠️ ESTOS MÉTODOS NO NECESITAN companyId PORQUE SON DE AUTENTICACIÓN
 
   @Get('auth/google/:userId')
   async googleAuth(
@@ -216,7 +331,6 @@ export class CalendarController {
       await this.googleCalendarService.saveUserTokens(state, tokens);
       console.log('✅ [CALLBACK] Tokens guardados');
       
-      // ✅ DEVOLVER ÉXITO (NO redirigir)
       return res.status(200).json({
         success: true,
         userId: state,
@@ -227,7 +341,6 @@ export class CalendarController {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('❌ [CALLBACK] Error:', errorMessage);
       
-      // ✅ DEVOLVER ERROR (NO redirigir)
       return res.status(500).json({
         success: false,
         error: errorMessage
@@ -254,14 +367,21 @@ export class CalendarController {
   }
 
   @Post('sync-pending/:userId')
-  async syncPendingTasksToGoogle(@Param('userId', ParseUUIDPipe) userId: string) {
+  async syncPendingTasksToGoogle(
+    @Param('userId', ParseUUIDPipe) userId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
     console.log(`🔍 [SYNC PENDING] Sincronizando tareas pendientes para userId: ${userId}`);
     const hasToken = await this.googleCalendarService.hasValidToken(userId);
     if (!hasToken) {
       return { success: false, error: 'Usuario no tiene Google Calendar conectado' };
     }
 
-    const tasks = await this.calendarService.getPendingTasks(userId);
+    const tasks = await this.calendarService.getPendingTasks(userId, companyId);
 
     if (tasks.length === 0) {
       return { success: true, message: 'No hay tareas pendientes para sincronizar', total: 0 };
@@ -275,17 +395,26 @@ export class CalendarController {
   async syncMonthToGoogle(
     @Param('userId', ParseUUIDPipe) userId: string,
     @Body() body: { year: number; month: number },
+    @Query('companyId') companyId: string,
   ) {
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido como query param');
+    }
+    
     console.log(`🔍 [SYNC MONTH] Sincronizando mes ${body.month}/${body.year} para userId: ${userId}`);
     const hasToken = await this.googleCalendarService.hasValidToken(userId);
     if (!hasToken) {
       return { success: false, error: 'Usuario no tiene Google Calendar conectado' };
     }
 
-    const tasks = await this.calendarService.getTasksByUser(userId, {
-      year: body.year,
-      month: body.month,
-    });
+    const tasks = await this.calendarService.getTasksByUser(
+      userId, 
+      companyId,
+      {
+        year: body.year,
+        month: body.month,
+      }
+    );
 
     if (tasks.length === 0) {
       return { success: true, message: 'No hay tareas para sincronizar', total: 0 };

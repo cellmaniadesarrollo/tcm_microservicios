@@ -6,6 +6,10 @@ export class CreateEmployeeTaskDto {
   @IsNotEmpty()
   userId: string;  // Cambiado de employeeId a userId
 
+  @IsNotEmpty()
+  @IsUUID()
+  companyId: string;
+
   @IsString()
   @IsNotEmpty()
   title: string;

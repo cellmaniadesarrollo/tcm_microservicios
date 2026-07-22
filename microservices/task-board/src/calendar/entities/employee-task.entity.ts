@@ -4,13 +4,20 @@ import {
   Column, 
   PrimaryGeneratedColumn, 
   CreateDateColumn, 
-  UpdateDateColumn 
+  UpdateDateColumn,
+  Index // ← Importar Index para mejorar rendimiento
 } from 'typeorm';
 
 @Entity('employee_tasks')
+@Index(['companyId', 'userId']) // ← Índice compuesto para búsquedas rápidas
+@Index(['companyId', 'dueDate']) // ← Índice para filtros por fecha
 export class EmployeeTask {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  // ✅ AGREGAR companyId - OBLIGATORIO
+  @Column({ name: 'company_id', type: 'uuid', nullable: true, })
+  companyId: string;
 
   @Column({ name: 'user_id' })
   userId: string;
@@ -46,15 +53,12 @@ export class EmployeeTask {
   @Column({ name: 'is_completed', default: false })
   isCompleted: boolean;
 
-  // NUEVO: Para almacenar la URL de la foto de evidencia
   @Column({ name: 'completion_photo_url', nullable: true })
   completionPhotoUrl: string;
 
-  // NUEVO: Fecha y hora de cuando se completó
   @Column({ name: 'completed_at', nullable: true })
   completedAt: Date;
 
-  // NUEVO: Comentario adicional al completar
   @Column({ name: 'completion_notes', nullable: true })
   completionNotes: string;
 

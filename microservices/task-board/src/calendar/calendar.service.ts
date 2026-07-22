@@ -21,6 +21,7 @@ export class CalendarService {
     const dueDate = new Date(createDto.dueDate);
     const task = this.employeeTaskRepository.create({
       ...createDto,
+      companyId: createDto.companyId, 
       dueDate,
       dueTime: createDto.dueTime || null,
       day: dueDate.getDate(),
@@ -31,24 +32,26 @@ export class CalendarService {
     return await this.employeeTaskRepository.save(task);
   }
 
-  async getTasksByUser(userId: string, monthDto: GetMonthTasksDto): Promise<EmployeeTask[]> {
+  async getTasksByUser(userId: string, companyId: string, monthDto: GetMonthTasksDto): Promise<EmployeeTask[]> {
     const startDate = new Date(monthDto.year, monthDto.month, 1);
     const endDate = new Date(monthDto.year, monthDto.month + 1, 0);
 
     return await this.employeeTaskRepository.find({
       where: {
         userId,
+        companyId,
         dueDate: Between(startDate, endDate),
       },
       order: { dueDate: 'ASC' },
     });
   }
 
-  async getAllTasksForMonth(monthDto: GetMonthTasksDto): Promise<EmployeeTask[]> {
+  async getAllTasksForMonth(companyId: string, monthDto: GetMonthTasksDto): Promise<EmployeeTask[]> {
     const startDate = new Date(monthDto.year, monthDto.month, 1);
     const endDate = new Date(monthDto.year, monthDto.month + 1, 0);
 
     const whereCondition: any = {
+      companyId,
       dueDate: Between(startDate, endDate),
     };
 
@@ -62,8 +65,8 @@ export class CalendarService {
     });
   }
 
-  async updateTask(id: string, updateDto: UpdateEmployeeTaskDto): Promise<EmployeeTask> {
-    const task = await this.employeeTaskRepository.findOne({ where: { id } });
+  async updateTask(id: string, companyId: string, updateDto: UpdateEmployeeTaskDto): Promise<EmployeeTask> {
+    const task = await this.employeeTaskRepository.findOne({ where: { id, companyId } });
     if (!task) {
       throw new NotFoundException(`Tarea con ID ${id} no encontrada`);
     }
@@ -86,15 +89,15 @@ export class CalendarService {
     return await this.employeeTaskRepository.save(task);
   }
 
-  async deleteTask(id: string): Promise<void> {
-    const result = await this.employeeTaskRepository.delete(id);
+  async deleteTask(id: string, companyId: string): Promise<void> {
+    const result = await this.employeeTaskRepository.delete({id, companyId});
     if (result.affected === 0) {
       throw new NotFoundException(`Tarea con ID ${id} no encontrada`);
     }
   }
 
-  async toggleComplete(id: string): Promise<EmployeeTask> {
-    const task = await this.employeeTaskRepository.findOne({ where: { id } });
+  async toggleComplete(id: string, companyId: string): Promise<EmployeeTask> {
+    const task = await this.employeeTaskRepository.findOne({ where: { id, companyId } });
     if (!task) {
       throw new NotFoundException(`Tarea con ID ${id} no encontrada`);
     }
@@ -104,8 +107,8 @@ export class CalendarService {
 
   // ==================== TAREAS CON FOTO ====================
 
-  async completeTaskWithPhoto(id: string, completeDto: CompleteTaskDto): Promise<EmployeeTask> {
-    const task = await this.employeeTaskRepository.findOne({ where: { id } });
+  async completeTaskWithPhoto(id: string, companyId: string, completeDto: CompleteTaskDto): Promise<EmployeeTask> {
+    const task = await this.employeeTaskRepository.findOne({ where: { id, companyId } });
     if (!task) {
       throw new NotFoundException(`Tarea con ID ${id} no encontrada`);
     }
@@ -118,11 +121,12 @@ export class CalendarService {
     return await this.employeeTaskRepository.save(task);
   }
 
-  async getTodayTasks(userId: string): Promise<EmployeeTask[]> {
+  async getTodayTasks(userId: string, companyId: string): Promise<EmployeeTask[]> {
     const today = new Date();
     return await this.employeeTaskRepository.find({
       where: {
         userId,
+        companyId,
         day: today.getDate(),
         month: today.getMonth(),
         year: today.getFullYear(),
@@ -131,20 +135,22 @@ export class CalendarService {
     });
   }
 
-  async getPendingTasks(userId: string): Promise<EmployeeTask[]> {
+  async getPendingTasks(userId: string, companyId: string): Promise<EmployeeTask[]> {
     return await this.employeeTaskRepository.find({
       where: {
         userId,
+        companyId,
         isCompleted: false,
       },
       order: { dueDate: 'ASC' },
     });
   }
 
-  async getCompletedTasksWithPhoto(userId: string): Promise<EmployeeTask[]> {
+  async getCompletedTasksWithPhoto(userId: string, companyId: string): Promise<EmployeeTask[]> {
     return await this.employeeTaskRepository.find({
       where: {
         userId,
+        companyId,
         isCompleted: true,
         completionPhotoUrl: Not(IsNull()),
       },
@@ -154,11 +160,12 @@ export class CalendarService {
 
   // ==================== REPORTES Y ESTADÍSTICAS ====================
 
-  async getUserReport(userId: string, year: number, month: number): Promise<any> {
-    const tasks = await this.getTasksByUser(userId, { year, month });
+  async getUserReport(userId: string, companyId: string, year: number, month: number): Promise<any> {
+    const tasks = await this.getTasksByUser(userId, companyId, { year, month });
     
     return {
       userId,
+      companyId,
       year,
       month,
       totalTasks: tasks.length,
@@ -186,12 +193,13 @@ export class CalendarService {
     };
   }
 
-  async getCleaningStats(userId: string, year: number, month: number): Promise<any> {
-    const tasks = await this.getTasksByUser(userId, { year, month });
+  async getCleaningStats(userId: string, companyId: string, year: number, month: number): Promise<any> {
+    const tasks = await this.getTasksByUser(userId, companyId, { year, month });
     const completedWithPhoto = tasks.filter(t => t.isCompleted && t.completionPhotoUrl);
     
     return {
       userId,
+      companyId,
       year,
       month,
       totalTasks: tasks.length,
@@ -219,23 +227,24 @@ export class CalendarService {
 
   // ==================== TAREAS RELACIONADAS ====================
 
-  async getTasksByBoard(boardId: string): Promise<EmployeeTask[]> {
+  async getTasksByBoard(boardId: string, companyId: string): Promise<EmployeeTask[]> {
     return await this.employeeTaskRepository.find({
-      where: { relatedBoardId: boardId },
+      where: { relatedBoardId: boardId, companyId },
       order: { dueDate: 'ASC' },
     });
   }
 
-  async getTasksByTask(taskId: string): Promise<EmployeeTask[]> {
+  async getTasksByTask(taskId: string, companyId: string): Promise<EmployeeTask[]> {
     return await this.employeeTaskRepository.find({
-      where: { relatedTaskId: taskId },
+      where: { relatedTaskId: taskId, companyId },
     });
   }
 
-  async getTasksByDateRange(userId: string, startDate: Date, endDate: Date): Promise<EmployeeTask[]> {
+  async getTasksByDateRange(userId: string, companyId: string, startDate: Date, endDate: Date): Promise<EmployeeTask[]> {
     return await this.employeeTaskRepository.find({
       where: {
         userId,
+        companyId,
         dueDate: Between(startDate, endDate),
       },
       order: { dueDate: 'ASC' },

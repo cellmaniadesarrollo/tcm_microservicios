@@ -17,5 +17,9 @@ export class GetMonthTasksDto {
 
   @IsUUID()
   @IsOptional()
-  userId?: string;  // Cambiado de employeeId a userId
+  userId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  companyId?: string;
 }

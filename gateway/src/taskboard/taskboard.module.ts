@@ -1,14 +1,17 @@
 // gateway/src/taskboard/taskboard.module.ts
+
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { HttpModule } from '@nestjs/axios';  // ← AGREGAR
+import { HttpModule } from '@nestjs/axios';
 import { TaskboardController } from './taskboard.controller';
 import { TaskboardService } from './taskboard.service';
 import { GoogleRedirectController } from './google-redirect.controller';
+import { AuthModule } from '../common/auth/auth.module'; // ← Importar el AuthModule de common
 
 @Module({
   imports: [
-    HttpModule,  // ← AGREGAR
+    AuthModule, // ← AGREGAR - Este es el que tiene los guards
+    HttpModule,
     ClientsModule.register([
       {
         name: 'TASKBOARD_CLIENT',

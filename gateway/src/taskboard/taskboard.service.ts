@@ -1,4 +1,6 @@
-import { Injectable, Inject } from '@nestjs/common';
+// gateway/src/taskboard/taskboard.service.ts
+
+import { Injectable, Inject, BadRequestException } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { HttpService } from '@nestjs/axios';
 import axios from 'axios';
@@ -16,7 +18,76 @@ export class TaskboardService {
     private readonly httpService: HttpService,
   ) {}
 
-  // ========== USERS (para buscar miembros) ==========
+  // ========== MÉTODO PARA OBTENER COMPANY ID ==========
+  
+  async getCompanyIdByUserId(userId: string, tokenPayload?: any): Promise<string> {
+    // ✅ PRIMERO: Intentar obtener companyId del token
+    if (tokenPayload && tokenPayload.companyId) {
+      console.log(`✅ [getCompanyIdByUserId] CompanyId desde token: ${tokenPayload.companyId}`);
+      return tokenPayload.companyId;
+    }
+    
+    if (!userId || userId === 'todos' || userId === 'undefined' || userId === 'null') {
+      console.error(`❌ userId inválido: "${userId}"`);
+      throw new BadRequestException('Se requiere un userId válido');
+    }
+    
+    console.log(`🔍 [getCompanyIdByUserId] Buscando companyId para: ${userId}`);
+    
+    try {
+      const users = await lastValueFrom(
+        this.usersClient.send({ cmd: 'get_all_users' }, {})
+      );
+      
+      console.log(`📊 [getCompanyIdByUserId] Usuarios recibidos: ${users?.length || 0}`);
+      
+      const user = users?.find((u: any) => u.id === userId);
+      
+      if (user) {
+        console.log(`👤 [getCompanyIdByUserId] Usuario encontrado:`, {
+          id: user.id,
+          name: user.name || user.name_user || 'sin nombre',
+          companyId: user.companyId
+        });
+        
+        if (user.companyId) {
+          console.log(`✅ [getCompanyIdByUserId] CompanyId encontrado: ${user.companyId}`);
+          return user.companyId;
+        }
+      }
+      
+      try {
+        const userIndividual = await lastValueFrom(
+          this.usersClient.send({ cmd: 'get_user_by_id' }, { id: userId })
+        );
+        
+        if (userIndividual?.companyId) {
+          console.log(`✅ [getCompanyIdByUserId] CompanyId encontrado (individual): ${userIndividual.companyId}`);
+          return userIndividual.companyId;
+        }
+      } catch (error: any) {
+        console.warn(`⚠️ No se pudo obtener usuario individual:`, error.message);
+      }
+      
+      // ✅ Si no tiene companyId en la BD, usar el del token si existe
+      if (tokenPayload?.companyId) {
+        console.log(`✅ [getCompanyIdByUserId] Usando companyId del token: ${tokenPayload.companyId}`);
+        return tokenPayload.companyId;
+      }
+      
+      console.error(`❌ [getCompanyIdByUserId] Usuario ${userId} NO tiene companyId`);
+      throw new BadRequestException(`El usuario ${userId} no tiene una compañía asignada`);
+      
+    } catch (error: any) {
+      console.error(`❌ [getCompanyIdByUserId] Error:`, error.message);
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new BadRequestException(`Error al obtener companyId del usuario: ${error.message}`);
+    }
+  }
+
+  // ========== USERS ==========
   
   async getAllUsers() {
     console.log('📤 [Gateway] Enviando a Users: getAllUsers - INICIO');
@@ -35,7 +106,7 @@ export class TaskboardService {
     try {
       const users = await this.getAllUsers();
       if (!search) return users;
-      const filtered = users.filter(user => 
+      const filtered = users.filter((user: any) => 
         (user.name || '').toLowerCase().includes(search.toLowerCase()) ||
         (user.email || '').toLowerCase().includes(search.toLowerCase())
       );
@@ -43,6 +114,19 @@ export class TaskboardService {
     } catch (error) {
       console.error('Error en searchUsers:', error);
       return [];
+    }
+  }
+
+  async getUserById(userId: string) {
+    if (!userId) {
+      return null;
+    }
+    try {
+      const users = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
+      return users.find((user: any) => user.id === userId) || null;
+    } catch (error) {
+      console.error(`Error fetching user ${userId}:`, (error as any).message);
+      return null;
     }
   }
 
@@ -108,21 +192,6 @@ export class TaskboardService {
     } catch (error) {
       console.error(`❌ [Gateway] Error en removeMember:`, error);
       throw error;
-    }
-  }
-
-  // ========== MIEMBROS (obtener datos del usuario) ==========
-  
-  async getUserById(userId: string) {
-    if (!userId) {
-      return null;
-    }
-    try {
-      const users = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
-      return users.find(user => user.id === userId) || null;
-    } catch (error) {
-      console.error(`Error fetching user ${userId}:`, (error as any).message);
-      return null;
     }
   }
 
@@ -363,7 +432,7 @@ export class TaskboardService {
     return lastValueFrom(this.taskboardClient.send({ cmd: 'tasks.removeCollaborator' }, { taskId, userId }));
   }
 
-  // ========== IMÁGENES (USANDO HTTP) ==========
+  // ========== IMÁGENES ==========
 
   async uploadImage(taskId: string, file: any, taskDetailId?: string) {
     console.log(`📤 [Gateway] uploadImage - INICIO`);
@@ -379,7 +448,6 @@ export class TaskboardService {
     console.log(`  - fileSize: ${file.size}`);
     console.log(`  - mimeType: ${file.mimetype}`);
     
-    // Por ahora, devolver un mock para probar
     return {
       success: true,
       data: {
@@ -500,11 +568,89 @@ export class TaskboardService {
     );
   }
 
-  // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
+  // ========== CALENDAR ==========
 
-  async createCalendarTask(data: any) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard (HTTP): createCalendarTask - title: ${data.title}`);
+  // ✅ NUEVO: Obtener tareas usando el token directamente
+  async getAllCalendarTasksForMonthWithToken(year: number, month: number, tokenPayload: any) {
+    console.log(`📤 [Gateway] getAllCalendarTasksForMonthWithToken - year: ${year}, month: ${month}`);
+    
+    // ✅ Usar companyId y userId directamente del token
+    const companyId = tokenPayload?.companyId;
+    const userId = tokenPayload?.sub || tokenPayload?.id || tokenPayload?.userId;
+    
+    if (!companyId) {
+      console.error('❌ No hay companyId en el token');
+      throw new BadRequestException('El usuario no tiene una compañía asignada');
+    }
+    
+    if (!userId) {
+      console.error('❌ No hay userId en el token');
+      throw new BadRequestException('Token inválido');
+    }
+    
+    console.log(`✅ companyId del token: ${companyId}`);
+    console.log(`✅ userId del token: ${userId}`);
+    
+    const url = `${this.taskboardHttpUrl}/calendar/monthly-tasks?year=${year}&month=${month}&companyId=${companyId}`;
+    console.log(`📤 URL: ${url}`);
+    
     try {
+      const response = await lastValueFrom(this.httpService.get(url));
+      console.log(`✅ Tareas obtenidas: ${response.data?.length || 0}`);
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getAllCalendarTasksForMonthWithToken:', error.message);
+      if (error.response) {
+        console.error('📥 Status:', error.response.status);
+        console.error('📥 Data:', error.response.data);
+      }
+      throw error;
+    }
+  }
+
+  // ✅ MÉTODO ORIGINAL MODIFICADO - Acepta tokenPayload opcional
+  async getAllCalendarTasksForMonth(year: number, month: number, userId?: string, tokenPayload?: any) {
+    console.log(`📤 [Gateway] getAllCalendarTasksForMonth - year: ${year}, month: ${month}, userId: ${userId || 'todos'}`);
+    
+    try {
+      let companyId: string | null = null;
+      
+      if (userId && userId !== 'todos' && userId !== 'undefined' && userId !== 'null') {
+        // ✅ Pasar tokenPayload para obtener companyId
+        companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      } else {
+        console.error('❌ userId inválido o no proporcionado');
+        throw new BadRequestException('Se requiere un userId válido');
+      }
+      
+      const url = `${this.taskboardHttpUrl}/calendar/monthly-tasks?year=${year}&month=${month}&companyId=${companyId}`;
+      console.log(`📤 URL: ${url}`);
+      
+      const response = await lastValueFrom(this.httpService.get(url));
+      return response.data;
+      
+    } catch (error: any) {
+      console.error('❌ Error en getAllCalendarTasksForMonth:', error.message);
+      if (error.response) {
+        console.error('📥 Status:', error.response.status);
+        console.error('📥 Data:', error.response.data);
+      }
+      throw error;
+    }
+  }
+
+  async createCalendarTask(data: any, tokenPayload?: any) {
+    console.log(`📤 [Gateway] createCalendarTask - title: ${data.title}`);
+    try {
+      if (!data.companyId && data.userId) {
+        const companyId = await this.getCompanyIdByUserId(data.userId, tokenPayload);
+        data.companyId = companyId;
+      }
+      
+      if (!data.companyId) {
+        throw new BadRequestException('companyId es requerido');
+      }
+      
       const response = await lastValueFrom(
         this.httpService.post(`${this.taskboardHttpUrl}/calendar/tasks`, data)
       );
@@ -515,64 +661,148 @@ export class TaskboardService {
     }
   }
 
-  async getUserCalendarTasks(userId: string, year: number, month: number) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: getUserCalendarTasks - userId: ${userId}, year: ${year}, month: ${month}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findByUser' }, { userId, year, month }));
+  async getUserCalendarTasks(userId: string, year: number, month: number, tokenPayload?: any) {
+    console.log(`📤 [Gateway] getUserCalendarTasks - userId: ${userId}, year: ${year}, month: ${month}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const url = `${this.taskboardHttpUrl}/calendar/users/${userId}/tasks?year=${year}&month=${month}&companyId=${companyId}`;
+      const response = await lastValueFrom(this.httpService.get(url));
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getUserCalendarTasks:', error.message);
+      throw error;
+    }
   }
 
-  async getAllCalendarTasksForMonth(year: number, month: number, userId?: string) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: getAllCalendarTasksForMonth - year: ${year}, month: ${month}, userId: ${userId || 'todos'}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findAllForMonth' }, { year, month, userId }));
+  async updateCalendarTask(id: string, data: any, tokenPayload?: any) {
+    console.log(`📤 [Gateway] updateCalendarTask - id: ${id}`);
+    try {
+      if (!data.companyId && data.userId) {
+        const companyId = await this.getCompanyIdByUserId(data.userId, tokenPayload);
+        data.companyId = companyId;
+      }
+      
+      if (!data.companyId) {
+        throw new BadRequestException('companyId es requerido');
+      }
+      
+      const response = await lastValueFrom(
+        this.httpService.put(`${this.taskboardHttpUrl}/calendar/tasks/${id}`, data)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en updateCalendarTask:', error.message);
+      throw error;
+    }
   }
 
-  async updateCalendarTask(id: string, data: any) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: updateCalendarTask - id: ${id}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.update' }, { id, ...data }));
+  async deleteCalendarTask(id: string, userId: string, tokenPayload?: any) {
+    console.log(`📤 [Gateway] deleteCalendarTask - id: ${id}, userId: ${userId}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.delete(`${this.taskboardHttpUrl}/calendar/tasks/${id}?companyId=${companyId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en deleteCalendarTask:', error.message);
+      throw error;
+    }
   }
 
-  async deleteCalendarTask(id: string) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: deleteCalendarTask - id: ${id}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.delete' }, id));
+  async toggleCalendarTaskComplete(id: string, userId: string, tokenPayload?: any) {
+    console.log(`📤 [Gateway] toggleCalendarTaskComplete - id: ${id}, userId: ${userId}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.put(`${this.taskboardHttpUrl}/calendar/tasks/${id}/toggle?companyId=${companyId}`, {})
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en toggleCalendarTaskComplete:', error.message);
+      throw error;
+    }
   }
 
-  async toggleCalendarTaskComplete(id: string) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: toggleCalendarTaskComplete - id: ${id}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.toggleComplete' }, id));
+  async completeCalendarTaskWithPhoto(id: string, userId: string, data: { completionPhotoUrl: string; completionNotes?: string }, tokenPayload?: any) {
+    console.log(`📤 [Gateway] completeCalendarTaskWithPhoto - id: ${id}, userId: ${userId}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.put(
+          `${this.taskboardHttpUrl}/calendar/tasks/${id}/complete?companyId=${companyId}`,
+          data
+        )
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en completeCalendarTaskWithPhoto:', error.message);
+      throw error;
+    }
   }
 
-  async completeCalendarTaskWithPhoto(id: string, data: { completionPhotoUrl: string; completionNotes?: string }) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: completeCalendarTaskWithPhoto - id: ${id}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.completeWithPhoto' }, { id, ...data }));
+  async getTodayCalendarTasks(userId: string, tokenPayload?: any) {
+    console.log(`📤 [Gateway] getTodayCalendarTasks - userId: ${userId}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/calendar/users/${userId}/tasks/today?companyId=${companyId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getTodayCalendarTasks:', error.message);
+      throw error;
+    }
   }
 
-  async getTodayCalendarTasks(userId: string) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: getTodayCalendarTasks - userId: ${userId}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.today' }, userId));
+  async getPendingCalendarTasks(userId: string, tokenPayload?: any) {
+    console.log(`📤 [Gateway] getPendingCalendarTasks - userId: ${userId}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/calendar/users/${userId}/tasks/pending?companyId=${companyId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getPendingCalendarTasks:', error.message);
+      throw error;
+    }
   }
 
-  async getPendingCalendarTasks(userId: string) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: getPendingCalendarTasks - userId: ${userId}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.pending' }, userId));
+  async getUserCalendarReport(userId: string, year: number, month: number, tokenPayload?: any) {
+    console.log(`📤 [Gateway] getUserCalendarReport - userId: ${userId}, year: ${year}, month: ${month}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/calendar/users/${userId}/report?year=${year}&month=${month}&companyId=${companyId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getUserCalendarReport:', error.message);
+      throw error;
+    }
   }
 
-  async getUserCalendarReport(userId: string, year: number, month: number) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: getUserCalendarReport - userId: ${userId}, year: ${year}, month: ${month}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.report.user' }, { userId, year, month }));
-  }
-
-  async getCleaningStats(userId: string, year: number, month: number) {
-    console.log(`📤 [Gateway] Enviando a TaskBoard: getCleaningStats - userId: ${userId}, year: ${year}, month: ${month}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.stats.cleaning' }, { userId, year, month }));
+  async getCleaningStats(userId: string, year: number, month: number, tokenPayload?: any) {
+    console.log(`📤 [Gateway] getCleaningStats - userId: ${userId}, year: ${year}, month: ${month}`);
+    try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
+      const response = await lastValueFrom(
+        this.httpService.get(`${this.taskboardHttpUrl}/calendar/users/${userId}/cleaning-stats?year=${year}&month=${month}&companyId=${companyId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      console.error('❌ Error en getCleaningStats:', error.message);
+      throw error;
+    }
   }
 
   async getCalendarImageUrl(taskId: string, imageId: string) {
     console.log(`📤 [Gateway] getCalendarImageUrl - taskId: ${taskId}, imageId: ${imageId}`);
     try {
-      // 🔥 Usar HTTP directo al microservicio (puerto 3001)
       const response = await lastValueFrom(
         this.httpService.get(`${this.taskboardHttpUrl}/tasks/${taskId}/images/${imageId}/url`)
       );
-      console.log('📥 Respuesta del microservicio:', response.data);
       return response.data;
     } catch (error: any) {
       console.error('❌ Error en getCalendarImageUrl:', error.message);
@@ -580,11 +810,8 @@ export class TaskboardService {
     }
   }
 
-  // ========== GOOGLE CALENDAR - AUTENTICACIÓN ==========
+  // ========== GOOGLE CALENDAR ==========
 
-  /**
-   * Obtener URL de autorización de Google Calendar
-   */
   async getAuthUrl(userId: string) {
     console.log(`📤 [Gateway] getAuthUrl - userId: ${userId}`);
     try {
@@ -592,12 +819,10 @@ export class TaskboardService {
         this.httpService.get(`${this.taskboardHttpUrl}/calendar/auth/google/${userId}`)
       );
       
-      // Si la respuesta es un string (redirección), devolverla
       if (typeof response.data === 'string') {
         return response.data;
       }
       
-      // Si es un objeto con authUrl
       if (response.data && response.data.authUrl) {
         return response.data.authUrl;
       }
@@ -609,9 +834,6 @@ export class TaskboardService {
     }
   }
 
-  /**
-   * Verificar si el usuario tiene Google Calendar conectado
-   */
   async getAuthStatus(userId: string) {
     console.log(`📤 [Gateway] getAuthStatus - userId: ${userId}`);
     try {
@@ -625,9 +847,6 @@ export class TaskboardService {
     }
   }
 
-  /**
-   * Desconectar Google Calendar
-   */
   async disconnectGoogle(userId: string) {
     console.log(`📤 [Gateway] disconnectGoogle - userId: ${userId}`);
     try {
@@ -641,14 +860,12 @@ export class TaskboardService {
     }
   }
 
-  /**
-   * Sincronizar tareas pendientes a Google Calendar
-   */
-  async syncPendingTasks(userId: string) {
+  async syncPendingTasks(userId: string, tokenPayload?: any) {
     console.log(`📤 [Gateway] syncPendingTasks - userId: ${userId}`);
     try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
       const response = await lastValueFrom(
-        this.httpService.post(`${this.taskboardHttpUrl}/calendar/sync-pending/${userId}`, {})
+        this.httpService.post(`${this.taskboardHttpUrl}/calendar/sync-pending/${userId}?companyId=${companyId}`, {})
       );
       return response.data;
     } catch (error: any) {
@@ -657,14 +874,12 @@ export class TaskboardService {
     }
   }
 
-  /**
-   * Sincronizar tareas de un mes específico a Google Calendar
-   */
-  async syncMonthTasks(userId: string, year: number, month: number) {
+  async syncMonthTasks(userId: string, year: number, month: number, tokenPayload?: any) {
     console.log(`📤 [Gateway] syncMonthTasks - userId: ${userId}, year: ${year}, month: ${month}`);
     try {
+      const companyId = await this.getCompanyIdByUserId(userId, tokenPayload);
       const response = await lastValueFrom(
-        this.httpService.post(`${this.taskboardHttpUrl}/calendar/sync-month/${userId}`, { year, month })
+        this.httpService.post(`${this.taskboardHttpUrl}/calendar/sync-month/${userId}?companyId=${companyId}`, { year, month })
       );
       return response.data;
     } catch (error: any) {
@@ -673,9 +888,6 @@ export class TaskboardService {
     }
   }
 
-  /**
-   * Obtener eventos de Google Calendar
-   */
   async getGoogleEvents(userId: string, timeMin?: string, timeMax?: string) {
     console.log(`📤 [Gateway] getGoogleEvents - userId: ${userId}`);
     try {

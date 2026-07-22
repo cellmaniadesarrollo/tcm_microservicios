@@ -1,14 +1,24 @@
 // gateway/src/taskboard/taskboard.controller.ts
-import { Controller, Post, Body, Get, Put, Param, Res, Patch, Delete, Query, UploadedFile, UseInterceptors, Redirect } from '@nestjs/common';
+
+import { 
+  Controller, Post, Body, Get, Put, Param, Res, Patch, Delete, 
+  Query, UploadedFile, UseInterceptors, Redirect, Req, 
+  UnauthorizedException, UseGuards 
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TaskboardService } from './taskboard.service';
-import { Response } from 'express';
+import { Response, Request } from 'express';
+import { JwtAuthGuard } from '../common/auth/guards/jwt-auth.guard';
+import { GroupsGuard } from '../common/auth/guards/groups.guard';
+import { FeaturesGuard } from '../common/auth/guards/features.guard';
+import { Public } from '../common/auth/decorators/public.decorator';
 
 @Controller('taskboard')
+@UseGuards(JwtAuthGuard, GroupsGuard, FeaturesGuard) // ← GUARDS APLICADOS A TODO
 export class TaskboardController {
   constructor(private readonly taskboardService: TaskboardService) {}
 
-  // ========== USERS (para buscar miembros) ==========
+  // ========== USERS ==========
   
   @Get('users')
   async getAllUsers() {
@@ -25,7 +35,7 @@ export class TaskboardController {
     return this.taskboardService.getUserById(id);
   }
 
-  // ========== RUTAS ESPECÍFICAS PRIMERO ==========
+  // ========== ROLES ==========
   
   @Get('boards/roles')
   getRoles() {
@@ -42,7 +52,7 @@ export class TaskboardController {
     return this.taskboardService.findBoardsByUser(userId);
   }
 
-  // ========== RUTAS DINÁMICAS DESPUÉS ==========
+  // ========== BOARDS ==========
   
   @Post('boards')
   createBoard(@Body() data: any) {
@@ -150,7 +160,7 @@ export class TaskboardController {
     return this.taskboardService.removeTask(id);
   }
 
-  // ========== IMÁGENES (AGREGAR AQUÍ) ==========
+  // ========== IMÁGENES ==========
   
   @Post('tasks/:taskId/images')
   @UseInterceptors(FileInterceptor('file'))
@@ -165,7 +175,6 @@ export class TaskboardController {
     console.log('file.originalname:', file?.originalname);
     console.log('file.size:', file?.size);
     
-    // Por ahora, devolver mock
     return {
       success: true,
       message: 'Prueba - imagen recibida',
@@ -385,7 +394,7 @@ export class TaskboardController {
     return this.taskboardService.removeLabel(id);
   }
 
-    // ========== PUSH NOTIFICATIONS ==========
+  // ========== PUSH NOTIFICATIONS ==========
 
   @Get('push-notifications/vapid-public-key')
   async getVapidPublicKey() {
@@ -428,10 +437,17 @@ export class TaskboardController {
     return this.taskboardService.sendNotification(dto);
   }
 
-  // ========== CALENDAR / TAREAS DE LIMPIEZA ==========
+  // ========== CALENDAR ==========
 
   @Post('calendar/tasks')
-  async createCalendarTask(@Body() data: any) {
+  async createCalendarTask(
+    @Body() data: any,
+    @Req() req: Request
+  ) {
+    const userId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    if (userId) {
+      data.userId = userId;
+    }
     return this.taskboardService.createCalendarTask(data);
   }
 
@@ -440,7 +456,14 @@ export class TaskboardController {
     @Param('userId') userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
+    @Req() req: Request
   ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver tareas de ${userId}`);
+    }
+    
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month !== undefined ? month : new Date().getMonth();
     return this.taskboardService.getUserCalendarTasks(userId, currentYear, currentMonth);
@@ -448,48 +471,115 @@ export class TaskboardController {
 
   @Get('calendar/monthly-tasks')
   async getAllCalendarTasksForMonth(
+    @Req() req: Request,
     @Query('year') year: number,
     @Query('month') month: number,
-    @Query('userId') userId?: string,
   ) {
+    console.log('🔍 ===== CALENDARIO BACKEND =====');
+    console.log('🔍 req.user:', req.user);
+    
+    // ✅ El userId está en req.user.sub (según tu token)
+    const userId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    console.log('🔍 userId extraído:', userId);
+    
+    if (!userId) {
+      console.error('❌ Usuario no autenticado - req.user está vacío');
+      throw new UnauthorizedException('Usuario no autenticado');
+    }
+    
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month !== undefined ? month : new Date().getMonth();
-    return this.taskboardService.getAllCalendarTasksForMonth(currentYear, currentMonth, userId);
+    
+    try {
+      const result = await this.taskboardService.getAllCalendarTasksForMonth(
+        currentYear, 
+        currentMonth, 
+        userId
+      );
+      console.log('✅ Tareas obtenidas:', result?.length || 0);
+      return result;
+    } catch (error: any) {
+      console.error('❌ Error obteniendo tareas:', error.message);
+      throw error;
+    }
   }
 
   @Put('calendar/tasks/:id')
-  async updateCalendarTask( 
+  async updateCalendarTask(
     @Param('id') id: string,
     @Body() data: any,
+    @Req() req: Request
   ) {
+    const userId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    if (userId) {
+      data.userId = userId;
+    }
     return this.taskboardService.updateCalendarTask(id, data);
   }
 
   @Delete('calendar/tasks/:id')
-  async deleteCalendarTask(@Param('id') id: string) {
-    return this.taskboardService.deleteCalendarTask(id);
+  async deleteCalendarTask(
+    @Param('id') id: string,
+    @Req() req: Request
+  ) {
+    const userId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    if (!userId) {
+      throw new UnauthorizedException('Usuario no autenticado');
+    }
+    return this.taskboardService.deleteCalendarTask(id, userId);
   }
 
   @Put('calendar/tasks/:id/toggle')
-  async toggleCalendarTaskComplete(@Param('id') id: string) {
-    return this.taskboardService.toggleCalendarTaskComplete(id);
+  async toggleCalendarTaskComplete(
+    @Param('id') id: string,
+    @Req() req: Request
+  ) {
+    const userId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    if (!userId) {
+      throw new UnauthorizedException('Usuario no autenticado');
+    }
+    return this.taskboardService.toggleCalendarTaskComplete(id, userId);
   }
 
   @Put('calendar/tasks/:id/complete')
   async completeCalendarTaskWithPhoto(
     @Param('id') id: string,
     @Body() data: { completionPhotoUrl: string; completionNotes?: string },
+    @Req() req: Request
   ) {
-    return this.taskboardService.completeCalendarTaskWithPhoto(id, data);
+    const userId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    if (!userId) {
+      throw new UnauthorizedException('Usuario no autenticado');
+    }
+    return this.taskboardService.completeCalendarTaskWithPhoto(id, userId, data);
   }
 
   @Get('calendar/users/:userId/tasks/today')
-  async getTodayCalendarTasks(@Param('userId') userId: string) {
+  async getTodayCalendarTasks(
+    @Param('userId') userId: string,
+    @Req() req: Request
+  ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver tareas de hoy de ${userId}`);
+    }
+    
     return this.taskboardService.getTodayCalendarTasks(userId);
   }
 
   @Get('calendar/users/:userId/tasks/pending')
-  async getPendingCalendarTasks(@Param('userId') userId: string) {
+  async getPendingCalendarTasks(
+    @Param('userId') userId: string,
+    @Req() req: Request
+  ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver tareas pendientes de ${userId}`);
+    }
+    
     return this.taskboardService.getPendingCalendarTasks(userId);
   }
 
@@ -498,7 +588,14 @@ export class TaskboardController {
     @Param('userId') userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
+    @Req() req: Request
   ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver reporte de ${userId}`);
+    }
+    
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month !== undefined ? month : new Date().getMonth();
     return this.taskboardService.getUserCalendarReport(userId, currentYear, currentMonth);
@@ -509,7 +606,14 @@ export class TaskboardController {
     @Param('userId') userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
+    @Req() req: Request
   ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver estadísticas de ${userId}`);
+    }
+    
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month !== undefined ? month : new Date().getMonth();
     return this.taskboardService.getCleaningStats(userId, currentYear, currentMonth);
@@ -524,21 +628,16 @@ export class TaskboardController {
     return this.taskboardService.getCalendarImageUrl(taskId, imageId);
   }
 
-  // ========== GOOGLE CALENDAR - AUTH ==========
+  // ========== GOOGLE CALENDAR ==========
 
-  /**
-   * Redirige al usuario a Google para autorizar Calendar
-   * Ejemplo: GET /taskboard/calendar/auth/google/5feee4d7...
-   */
   @Get('calendar/auth/google/:userId')
   @Redirect()
   async googleAuth(@Param('userId') userId: string) {
     console.log(`🔍 [Gateway] googleAuth - userId: ${userId}`);
     
-    // ✅ En producción usar el dominio, en desarrollo localhost
     const isProduction = process.env.NODE_ENV === 'production';
     const baseUrl = isProduction 
-      ? 'http://ms.teamcellmania.com:3005'  // 👈 Ajusta según tu dominio
+      ? 'http://ms.teamcellmania.com:3005'
       : 'http://localhost:3005';
     
     const url = `${baseUrl}/calendar/auth/google/${userId}`;
@@ -546,10 +645,6 @@ export class TaskboardController {
     return { url, statusCode: 302 };
   }
 
-  /**
-   * Callback de Google después de la autorización
-   * Google redirige aquí con el código de autorización
-   */
   @Get('calendar/oauth-callback')
   async oauthCallback(
     @Query('code') code: string,
@@ -561,58 +656,76 @@ export class TaskboardController {
     return res.redirect(callbackUrl);
   }
 
-  /**
-   * Verificar si el usuario tiene Google Calendar conectado
-   * Ejemplo: GET /taskboard/calendar/auth/status/5feee4d7...
-   */
   @Get('calendar/auth/status/:userId')
-  async getAuthStatus(@Param('userId') userId: string) {
+  async getAuthStatus(
+    @Param('userId') userId: string,
+    @Req() req: Request
+  ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver auth status de ${userId}`);
+    }
+    
     return this.taskboardService.getAuthStatus(userId);
   }
 
-  /**
-   * Desconectar Google Calendar
-   * Ejemplo: DELETE /taskboard/calendar/auth/5feee4d7...
-   */
   @Delete('calendar/auth/:userId')
-  async disconnectGoogle(@Param('userId') userId: string) {
+  async disconnectGoogle(
+    @Param('userId') userId: string,
+    @Req() req: Request
+  ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta desconectar Google de ${userId}`);
+    }
+    
     return this.taskboardService.disconnectGoogle(userId);
   }
 
-  // ========== GOOGLE CALENDAR - SYNC ==========
-
-  /**
-   * Sincronizar tareas pendientes a Google Calendar
-   * Ejemplo: POST /taskboard/calendar/sync-pending/5feee4d7...
-   */
   @Post('calendar/sync-pending/:userId')
-  async syncPendingTasks(@Param('userId') userId: string) {
+  async syncPendingTasks(
+    @Param('userId') userId: string,
+    @Req() req: Request
+  ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta sincronizar tareas de ${userId}`);
+    }
+    
     return this.taskboardService.syncPendingTasks(userId);
   }
 
-  /**
-   * Sincronizar tareas de un mes específico a Google Calendar
-   * Ejemplo: POST /taskboard/calendar/sync-month/5feee4d7...
-   * Body: { "year": 2026, "month": 6 }
-   */
   @Post('calendar/sync-month/:userId')
   async syncMonthTasks(
     @Param('userId') userId: string,
-    @Body() body: { year: number; month: number }
+    @Body() body: { year: number; month: number },
+    @Req() req: Request
   ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta sincronizar mes de ${userId}`);
+    }
+    
     return this.taskboardService.syncMonthTasks(userId, body.year, body.month);
   }
 
-  /**
-   * Obtener eventos de Google Calendar
-   * Ejemplo: GET /taskboard/calendar/google-events/5feee4d7?timeMin=2026-06-01T00:00:00Z
-   */
   @Get('calendar/google-events/:userId')
   async getGoogleEvents(
+    @Req() req: Request,
     @Param('userId') userId: string,
     @Query('timeMin') timeMin?: string,
     @Query('timeMax') timeMax?: string,
   ) {
+    const currentUserId = req.user?.['sub'] || req.user?.['id'] || req.user?.['userId'];
+    
+    if (currentUserId && currentUserId !== userId) {
+      console.warn(`⚠️ Usuario ${currentUserId} intenta ver eventos de ${userId}`);
+    }
+    
     return this.taskboardService.getGoogleEvents(userId, timeMin, timeMax);
   }
 }

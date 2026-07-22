@@ -13,4 +13,8 @@ export class CompleteTaskDto {
   @IsUrl()
   @IsOptional()
   completionPhotoUrl?: string;
+
+  @IsUUID()
+  @IsOptional()
+  companyId?: string;
 }
