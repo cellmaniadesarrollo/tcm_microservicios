@@ -267,4 +267,27 @@ export class UsersEmployeesEventsService {
             },
         });
     }
+    async findAllEmployeesBasic(user: any) {
+        const employees = await this.useremployeeCacheRepo
+            .createQueryBuilder('employee')
+            .where('employee.company_id = :companyId', { companyId: user.companyId })
+            .select([
+                'employee.id AS id',
+                'employee.username AS username',
+                'employee.first_name AS first_name',
+                'employee.last_name AS last_name',
+            ])
+            .getRawMany();
+
+        return employees.map((e) => ({
+            id: e.id,
+            username: e.username,
+            name: `${this.firstToken(e.first_name)} ${this.firstToken(e.last_name)}`.trim(),
+        }));
+    }
+
+    private firstToken(value: string): string {
+        if (!value) return '';
+        return value.trim().split(/\s+/)[0];
+    }
 } 

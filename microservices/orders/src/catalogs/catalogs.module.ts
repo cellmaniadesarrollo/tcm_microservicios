@@ -12,12 +12,15 @@ import { OrderStatus } from './entities/order_status.entity';
 import { GeoCountry } from './entities/geo-country.entity';
 import { GeoDivision } from './entities/geo-division.entity';
 import { CatalogsSeeder } from './seeders/catalogs.seeder';
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Brand, Model, DeviceType, OrderPriority, OrderType, OrderStatus,
     GeoCountry,
     GeoDivision,
-  ]), MysqlRawModule],
+  ]), MysqlRawModule,
+  ScheduleModule.forRoot(),
+  ],
   providers: [CatalogsService, CatalogsSeeder],
   controllers: [CatalogsController],
 

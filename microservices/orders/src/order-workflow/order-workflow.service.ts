@@ -42,8 +42,11 @@ import { LinkDeviceToOrderDto } from '../devices/dto/update-device.dto';
 import { DevicesService } from '../devices/devices.service';
 import { OrderPotentialPurchase } from '../order-potential-purchase/entities/order-potential-purchase.entity';
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
-import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
+import { SpareAssignment, SpareAssignmentStatus } from '../spare-assignments/entities/spare-assignment.entity';
 import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
+import { OrderPriceAgreement } from './entities/order-price-agreement.entity';
+import { UpdateOrderPriceAgreementDto } from './dto/update-order-price-agreement.dto';
+import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement.dto';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -74,6 +77,9 @@ export class OrderWorkflowService {
     private readonly orderNoteRepository: Repository<OrderNote>,
     @InjectRepository(OrderNoteLog)
     private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
+
+
+
     private readonly notificationsService: NotificationsService,
     private readonly userCacheService: UsersEmployeesEventsService,
     private readonly broadcastService: BroadcastService,
@@ -180,7 +186,15 @@ export class OrderWorkflowService {
         branch_id: user.branchId,
         observation: 'CREACIÓN DE ORDEN',
       });
-
+      // 💰 2️⃣.5 GUARDAR ACUERDO DE PRECIO (opcional)
+      if (dto.agreed_price !== undefined && dto.agreed_price !== null) {
+        await manager.save(OrderPriceAgreement, {
+          order_id: savedOrder.id,
+          agreed_price: dto.agreed_price,
+          agreed_by_id: user.userId,
+          observations: dto.price_agreement_observations?.trim() || undefined,
+        });
+      }
       // 📎 Adjuntos (subida a S3)
       const attachments: Attachment[] = [];
 
@@ -849,6 +863,19 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('findings.reportedBy', 'reportedBy')
         .leftJoinAndSelect('findings.procedures', 'procedures', 'procedures.is_active = :procActive', { procActive: true })
         .leftJoinAndSelect('procedures.performedBy', 'performedBy')
+        // ─── productos pendientes ────────────────────────────────
+        .leftJoinAndSelect('order.pendingProducts', 'pendingProducts', 'pendingProducts.deletedAt IS NULL')
+        .leftJoinAndSelect('pendingProducts.createdBy', 'pendingProductCreatedBy')
+
+        // ─── servicios extra ──────────────────────────────────────
+        .leftJoinAndSelect('order.extraServices', 'extraServices', 'extraServices.deletedAt IS NULL')
+        .leftJoinAndSelect('extraServices.serviceType', 'extraServiceType')
+        .leftJoinAndSelect('extraServices.createdBy', 'extraServiceCreatedBy')
+        // ─── acuerdo de precio ──────────────────────────────────────
+        .leftJoinAndSelect('order.priceAgreements', 'priceAgreements')
+        .leftJoinAndSelect('priceAgreements.agreedBy', 'priceAgreementAgreedBy')
+        .leftJoinAndSelect('priceAgreements.lastEditedBy', 'priceAgreementLastEditedBy')
+
         .where('order.id = :orderId', { orderId })
         .andWhere('order.company_id = :companyId', { companyId: user.companyId })
         .orderBy('findings.createdAt', 'ASC')
@@ -914,30 +941,33 @@ export class OrderWorkflowService {
         ? order.findings.flatMap((f) => f.procedures?.map((p) => p.id) || [])
         : [];
       const paymentIds = order.payments?.length ? order.payments.map((p) => p.id) : [];
-
-      // ─── CARGA DE SPARE ASSIGNMENTS ───────────────────────────────────────
-      const spareAssignments = findingIds.length
-        ? await this.spareAssignmentRepository.find({
-          where: { finding_id: In(findingIds), status: 'active' },
-          order: { created_at: 'ASC' },
-        })
+      const pendingProductIds = order.pendingProducts?.length
+        ? order.pendingProducts.map((p) => p.id)
+        : [];
+      const extraServiceIds = order.extraServices?.length
+        ? order.extraServices.map((s) => s.id)
         : [];
 
-      const spareMap = new Map<number, any[]>();
-      spareAssignments.forEach((s) => {
-        if (!spareMap.has(s.finding_id)) spareMap.set(s.finding_id, []);
-        spareMap.get(s.finding_id)!.push({
-          id: s.id,
-          movement_id: s.movement_id,
-          quantity: s.quantity,
-          sku: s.sku,
-          product_name: s.product_name,
-          unit_price: s.unit_price,
-          batch_number: s.batch_number,
-          status: s.status,
-          created_at: s.created_at,
-        });
+      // ─── CARGA DE SPARE ASSIGNMENTS (ahora por orden, no por hallazgo) ────
+      const spareAssignments = await this.spareAssignmentRepository.find({
+        where: {
+          order_id: order.id,
+          status: SpareAssignmentStatus.ACTIVE
+        },
+        order: { created_at: 'ASC' },
       });
+
+      const spares = spareAssignments.map((s) => ({
+        id: s.id,
+        movement_id: s.movement_id,
+        quantity: s.quantity,
+        sku: s.sku,
+        product_name: s.product_name,
+        unit_price: s.unit_price,
+        batch_number: s.batch_number,
+        status: s.status,
+        created_at: s.created_at,
+      }));
       // ──────────────────────────────────────────────────────────────────────
 
       // ─── CARGA MANUAL DE ATTACHMENTS ──────────────────────────────────────
@@ -954,6 +984,12 @@ export class OrderWorkflowService {
       if (paymentIds.length) {
         whereConditions.push({ entity_type: AttachmentEntityType.PAYMENT, entity_id: In(paymentIds), is_active: true });
       }
+      if (pendingProductIds.length) {
+        whereConditions.push({ entity_type: AttachmentEntityType.PENDING_PRODUCT, entity_id: In(pendingProductIds), is_active: true });
+      }
+      if (extraServiceIds.length) {
+        whereConditions.push({ entity_type: AttachmentEntityType.EXTRA_SERVICE, entity_id: In(extraServiceIds), is_active: true });
+      }
 
       const allAttachments = await this.attachmentRepository.find({
         where: whereConditions,
@@ -968,10 +1004,10 @@ export class OrderWorkflowService {
       });
 
       (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) || [];
+      (order as any).spares = spares;
 
       order.findings?.forEach((finding) => {
         finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) || [];
-        (finding as any).spares = spareMap.get(finding.id) ?? [];
         finding.procedures?.forEach((proc) => {
           proc.attachments = attachmentsMap.get(`${AttachmentEntityType.PROCEDURE}_${proc.id}`) || [];
         });
@@ -981,10 +1017,35 @@ export class OrderWorkflowService {
         payment.attachments = attachmentsMap.get(`${AttachmentEntityType.PAYMENT}_${payment.id}`) || [];
       });
 
+      order.pendingProducts?.forEach((product) => {
+        (product as any).attachments = attachmentsMap.get(`${AttachmentEntityType.PENDING_PRODUCT}_${product.id}`) || [];
+      });
+
+      order.extraServices?.forEach((service) => {
+        (service as any).attachments = attachmentsMap.get(`${AttachmentEntityType.EXTRA_SERVICE}_${service.id}`) || [];
+      });
+
       order.notes?.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
 
       await this.enrichAttachmentsWithSignedUrls(order);
+      const latestPriceAgreement = order.priceAgreements?.length
+        ? order.priceAgreements[0]
+        : null;
 
+      (order as any).priceAgreement = latestPriceAgreement
+        ? {
+          id: latestPriceAgreement.id,
+          agreed_price: latestPriceAgreement.agreed_price,
+          observations: latestPriceAgreement.observations ?? null,
+          created_at: latestPriceAgreement.createdAt,
+          updated_at: latestPriceAgreement.updatedAt,
+          agreed_by: mapUser(latestPriceAgreement.agreedBy),
+          last_edited_by: latestPriceAgreement.lastEditedBy
+            ? mapUser(latestPriceAgreement.lastEditedBy)
+            : null,
+        }
+        : null;
+      //console.log(order)
       return order;
 
     } catch (error) {
@@ -1045,6 +1106,7 @@ export class OrderWorkflowService {
         }
       }
     }
+
     // ─── Attachments de PAYMENTS ─────────────────────────────────────────────
     for (const payment of order.payments ?? []) {
       if (payment.attachments?.length) {
@@ -1060,8 +1122,44 @@ export class OrderWorkflowService {
         }
       }
     }
+
+    // ─── Attachments de PENDING PRODUCTS ─────────────────────────────────────
+    for (const product of order.pendingProducts ?? []) {
+      const attachments = (product as any).attachments;
+      if (attachments?.length) {
+        for (const att of attachments) {
+          promises.push(
+            this.awsS3Service
+              .getPresignedUrl(att.file_url, 1800)
+              .then((signed) => { att.file_url = signed; })
+              .catch((err) => {
+                console.error(`[ERROR] Falló presigned PENDING_PRODUCT ${att.id}:`, err.message);
+              }),
+          );
+        }
+      }
+    }
+
+    // ─── Attachments de EXTRA SERVICES ───────────────────────────────────────
+    for (const service of order.extraServices ?? []) {
+      const attachments = (service as any).attachments;
+      if (attachments?.length) {
+        for (const att of attachments) {
+          promises.push(
+            this.awsS3Service
+              .getPresignedUrl(att.file_url, 1800)
+              .then((signed) => { att.file_url = signed; })
+              .catch((err) => {
+                console.error(`[ERROR] Falló presigned EXTRA_SERVICE ${att.id}:`, err.message);
+              }),
+          );
+        }
+      }
+    }
+
     await Promise.allSettled(promises);
   }
+
 
 
 
@@ -2805,6 +2903,136 @@ export class OrderWorkflowService {
     );
 
     return signed;
+  }
+
+  async updateOrderPriceAgreement(
+    orderId: number,
+    dto: UpdateOrderPriceAgreementDto,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      // 🔒 Validar que la orden pertenece a la empresa
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // 🔒 Buscar el acuerdo de precio (asumimos uno por orden)
+      const agreement = await manager.findOne(OrderPriceAgreement, {
+        where: { order_id: orderId },
+        order: { createdAt: 'DESC' },
+      });
+
+      if (!agreement) {
+        throw new RpcException(
+          new NotFoundException('No existe un precio convenido para esta orden'),
+        );
+      }
+
+      if (dto.agreed_price === undefined && dto.observations === undefined) {
+        throw new RpcException(
+          new BadRequestException('No se enviaron campos para actualizar'),
+        );
+      }
+
+      if (dto.agreed_price !== undefined && dto.agreed_price !== null) {
+        agreement.agreed_price = dto.agreed_price;
+      }
+
+      if (dto.observations !== undefined) {
+        agreement.observations = dto.observations?.trim() || undefined;
+      }
+
+      agreement.last_edited_by_id = user.userId;
+
+      const saved = await manager.save(agreement);
+
+      this.handleBroadcast(orderId, 'updated');
+
+      return saved;
+    });
+  }
+
+  async deleteOrderPriceAgreement(
+    orderId: number,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      const agreement = await manager.findOne(OrderPriceAgreement, {
+        where: { order_id: orderId },
+      });
+
+      if (!agreement) {
+        throw new RpcException(
+          new NotFoundException('No existe un precio convenido para esta orden'),
+        );
+      }
+
+      await manager.remove(agreement);
+
+      this.handleBroadcast(orderId, 'updated');
+
+      return { success: true, orderId };
+    });
+  }
+  async createOrderPriceAgreement(
+    orderId: number,
+    dto: CreateOrderPriceAgreementDto,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      // 🔒 Validar que la orden pertenece a la empresa
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // 🔒 Evitar duplicados: si ya existe uno, no crear otro (usar update en su lugar)
+      const existing = await manager.findOne(OrderPriceAgreement, {
+        where: { order_id: orderId },
+      });
+
+      if (existing) {
+        throw new RpcException(
+          new BadRequestException(
+            'Ya existe un precio convenido para esta orden, usa la edición en su lugar',
+          ),
+        );
+      }
+
+      if (dto.agreed_price === undefined || dto.agreed_price === null) {
+        throw new RpcException(
+          new BadRequestException('El precio convenido es requerido'),
+        );
+      }
+
+      const agreement = manager.create(OrderPriceAgreement, {
+        order_id: orderId,
+        agreed_price: dto.agreed_price,
+        agreed_by_id: user.userId,
+        observations: dto.observations?.trim() || undefined,
+      });
+
+      const saved = await manager.save(agreement);
+
+      this.handleBroadcast(orderId, 'updated');
+
+      return saved;
+    });
   }
 }
 
