@@ -1,10 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { OrderReplica, OrderReplicaDocument } from './schemas/order-replica.schema';
 import { OrderStatus, OrderStatusDocument } from './schemas/order-status.schema';
 import { OrderType, OrderTypeDocument } from './schemas/order-type.schema';
 import { OrderValidationService } from '../order-validation/order-validation.service';
+import { RpcException } from '@nestjs/microservices';
 
 @Injectable()
 export class OrdersRelayService {
@@ -403,5 +404,32 @@ export class OrdersRelayService {
             this.bulkUpsert(this.orderStatusModel, orderStatuses, 'OrderStatuses'),
             this.bulkUpsert(this.orderTypeModel, orderTypes, 'OrderTypes'),
         ]);
+    }
+
+    /**
+         * Busca una orden replicada por su id numérico (PK del MS origen).
+         */
+    async findOrderById(orderId: number): Promise<OrderReplicaDocument> {
+        try {
+            const order = await this.orderModel.findOne({ id: orderId }).exec();
+
+            if (!order) {
+                throw new RpcException(
+                    new NotFoundException(`Orden con id ${orderId} no encontrada en la réplica`),
+                );
+            }
+
+            return order;
+        } catch (error) {
+            // Si ya es un RpcException (p.ej. el NotFoundException que lanzamos arriba), lo re-lanzamos tal cual
+            if (error instanceof RpcException) {
+                throw error;
+            }
+
+            // Cualquier otro error (fallo de conexión, query mal formada, etc.)
+            throw new RpcException(
+                new InternalServerErrorException('Error interno al obtener datos de la orden'),
+            );
+        }
     }
 }

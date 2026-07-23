@@ -3,6 +3,11 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { GetOrdersFilterDto } from './dto/get-orders-filter.dto.gateway';
 import { GetAdminDashboardRangeDto } from './dto/get-admin-dashboard.dto.gateway';
+import { RegisterOrderPrintDto } from './dto/register-order-print.dto.gateway';
+import { RegisterPrintCopyDto } from './dto/register-print-copy.dto.gateway';
+import { GetEmployeesFinesDto } from './dto/get-employees-fines.dto';
+import { UpdateFineStatusDto } from './dto/update-fine-status.dto';
+import { GetFinesListDto } from './dto/get-fines-list.dto';
 
 @Injectable()
 export class ReportsService {
@@ -36,12 +41,11 @@ export class ReportsService {
         );
     }
     async getDashboardCustomer(user: any) {
-        // La lógica de "mensajería" se queda aquí
         return await firstValueFrom(
             this.client.send(
                 { cmd: 'fetch_customer_for_dashboard_orders' },
                 {
-                    internalToken: process.env.INTERNAL_SECRET, // El service gestiona el token 
+                    internalToken: process.env.INTERNAL_SECRET,
                     user,
                 },
             ),
@@ -121,6 +125,122 @@ export class ReportsService {
                     },
                     from: dto.from,
                     to: dto.to,
+                },
+            ),
+        );
+    }
+
+    // gateway/reports/reports.service.ts (método agregado)
+    async registerOrderPrint(user: any, dto: RegisterOrderPrintDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'register_order_print' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: dto,
+                    user: {
+                        userId: user.sub,
+                        companyId: user.companyId,
+                    },
+                },
+            ),
+        );
+    }
+    async getPrintStatus(dto: any) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_print_status' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: dto,
+                },
+            ),
+        );
+    }
+    async registerPrintCopy(user: any, dto: RegisterPrintCopyDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'register_print_copy' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: dto,
+                    user: {
+                        userId: user.sub,
+                        companyId: user.companyId,
+                        branchId: user.branchId,
+                    },
+                },
+            ),
+        );
+    }
+    async getEmployeesFinesSummary(user: any, dto: GetEmployeesFinesDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_employees_fines_summary' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: dto,
+                    user: {
+                        userId: user.sub,
+                        companyId: user.companyId,
+                        branchId: user.branchId,
+                    },
+                },
+            ),
+        );
+    }
+
+    async updateFineStatus(user: any, dto: UpdateFineStatusDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'update_fine_status' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: dto,
+                    user: {
+                        userId: user.sub,
+                        companyId: user.companyId,
+                        branchId: user.branchId,
+                    },
+                },
+            ),
+        );
+    }
+
+    // gateway/fines.gateway.service.ts (agregar)
+    async getFinesList(user: any, dto: GetFinesListDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_fines_list' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: dto,
+                    user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+                },
+            ),
+        );
+    }
+
+    async getEmployeesForFilter(user: any) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_employees_for_filter' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: {},
+                    user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+                },
+            ),
+        );
+    }
+    async getFineDetail(user: any, fineId: string) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_fine_detail' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    data: { fineId },
+                    user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
                 },
             ),
         );
