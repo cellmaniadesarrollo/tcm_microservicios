@@ -35,6 +35,6 @@ import { OrderValidationModule } from '../order-validation/order-validation.modu
   exports: [OrdersEventsListener, MongooseModule.forFeature([
     { name: OrderStatus.name, schema: OrderStatusSchema },
     { name: OrderType.name, schema: OrderTypeSchema },
-  ]),]
+  ]), OrdersRelayService,]
 })
 export class OrdersRelayModule { }
