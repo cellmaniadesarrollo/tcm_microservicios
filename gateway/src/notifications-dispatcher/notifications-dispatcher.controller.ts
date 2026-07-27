@@ -102,4 +102,82 @@ export class NotificationsDispatcherController {
       ),
     );
   }
+  // agregar a notifications-dispatcher.controller.ts
+
+  // ─── Sesión oficial ───────────────────────────────────────────────────────
+
+  @Post('sessions/official')
+  async configureOfficial(
+    @Body() body: {
+      sessionId?: string;
+      phoneNumberId: string;
+      accessToken: string;
+      wabaId: string;
+      apiVersion?: string;
+      routingId?: string | null;
+    },
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.client.send(
+        { cmd: 'whatsapp_configure_official' },
+        { internalToken: process.env.INTERNAL_SECRET, ...body, user: { companyId: user.companyId } },
+      ),
+    );
+  }
+
+  @Get('sessions/:sessionId/official/test')
+  async testOfficialConnection(@Param('sessionId') sessionId: string, @User() user: any) {
+    return firstValueFrom(
+      this.client.send(
+        { cmd: 'whatsapp_test_official_connection' },
+        { internalToken: process.env.INTERNAL_SECRET, sessionId, user: { companyId: user.companyId } },
+      ),
+    );
+  }
+
+  // ─── Plantillas ───────────────────────────────────────────────────────────
+
+  @Post('sessions/:sessionId/templates/sync')
+  async syncTemplates(@Param('sessionId') sessionId: string, @User() user: any) {
+    return firstValueFrom(
+      this.client.send(
+        { cmd: 'whatsapp_sync_templates' },
+        { internalToken: process.env.INTERNAL_SECRET, sessionId, user: { companyId: user.companyId } },
+      ),
+    );
+  }
+
+  @Get('sessions/:sessionId/templates')
+  async listTemplates(@Param('sessionId') sessionId: string, @User() user: any) {
+    return firstValueFrom(
+      this.client.send(
+        { cmd: 'whatsapp_list_templates' },
+        { internalToken: process.env.INTERNAL_SECRET, sessionId, user: { companyId: user.companyId } },
+      ),
+    );
+  }
+
+  @Patch('templates/:templateId/link')
+  async linkTemplate(
+    @Param('templateId') templateId: string,
+    @Body() body: { event: string },
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.client.send(
+        { cmd: 'whatsapp_link_template' },
+        { internalToken: process.env.INTERNAL_SECRET, templateId, event: body.event, user: { companyId: user.companyId } },
+      ),
+    );
+  }
+  @Get('sessions/:sessionId')
+  async getSession(@Param('sessionId') sessionId: string, @User() user: any) {
+    return firstValueFrom(
+      this.client.send(
+        { cmd: 'whatsapp_get_session' },
+        { internalToken: process.env.INTERNAL_SECRET, sessionId, user: { companyId: user.companyId } },
+      ),
+    );
+  }
 }
