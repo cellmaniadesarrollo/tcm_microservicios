@@ -163,6 +163,7 @@ services:
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - LEGACY_JWT_SECRET
+      - WHATSAPP_WEBHOOK_VERIFY_TOKEN
     networks:
       - backend
     depends_on:
