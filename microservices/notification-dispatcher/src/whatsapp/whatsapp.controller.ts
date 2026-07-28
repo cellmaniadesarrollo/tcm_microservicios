@@ -6,7 +6,7 @@ import { WhatsappTemplateService } from './whatsapp-template.service';
 
 const logger = new Logger('WhatsappController');
 
-@Controller()
+@Controller() 
 export class WhatsappController {
     constructor(private readonly whatsappService: WhatsappService,
         private readonly whatsappOfficialService: WhatsappOfficialService,
