@@ -79,7 +79,14 @@ export class OrdersGatewayService {
             user: { userId: user.userId, companyId: user.companyId },
         });
     }
-
+    updateDeviceImei(deviceId: number, orderId: number, dto: any, user: any) {
+        return this.send('update_device_imei', {
+            deviceId,
+            orderId,
+            dto,
+            user: { userId: user.userId, companyId: user.companyId },
+        });
+    }
     getInitialData() {
         return this.send('get_newdata_catalog_orders');
     }

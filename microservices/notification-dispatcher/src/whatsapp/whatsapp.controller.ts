@@ -1,12 +1,18 @@
 import { Controller, Logger } from '@nestjs/common';
 import { MessagePattern, RpcException } from '@nestjs/microservices';
 import { WhatsappService } from './whatsapp.service';
+import { WhatsappOfficialService } from './whatsapp-official.service';
+import { WhatsappTemplateService } from './whatsapp-template.service';
 
 const logger = new Logger('WhatsappController');
 
-@Controller()
+@Controller() 
 export class WhatsappController {
-    constructor(private readonly whatsappService: WhatsappService) { }
+    constructor(private readonly whatsappService: WhatsappService,
+        private readonly whatsappOfficialService: WhatsappOfficialService,
+        private readonly whatsappTemplateService: WhatsappTemplateService
+
+    ) { }
 
     // ─── Sesiones CRUD ────────────────────────────────────────────────────────
 
@@ -80,6 +86,83 @@ export class WhatsappController {
         try {
             const datass = this.whatsappService.getQrStatus(data.sessionId);
             return datass
+        } catch (e: any) {
+            throw new RpcException(e.message);
+        }
+    }
+
+    // agregar a whatsapp.controller.ts
+
+    @MessagePattern({ cmd: 'whatsapp_configure_official' })
+    async configureOfficial(data: {
+        user: { companyId: string };
+        sessionId?: string;
+        phoneNumberId: string;
+        accessToken: string;
+        wabaId: string;
+        apiVersion?: string;
+        routingId?: string | null;
+    }) {
+        try {
+            return await this.whatsappOfficialService.configureSession(
+                data.user.companyId,
+                {
+                    phoneNumberId: data.phoneNumberId,
+                    accessToken: data.accessToken,
+                    wabaId: data.wabaId,
+                    apiVersion: data.apiVersion,
+                    routingId: data.routingId,
+                },
+                data.sessionId,
+            );
+        } catch (e: any) {
+            throw new RpcException(e.message);
+        }
+    }
+
+    @MessagePattern({ cmd: 'whatsapp_test_official_connection' })
+    async testOfficialConnection(data: { user: { companyId: string }; sessionId: string }) {
+        try {
+            return await this.whatsappOfficialService.testConnection(data.sessionId, data.user.companyId);
+        } catch (e: any) {
+            throw new RpcException(e.message);
+        }
+    }
+
+    @MessagePattern({ cmd: 'whatsapp_sync_templates' })
+    async syncTemplates(data: { user: { companyId: string }; sessionId: string }) {
+        try {
+            return await this.whatsappTemplateService.syncFromMeta(data.user.companyId, data.sessionId);
+        } catch (e: any) {
+            throw new RpcException(e.message);
+        }
+    }
+
+    @MessagePattern({ cmd: 'whatsapp_list_templates' })
+    async listTemplates(data: { user: { companyId: string }; sessionId: string }) {
+        try {
+            return await this.whatsappTemplateService.listBySession(data.user.companyId, data.sessionId);
+        } catch (e: any) {
+            throw new RpcException(e.message);
+        }
+    }
+
+    @MessagePattern({ cmd: 'whatsapp_link_template' })
+    async linkTemplate(data: { user: { companyId: string }; templateId: string; event: string }) {
+        try {
+            return await this.whatsappTemplateService.linkToEvent(
+                data.user.companyId,
+                data.templateId,
+                data.event as any,
+            );
+        } catch (e: any) {
+            throw new RpcException(e.message);
+        }
+    }
+    @MessagePattern({ cmd: 'whatsapp_get_session' })
+    async getSession(data: { user: { companyId: string }; sessionId: string }) {
+        try {
+            return await this.whatsappService.getSession(data.user.companyId, data.sessionId);
         } catch (e: any) {
             throw new RpcException(e.message);
         }
