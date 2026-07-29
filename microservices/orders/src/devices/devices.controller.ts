@@ -3,6 +3,7 @@ import { DevicesService } from './devices.service';
 import { MessagePattern } from '@nestjs/microservices';
 import { UpdateDeviceDto } from './dto/update-device.dto';
 import { CheckWarrantyDto } from './dto/check-warranty.dto';
+import { UpdateDeviceImeiDto } from './dto/update-device-imei.dto';
 
 @Controller('devices')
 export class DevicesController {
@@ -32,6 +33,20 @@ export class DevicesController {
   }) {
     return this.devicesService.updateDevice(
       data.deviceId,
+      data.user,
+      data.dto,
+    );
+  }
+  @MessagePattern({ cmd: 'update_device_imei' })
+  async updateDeviceImei(data: {
+    deviceId: number;
+    orderId: number;
+    dto: UpdateDeviceImeiDto;
+    user: { companyId: string };
+  }) {
+    return this.devicesService.updateDeviceImei(
+      data.deviceId,
+      data.orderId,
       data.user,
       data.dto,
     );
