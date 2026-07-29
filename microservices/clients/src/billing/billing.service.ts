@@ -15,6 +15,7 @@ import { BroadcastService } from '../broadcast/broadcast.service';
 import { PersonType } from '../catalogs/entities/person-type.entity';
 import { Gender } from '../catalogs/entities/gender.entity';
 import { backfillMissingCustomerPersonalData } from './helpers/customer-personal-data.helper';
+import { Contact } from '../customers/entities/contact.entity';
 
 @Injectable()
 export class BillingService {
@@ -43,7 +44,8 @@ export class BillingService {
         private readonly idTypeRepo: Repository<IdType>,
         private readonly broadcast: BroadcastService,
 
-
+        @InjectRepository(Contact)
+        private readonly contactRepo: Repository<Contact>,
     ) { }
     async onModuleInit() {
         try {
@@ -337,10 +339,17 @@ export class BillingService {
                 logger.log(`BillingData creado id: ${billingSaved.id}`);
             }
 
+            // ── Resolver ContactTypes una sola vez ──────────────────────────
+            const emailContactType = await this.contactTypeRepo.findOne({ where: { name: 'EMAIL' } });
+            const mobileContactType = await this.contactTypeRepo.findOne({ where: { name: 'MÓVIL' } });
+            const phoneContactType = await this.contactTypeRepo.findOne({ where: { name: 'TELÉFONO' } });
+
             // ── Buscar o crear Customer mínimo ────────────────────────────
             let customer = await this.customerRepo
                 .createQueryBuilder('c')
                 .leftJoinAndSelect('c.gender', 'gender')
+                .leftJoinAndSelect('c.contacts', 'contacts')
+                .leftJoinAndSelect('contacts.contactType', 'contactType')
                 .where('c.idNumber = :idNumber', { idNumber: data.idNumber })
                 .andWhere('c.companyId = :companyId', { companyId: data.user.companyId })
                 .getOne();
@@ -365,10 +374,66 @@ export class BillingService {
                     customer = await this.customerRepo.save(customer);
                     logger.log(`Customer ${customer.id} actualizado con gender/birthDate faltantes`);
                 }
+
+                // 👇 Completa contacto MÓVIL si falta
+                if (data.cellphone && mobileContactType) {
+                    const hasMobile = customer.contacts?.some(
+                        (c) => c.contactType?.id === mobileContactType.id,
+                    );
+                    if (!hasMobile) {
+                        const newContact = this.contactRepo.create({
+                            contactType: { id: mobileContactType.id },
+                            value: data.cellphone,
+                            isPrimary: !customer.contacts?.length,
+                            customer: { id: customer.id },
+                        });
+                        await this.contactRepo.save(newContact);
+                        logger.log(`Contacto MÓVIL agregado al customer ${customer.id}`);
+                    }
+                }
+
+                // 👇 Completa contacto TELÉFONO si falta
+                if (data.phone && phoneContactType) {
+                    const hasPhone = customer.contacts?.some(
+                        (c) => c.contactType?.id === phoneContactType.id,
+                    );
+                    if (!hasPhone) {
+                        const newContact = this.contactRepo.create({
+                            contactType: { id: phoneContactType.id },
+                            value: data.phone,
+                            isPrimary: false,
+                            customer: { id: customer.id },
+                        });
+                        await this.contactRepo.save(newContact);
+                        logger.log(`Contacto TELÉFONO agregado al customer ${customer.id}`);
+                    }
+                }
             } else {
-                const emailContactType = await this.contactTypeRepo.findOne({
-                    where: { name: 'EMAIL' },
-                });
+                const contacts: any[] = [];
+
+                if (data.mainEmail && emailContactType) {
+                    contacts.push({
+                        contactType: { id: emailContactType.id },
+                        value: data.mainEmail,
+                        isPrimary: true,
+                    });
+                }
+
+                if (data.cellphone && mobileContactType) {
+                    contacts.push({
+                        contactType: { id: mobileContactType.id },
+                        value: data.cellphone,
+                        isPrimary: !data.mainEmail, // primario si no hay email
+                    });
+                }
+
+                if (data.phone && phoneContactType) {
+                    contacts.push({
+                        contactType: { id: phoneContactType.id },
+                        value: data.phone,
+                        isPrimary: false,
+                    });
+                }
 
                 const newCustomer = this.customerRepo.create({
                     company: { id: data.user.companyId },
@@ -377,15 +442,9 @@ export class BillingService {
                     firstName: data.firstName ?? data.businessName?.split(' ')[0] ?? 'S/N',
                     lastName: data.lastName ?? data.businessName?.split(' ').slice(1).join(' ') ?? 'S/N',
                     gender: data.genderId ? { id: data.genderId } : undefined,
-                    birthDate: data.birthdate ? new Date(data.birthdate) : undefined, // 👈 nombre correcto + conversión
+                    birthDate: data.birthdate ? new Date(data.birthdate) : undefined,
                     isActive: true,
-                    contacts: data.mainEmail && emailContactType
-                        ? [{
-                            contactType: { id: emailContactType.id },
-                            value: data.mainEmail,
-                            isPrimary: true,
-                        }]
-                        : [],
+                    contacts,
                 });
 
                 customer = await this.customerRepo.save(newCustomer);
@@ -442,7 +501,6 @@ export class BillingService {
             );
         }
     }
-
     async updateFromLegacyRaw(raw: any) {
         if (!raw?.company_id && !raw?.user?.companyId)
             throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));
