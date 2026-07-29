@@ -18,6 +18,7 @@ export class NotificationTrackingService {
 
   /**
    * Crear un nuevo tracking para una notificación
+   * ✅ MODIFICADO: Ya no agrega acciones automáticas
    */
   async create(createDto: CreateNotificationTrackingDto): Promise<NotificationTrackingDocument> {
     const notification = await this.notificationModel.findById(createDto.notificationId);
@@ -25,15 +26,23 @@ export class NotificationTrackingService {
       throw new NotFoundException(`Notification with id ${createDto.notificationId} not found`);
     }
 
-    const tracking = new this.trackingModel({
-      ...createDto,
-      actions: [{
+    // ✅ Tipar explícitamente el array actions
+    const actions: any[] = [];
+    
+    // Solo agregar acción si hay notas reales (no automáticas)
+    if (createDto.notes && createDto.notes !== 'Tracking inicial creado automáticamente') {
+      actions.push({
         type: 'note_added',
         performedBy: createDto.calledBy || 'system',
         performedByName: createDto.calledByName || 'Sistema',
         performedAt: new Date(),
-        metadata: { notes: createDto.notes || 'Tracking inicial creado' }
-      }]
+        metadata: { notes: createDto.notes }
+      });
+    }
+
+    const tracking = new this.trackingModel({
+      ...createDto,
+      actions: actions // ✅ Array vacío si no hay notas reales
     });
 
     return await tracking.save();
@@ -50,6 +59,7 @@ export class NotificationTrackingService {
 
   /**
    * Obtener el tracking más reciente de una notificación
+   * ✅ MODIFICADO: Ya no crea tracking con nota automática
    */
   async findLatestByNotificationId(notificationId: string): Promise<NotificationTrackingDocument> {
     const notification = await this.notificationModel.findById(notificationId);
@@ -67,13 +77,13 @@ export class NotificationTrackingService {
       return existingTracking as any as NotificationTrackingDocument;
     }
     
-    // ✅ Si no existe, crear uno nuevo
+    // ✅ Si no existe, crear uno nuevo SIN nota automática
     const newTracking = await this.create({ 
-      notificationId,
-      notes: 'Tracking inicial creado automáticamente'
+      notificationId
+      // ✅ No pasar notes para evitar el mensaje automático
     });
     
-    // ✅ Retornar el nuevo tracking con casteo doble
+    // ✅ Retornar el nuevo tracking
     return newTracking as any as NotificationTrackingDocument;
   }
 
@@ -138,7 +148,8 @@ export class NotificationTrackingService {
       });
     }
 
-    if (updateDto.notes && updateDto.notes !== tracking.notes) {
+    // ✅ MODIFICADO: Solo agregar acción de nota si la nota es diferente y no es la automática
+    if (updateDto.notes && updateDto.notes !== tracking.notes && updateDto.notes !== 'Tracking inicial creado automáticamente') {
       actions.push({
         type: 'note_added',
         performedBy: updateDto.calledBy || tracking.calledBy || 'system',
