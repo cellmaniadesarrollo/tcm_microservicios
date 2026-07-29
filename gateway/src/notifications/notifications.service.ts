@@ -271,4 +271,171 @@ export class NotificationsService {
       )
     );
   }
+
+  /**
+   * Crear tracking para una notificación
+   */
+  async createNotificationTracking(data: {
+    notificationId: string;
+    notes?: string;
+    isCalled?: boolean;
+    hasProblems?: boolean;
+    problemDescription?: string;
+    calledBy?: string;
+    calledByName?: string;
+    problemReportedBy?: string;
+    problemReportedByName?: string;
+    archivedBy?: string;
+    archivedByName?: string;
+  }) {
+    console.log(`📤 [Gateway] createNotificationTracking - notificationId: ${data.notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'create_notification_tracking' },
+        data
+      )
+    );
+  }
+
+  /**
+   * Obtener historial de tracking de una notificación
+   */
+  async getNotificationTrackingHistory(notificationId: string) {
+    console.log(`📤 [Gateway] getNotificationTrackingHistory - notificationId: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_notification_tracking_history' },
+        { notificationId }
+      )
+    );
+  }
+
+  /**
+   * Obtener el tracking más reciente de una notificación
+   */
+  async getLatestNotificationTracking(notificationId: string) {
+    console.log(`📤 [Gateway] getLatestNotificationTracking - notificationId: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'get_latest_notification_tracking' },
+        { notificationId }
+      )
+    );
+  }
+
+  /**
+   * Actualizar tracking de una notificación
+   */
+  async updateNotificationTracking(
+    trackingId: string,
+    data: {
+      notes?: string;
+      isCalled?: boolean;
+      hasProblems?: boolean;
+      problemDescription?: string;
+      calledBy?: string;
+      calledByName?: string;
+      problemReportedBy?: string;
+      problemReportedByName?: string;
+      archivedBy?: string;
+      archivedByName?: string;
+      isArchived?: boolean;
+      unarchivedBy?: string;
+      unarchivedByName?: string;
+    }
+  ) {
+    console.log(`📤 [Gateway] updateNotificationTracking - trackingId: ${trackingId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'update_notification_tracking' },
+        { id: trackingId, ...data }
+      )
+    );
+  }
+
+  /**
+   * Marcar como llamada realizada
+   */
+  async markAsCalled(
+    notificationId: string,
+    userId: string,
+    userName: string,
+    notes?: string
+  ) {
+    console.log(`📞 [Gateway] markAsCalled - notificationId: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'mark_as_called' },
+        { notificationId, userId, userName, notes }
+      )
+    );
+  }
+
+  /**
+   * Reportar problema en una notificación
+   */
+  async reportProblem(
+    notificationId: string,
+    userId: string,
+    userName: string,
+    problemDescription: string,
+    notes?: string
+  ) {
+    console.log(`⚠️ [Gateway] reportProblem - notificationId: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'report_problem' },
+        { notificationId, userId, userName, problemDescription, notes }
+      )
+    );
+  }
+
+  /**
+   * Archivar/Desarchivar una notificación
+   */
+  async toggleArchive(
+    notificationId: string,
+    userId: string,
+    userName: string,
+    archive: boolean
+  ) {
+    console.log(`📦 [Gateway] toggleArchive - notificationId: ${notificationId}, archive: ${archive}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'toggle_archive' },
+        { notificationId, userId, userName, archive }
+      )
+    );
+  }
+
+  /**
+   * Agregar nota a una notificación
+   */
+  async addNoteToNotification(
+    notificationId: string,
+    userId: string,
+    userName: string,
+    notes: string
+  ) {
+    console.log(`📝 [Gateway] addNoteToNotification - notificationId: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'add_note_to_notification' },
+        { notificationId, userId, userName, notes }
+      )
+    );
+  }
+
+  /**
+   * Eliminar tracking (solo administración)
+   */
+  async deleteNotificationTracking(trackingId: string) {
+    console.log(`🗑️ [Gateway] deleteNotificationTracking - trackingId: ${trackingId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'delete_notification_tracking' },
+        { id: trackingId }
+      )
+    );
+  }
 }
