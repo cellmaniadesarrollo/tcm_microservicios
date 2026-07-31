@@ -54,7 +54,7 @@ export class BillingData {
   @Column({ type: 'varchar', length: 20, nullable: true })
   phone: string;
 
-  @Column({ type: 'varchar', length: 10, nullable: true })
+  @Column({ type: 'varchar', length: 20, nullable: true })
   birthdate: string;
 
   @ManyToOne(() => Gender, { eager: true, nullable: true })

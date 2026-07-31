@@ -10,6 +10,7 @@ import { Auth } from '../common/auth/decorators/auth.decorator';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Groups } from '../common/auth/decorators/groups.decorator';
 import { Features } from '../common/auth/decorators/features.decorator';
+import { CreateCustomerWithBillingDto } from './dto/create-customer-with-billing.dto';
 
 @Controller('customers')
 @Features('orders')
@@ -204,5 +205,13 @@ export class CustomersController {
       ),
     );
   }
-
+  @Post('with-billing')
+  async saveCustomerWithBilling(@Body() dto: CreateCustomerWithBillingDto, @User() user: any) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'create_customer_with_billing' },
+        { internalToken: process.env.INTERNAL_SECRET, ...dto, user },
+      ),
+    );
+  }
 }

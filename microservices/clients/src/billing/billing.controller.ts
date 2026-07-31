@@ -49,4 +49,8 @@ export class BillingController {
     console.log(data)
     return this.billingService.updateFromLegacyRaw(data);
   }
+  @MessagePattern({ cmd: 'create_customer_with_billing' })
+  createWithBilling(@Payload() data: any) {
+    return this.billingService.createCustomerWithBilling(data);
+  }
 }
