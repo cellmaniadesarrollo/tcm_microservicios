@@ -99,6 +99,7 @@ services:
           users.revoke-token
           users.save-token
           users.requests
+          users.update-token
           taskboard.responses
         "
 

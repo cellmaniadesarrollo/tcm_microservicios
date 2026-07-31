@@ -4,7 +4,7 @@ import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { InternalAuthInterceptor } from './interceptors/internal-auth.interceptor';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
-import * as http from 'http';
+import * as http from 'http'; 
 
 async function bootstrap() {
   try {

@@ -17,17 +17,23 @@ export class TaskboardService {
   ) {}
 
   // ========== USERS (para buscar miembros) ==========
-  
-  async getAllUsers() {
-    console.log('📤 [Gateway] Enviando a Users: getAllUsers - INICIO');
-    try {
-      const result = await lastValueFrom(this.usersClient.send({ cmd: 'get_all_users' }, {}));
-      console.log('✅ Respuesta recibida:', result?.length || 0, 'usuarios');
-      return result;
-    } catch (error) {
-      console.error('❌ Error en getAllUsers:', error);
-      return [];
-    }
+
+  async getAllUsers(user?: any) {
+    console.log('📤 [Gateway] getAllUsers - user:', {
+      id: user?.sub,
+      companyId: user?.companyId
+    });
+    
+    // 🔥 PASAR EL USER AL MICROSERVICIO
+    return lastValueFrom(
+      this.usersClient.send(
+        { cmd: 'get_all_users' },
+        { 
+          internalToken: process.env.INTERNAL_SECRET,
+          user: user // 🔥 Pasar el user completo
+        }
+      )
+    );
   }
 
   async searchUsers(search: string) {
@@ -520,9 +526,16 @@ export class TaskboardService {
     return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findByUser' }, { userId, year, month }));
   }
 
-  async getAllCalendarTasksForMonth(year: number, month: number, userId?: string) {
+  async getAllCalendarTasksForMonth(year: number, month: number, userId?: string, companyId?: string) {
     console.log(`📤 [Gateway] Enviando a TaskBoard: getAllCalendarTasksForMonth - year: ${year}, month: ${month}, userId: ${userId || 'todos'}`);
-    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findAllForMonth' }, { year, month, userId }));
+    
+    // 🔥 Pasar companyId en el payload
+    return lastValueFrom(
+      this.taskboardClient.send(
+        { cmd: 'calendar.tasks.findAllForMonth' },
+        { year, month, userId, companyId }
+      )
+    );
   }
 
   async updateCalendarTask(id: string, data: any) {

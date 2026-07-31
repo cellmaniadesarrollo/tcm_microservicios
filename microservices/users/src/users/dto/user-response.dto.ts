@@ -36,4 +36,11 @@ export class UserResponseDto {
 
   @ApiProperty({ description: 'Información del empleado asociado', required: false })
   employee?: EmployeeInfoDto;
+
+  @ApiProperty({ 
+    example: '613d64b9-c8fb-4e72-b5b9-0bb035c4cf6f', 
+    description: 'ID de la compañía del usuario',
+    required: false 
+  })
+  companyId?: string;
 }

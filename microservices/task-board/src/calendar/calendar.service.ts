@@ -1,7 +1,9 @@
 // src/calendar/calendar.service.ts
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Between, Not, IsNull } from 'typeorm';
+import { Repository, Between, Not, IsNull, In } from 'typeorm';
+import { ClientProxy } from '@nestjs/microservices';
+import { firstValueFrom } from 'rxjs';
 import { EmployeeTask } from './entities/employee-task.entity';
 import { CreateEmployeeTaskDto } from './dto/create-employee-task.dto';
 import { UpdateEmployeeTaskDto } from './dto/update-employee-task.dto';
@@ -13,6 +15,7 @@ export class CalendarService {
   constructor(
     @InjectRepository(EmployeeTask)
     private employeeTaskRepository: Repository<EmployeeTask>,
+    @Inject('USERS_CLIENT') private usersClient: ClientProxy,
   ) {}
 
   // ==================== CRUD BÁSICO ====================
@@ -44,7 +47,7 @@ export class CalendarService {
     });
   }
 
-  async getAllTasksForMonth(monthDto: GetMonthTasksDto): Promise<EmployeeTask[]> {
+  async getAllTasksForMonth(monthDto: GetMonthTasksDto, companyId?: string): Promise<EmployeeTask[]> {
     const startDate = new Date(monthDto.year, monthDto.month, 1);
     const endDate = new Date(monthDto.year, monthDto.month + 1, 0);
 
@@ -54,6 +57,29 @@ export class CalendarService {
 
     if (monthDto.userId) {
       whereCondition.userId = monthDto.userId;
+    }
+
+    if (companyId) {
+      try {
+        // Obtener usuarios de la compañía desde el microservicio users
+        const users = await firstValueFrom(
+          this.usersClient.send(
+            { cmd: 'get_users_by_company' },
+            { companyId }
+          )
+        );
+        
+        if (users && users.length > 0) {
+          const userIds = users.map((u: any) => u.id);
+          whereCondition.userId = In(userIds);
+        } else {
+          // Si no hay usuarios en la compañía, devolver vacío
+          return [];
+        }
+      } catch (error) {
+        console.error('❌ Error obteniendo usuarios de la compañía:', error);
+        return [];
+      }
     }
 
     return await this.employeeTaskRepository.find({
