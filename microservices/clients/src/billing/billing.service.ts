@@ -4,7 +4,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, Like, QueryFailedError, Repository } from 'typeorm';
 import { RpcException } from '@nestjs/microservices';
 import { BillingData } from './entities/billing-data.entity';
 import { CustomerBillingData } from './entities/customer-billing-data.entity';
@@ -46,6 +46,7 @@ export class BillingService {
 
         @InjectRepository(Contact)
         private readonly contactRepo: Repository<Contact>,
+        private readonly dataSource: DataSource
     ) { }
     async onModuleInit() {
         try {
@@ -728,6 +729,194 @@ export class BillingService {
             logger.log(`📤 Evento CLIENT_CREATED emitido para cliente mínimo id: ${customerId}`);
         } catch (eventError) {
             console.error('Error publicando evento CLIENT_CREATED (legacy):', eventError);
+        }
+    }
+
+    async createCustomerWithBilling(data: any) {
+        const logger = new Logger('CreateCustomerWithBilling');
+
+        // Guardamos qué eventos hay que emitir DESPUÉS del commit,
+        // para no notificar cambios que luego se revierten por un fallo posterior.
+        let shouldPublishClientCreated = false;
+        let shouldPublishBillingCreated = false;
+
+        try {
+            if (!data?.user?.companyId)
+                throw new RpcException(new BadRequestException('companyId es requerido'));
+
+            const c = data.customer;
+            if (!c?.idNumber)
+                throw new RpcException(new BadRequestException('idNumber del cliente es requerido'));
+
+            const result = await this.dataSource.transaction(async (manager) => {
+                const customerRepo = manager.getRepository(Customer);
+                const billingRepo = manager.getRepository(BillingData);
+                const customerBillingRepo = manager.getRepository(CustomerBillingData);
+
+                // ── 1. Buscar o crear Customer ──────────────────────────────
+                let customer = await customerRepo.findOne({
+                    where: { idNumber: c.idNumber, company: { id: data.user.companyId } },
+                    relations: { idType: true, gender: true, contacts: { contactType: true }, addresses: { city: true } },
+                });
+
+                let customerCreated = false;
+
+                if (!customer) {
+                    const newCustomer = customerRepo.create({
+                        company: { id: data.user.companyId },
+                        idType: { id: c.idTypeId },
+                        idNumber: c.idNumber,
+                        firstName: c.firstName,
+                        lastName: c.lastName,
+                        birthDate: c.birthDate ? new Date(c.birthDate) : undefined,
+                        gender: c.genderId ? { id: c.genderId } : undefined,
+                        contacts: c.contacts?.map((ct: any) => ({
+                            contactType: { id: ct.contactTypeId },
+                            value: ct.value,
+                            isPrimary: ct.isPrimary ?? false,
+                        })),
+                        addresses: c.addresses?.map((a: any) => ({
+                            city: a.cityId ? { id: a.cityId } : undefined,
+                            zone: a.zone,
+                            sector: a.sector,
+                            locality: a.locality,
+                            mainStreet: a.mainStreet,
+                            secondaryStreet: a.secondaryStreet,
+                            reference: a.reference,
+                            postalCode: a.postalCode,
+                        })),
+                    });
+
+                    const saved = await customerRepo.save(newCustomer);
+                    const refetched = await customerRepo.findOne({
+                        where: { id: saved.id },
+                        relations: { idType: true, gender: true, contacts: { contactType: true }, addresses: { city: true } },
+                    });
+
+                    if (!refetched)
+                        throw new RpcException(new InternalServerErrorException('Error recuperando el customer recién creado'));
+
+                    customer = refetched;
+                    customerCreated = true;
+                    shouldPublishClientCreated = true;
+                    logger.log(`Customer creado id: ${customer.id}`);
+                } else {
+                    logger.log(`Customer ya existía id: ${customer.id}, se reutiliza (no se sobreescriben datos)`);
+                }
+
+                // ── 2. Billing (opcional) ───────────────────────────────────
+                let billingSaved: BillingData | null = null;
+                let billingCreated = false;
+
+                if (data.billing) {
+                    const b = data.billing;
+
+                    const existingBilling = await billingRepo.findOne({
+                        where: { idNumber: c.idNumber, company: { id: data.user.companyId } },
+                    });
+
+                    if (existingBilling) {
+                        billingSaved = existingBilling;
+                        logger.log(`BillingData ya existía id: ${existingBilling.id}, se reutiliza`);
+                    } else {
+                        const emailContact = customer.contacts?.find((ct) => ct.contactType?.name === 'EMAIL');
+                        const mobileContact = customer.contacts?.find((ct) => ct.contactType?.name === 'MÓVIL');
+                        const phoneContact = customer.contacts?.find((ct) => ct.contactType?.name === 'TELÉFONO');
+
+                        const primaryAddress = customer.addresses?.[0];
+                        const flattenedAddress = primaryAddress
+                            ? [primaryAddress.mainStreet, primaryAddress.secondaryStreet, primaryAddress.reference]
+                                .filter(Boolean)
+                                .join(', ')
+                            : '';
+
+                        let billingFirstName = customer.firstName;
+                        let billingLastName = customer.lastName;
+                        if (b.businessName?.trim()) {
+                            const parts = b.businessName.trim().split(' ');
+                            billingFirstName = parts[0];
+                            billingLastName = parts.slice(1).join(' ') || parts[0];
+                        }
+
+                        const mainEmail = b.mainEmailOverride ?? emailContact?.value;
+                        if (!mainEmail)
+                            throw new RpcException(
+                                new BadRequestException('mainEmail es requerido para crear la facturación (no hay contacto EMAIL ni override)'),
+                            );
+
+                        const billing = billingRepo.create({
+                            company: { id: data.user.companyId },
+                            idType: { id: c.idTypeId },
+                            idNumber: c.idNumber,
+                            personType: { id: b.personTypeId },
+                            gender: c.genderId ? { id: c.genderId } : undefined,
+                            firstName: billingFirstName,
+                            lastName: billingLastName,
+                            tradeName: b.tradeName,
+                            mainEmail,
+                            cellphone: mobileContact?.value,
+                            phone: phoneContact?.value,
+                            birthdate: c.birthDate ? new Date(c.birthDate).toISOString().split('T')[0] : undefined,
+                            address: b.addressOverride ?? flattenedAddress,
+                            city: b.cityOverride ?? primaryAddress?.city?.name,
+                            isCompanyClient: b.isCompanyClient ?? false,
+                            customer: { id: customer.id },
+                        });
+
+                        billingSaved = await billingRepo.save(billing);
+                        billingCreated = true;
+                        shouldPublishBillingCreated = true;
+                        logger.log(`BillingData creado id: ${billingSaved.id}`);
+                    }
+
+                    // ── 3. Vincular pivot (CustomerBillingData) ──────────────
+                    const alreadyLinked = await customerBillingRepo.findOne({
+                        where: { customer: { id: customer.id }, billingData: { id: billingSaved.id } },
+                    });
+
+                    if (!alreadyLinked) {
+                        await customerBillingRepo.save(
+                            customerBillingRepo.create({
+                                customer: { id: customer.id },
+                                billingData: { id: billingSaved.id },
+                                isDefault: true,
+                            }),
+                        );
+                    }
+                }
+
+                return { customer, billing: billingSaved };
+            });
+
+            // ── Eventos: solo DESPUÉS de que la transacción hizo commit ────
+            if (shouldPublishClientCreated) {
+                try {
+                    await this.broadcast.publishClientCreated(result.customer);
+                } catch (eventError) {
+                    console.error('Error publicando CLIENT_CREATED:', eventError);
+                }
+            }
+
+            if (shouldPublishBillingCreated && result.billing) {
+                try {
+                    const billingWithRelations = await this.billingRepo.findOne({
+                        where: { id: result.billing.id },
+                        relations: { idType: true, personType: true, gender: true, customerLinks: { customer: true } },
+                    });
+                    await this.broadcast.publishClientBillingCreated(billingWithRelations);
+                } catch (eventError) {
+                    console.error('Error publicando CLIENT_BILLING_CREATED:', eventError);
+                }
+            }
+
+            return result;
+
+        } catch (error) {
+            logger.error(error);
+            if (error instanceof QueryFailedError && (error.driverError as any)?.code === '23505')
+                throw new RpcException(new ForbiddenException('Ya existe un cliente o dato de facturación con este documento'));
+            if (error instanceof RpcException) throw error;
+            throw new RpcException(new InternalServerErrorException('Error creando cliente con facturación'));
         }
     }
 }
