@@ -338,5 +338,14 @@ export class UsersService {
     // 📩 aquí luego envías token por email
   }
 
-
+  async findByCompany(companyId: string): Promise<User[]> {
+    return this.userRepo.find({
+      where: { 
+        company: { id: companyId },
+        state_user: true 
+      },
+      relations: ['company'],
+      select: ['id', 'name_user', 'email_user', 'state_user'],
+    });
+  }
 }

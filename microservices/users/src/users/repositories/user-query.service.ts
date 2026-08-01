@@ -15,7 +15,7 @@ export class UserQueryService {
   async findAllForApi(): Promise<UserResponseDto[]> {
     const users = await this.repo.find({
       select: ['id', 'name_user', 'email_user', 'state_user', 'createdAt', 'updatedAt'],
-      relations: ['employee']  // ✅ ¡Esto es lo que falta!
+      relations: ['employee', 'company']  // ✅ ¡Esto es lo que falta!
     });
     
     return users.map(user => {
@@ -37,7 +37,8 @@ export class UserQueryService {
         isActive: user.state_user,
         createdAt: user.createdAt ? user.createdAt.toISOString() : new Date().toISOString(),
         updatedAt: user.updatedAt ? user.updatedAt.toISOString() : new Date().toISOString(),
-        employee: employeeInfo
+        employee: employeeInfo,
+        companyId: user.company?.id || undefined
       };
     });
   }
