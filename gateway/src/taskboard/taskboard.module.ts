@@ -1,14 +1,25 @@
 // gateway/src/taskboard/taskboard.module.ts
 import { Module } from '@nestjs/common';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { HttpModule } from '@nestjs/axios';  // ← AGREGAR
+import { HttpModule } from '@nestjs/axios';
 import { TaskboardController } from './taskboard.controller';
 import { TaskboardService } from './taskboard.service';
 import { GoogleRedirectController } from './google-redirect.controller';
 
+// 🔥 IMPORTAR JWT MODULE DESDE COMMON
+import { JwtModule } from '../common/jwt/jwt.module';
+
+// 🔥 IMPORTAR GUARDS
+import { JwtAuthGuard } from '../common/auth/guards/jwt-auth.guard';
+import { GroupsGuard } from '../common/auth/guards/groups.guard';
+import { FeaturesGuard } from '../common/auth/guards/features.guard';
+
 @Module({
   imports: [
-    HttpModule,  // ← AGREGAR
+    // 🔥 USAR EL JWT MODULE EXISTENTE
+    JwtModule,
+    
+    HttpModule,
     ClientsModule.register([
       {
         name: 'TASKBOARD_CLIENT',
@@ -40,7 +51,13 @@ import { GoogleRedirectController } from './google-redirect.controller';
     TaskboardController,
     GoogleRedirectController
   ],
-  providers: [TaskboardService],
+  providers: [
+    TaskboardService,
+    // 🔥 REGISTRAR GUARDS
+    JwtAuthGuard,
+    GroupsGuard,
+    FeaturesGuard,
+  ],
   exports: [TaskboardService],
 })
 export class TaskboardModule {}

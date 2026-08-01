@@ -186,7 +186,7 @@ export class GoogleController {
     try {
       let result: any;
       let success = true;
-      let error: string | null = null; // 👈 CORREGIDO
+      let error: string | null = null;
 
       switch (type) {
         case 'GET_TOKEN':
@@ -223,6 +223,13 @@ export class GoogleController {
           result = { accessToken: newAccessToken };
           break;
 
+        // 🔥 NUEVO: Handler para UPDATE_TOKEN
+        case 'UPDATE_TOKEN':
+          console.log(`📥 [Kafka] UPDATE_TOKEN para usuario: ${data.userId}`);
+          const updateResult = await this.googleService.handleUpdateToken(data);
+          result = updateResult;
+          break;
+
         default:
           success = false;
           error = `Tipo de petición desconocido: ${type}`;
@@ -254,5 +261,26 @@ export class GoogleController {
         }
       );
     }
+  }
+
+  // ==================== 🔥 NUEVO HANDLER PARA UPDATE_TOKEN ====================
+  
+  @MessagePattern('users.update-token')
+  async handleUpdateToken(message: any) {
+    console.log(`📥 [Kafka] handleUpdateToken recibido:`, JSON.stringify(message, null, 2));
+    
+    // Extraer los datos del mensaje
+    let data = message;
+    if (message.data && typeof message.data === 'object') {
+      data = message.data;
+    }
+    
+    // Si viene como evento de Kafka
+    if (message.eventType === 'UPDATE_TOKEN' && message.data) {
+      data = message.data;
+    }
+    
+    const result = await this.googleService.handleUpdateToken(data);
+    return result;
   }
 }
