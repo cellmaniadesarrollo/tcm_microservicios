@@ -48,14 +48,15 @@ export class SpareAssignmentsService {
 
             const entities = chunk.map((spare) => {
                 return this.repo.create({
-                    id: String(spare._id ?? spare.id),        // ← identidad real, ya no fallback a movementId
-                    movement_id: String(spare.movementId),      // ← estrictamente el movimiento, sin fallback
+                    id: String(spare._id ?? spare.id),
+                    movement_id: String(spare.movementId),
                     order_id: spare.orderId,
                     quantity: spare.quantity,
                     sku: spare.spare?.sku,
                     product_name: spare.spare?.productName,
                     unit_price: spare.spare?.unitPrice,
                     batch_number: spare.spare?.batchNumber,
+                    is_billable_in_repair_orders: spare.spare?.isBillableInRepairOrders ?? false, // 🆕
                     status: (spare.status as SpareAssignmentStatus) ?? SpareAssignmentStatus.ACTIVE,
                     returned_at: spare.returnedAt ?? null,
                     created_at: spare.createdAt,
@@ -72,7 +73,7 @@ export class SpareAssignmentsService {
                 .into(SpareAssignment)
                 .values(entities)
                 .orUpdate(
-                    ['movement_id', 'quantity', 'status', 'returned_at', 'updated_at'],
+                    ['movement_id', 'quantity', 'status', 'returned_at', 'updated_at', 'is_billable_in_repair_orders'],
                     ['id'],
                 )
                 .execute();
@@ -94,6 +95,7 @@ export class SpareAssignmentsService {
             product_name: data.spare.productName,
             unit_price: data.spare.unitPrice,
             batch_number: data.spare.batchNumber,
+            is_billable_in_repair_orders: data.spare.isBillableInRepairOrders ?? false, // 🆕
             status: SpareAssignmentStatus.ACTIVE,
             created_at: data.createdAt ?? data.assignedAt,
             updated_at: data.updatedAt ?? data.assignedAt,
@@ -136,6 +138,7 @@ export class SpareAssignmentsService {
                 product_name: data.spare.productName,
                 unit_price: data.spare.unitPrice,
                 batch_number: data.spare.batchNumber,
+                is_billable_in_repair_orders: data.spare.isBillableInRepairOrders ?? false,
                 status: SpareAssignmentStatus.ACTIVE,
                 created_at: data.newSpareCreatedAt ?? data.returnedAt,
                 updated_at: data.newSpareUpdatedAt ?? data.returnedAt,
