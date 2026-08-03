@@ -50,6 +50,18 @@ export class CalendarTcpController {
   }
 
   @MessagePattern({ cmd: 'calendar.tasks.findAllForMonth' })
+  async getAllTasksForMonth(@Payload() data: { year: number; month: number; userId?: string; companyId?: string }) {
+    console.log(`📥 [TCP] calendar.tasks.findAllForMonth - year: ${data.year}, month: ${data.month}, userId: ${data.userId || 'todos'}, companyId: ${data.companyId || 'none'}`);
+    
+    // 🔥 Pasar companyId al servicio
+    return await this.calendarService.getAllTasksForMonth(
+      { 
+        year: data.year, 
+        month: data.month, 
+        userId: data.userId 
+      },
+      data.companyId // 🔥 Pasar companyId
+    );
   async getAllTasksForMonth(@Payload() data: { 
     year: number; 
     month: number; 

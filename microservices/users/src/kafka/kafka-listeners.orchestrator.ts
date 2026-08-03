@@ -28,8 +28,9 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
         this.kafkaConsumer.registerHandler('users.has-token', this.googleController.handleHasToken.bind(this.googleController));
         this.kafkaConsumer.registerHandler('users.revoke-token', this.googleController.handleRevokeToken.bind(this.googleController));
         this.kafkaConsumer.registerHandler('users.refresh-token', this.googleController.handleRefreshToken.bind(this.googleController));
-        
-        // 👈 NUEVO: Registrar handler para request-response
+        // 🔥 NUEVO: Handler para UPDATE_TOKEN
+        this.kafkaConsumer.registerHandler('users.update-token', this.googleController.handleUpdateToken.bind(this.googleController));
+        // Handler para request-response
         this.kafkaConsumer.registerHandler('users.requests', this.googleController.handleRequest.bind(this.googleController));
 
         console.log('✅ [KafkaOrchestrator] Handlers de Google Calendar registrados');

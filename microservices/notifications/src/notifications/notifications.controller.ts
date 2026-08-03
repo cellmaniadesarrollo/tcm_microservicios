@@ -2,10 +2,14 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, EventPattern, Ctx, RmqContext } from '@nestjs/microservices';
 import { NotificationsService } from './notifications.service';
+import { NotificationTrackingService } from './notification-tracking.service'; // ✅ IMPORTAR
 
 @Controller('Notification-Save')
 export class NotificationsController {
-  constructor(private readonly notificationsService: NotificationsService) {}
+  constructor(
+    private readonly notificationsService: NotificationsService,
+    private readonly trackingService: NotificationTrackingService, // ✅ INYECTAR
+  ) {}
 
   // 📌 Para UI: Obtener notificaciones de un usuario
   @MessagePattern({ cmd: 'get_user_notifications' })
@@ -239,14 +243,14 @@ export class NotificationsController {
     page?: number;
     limit?: number;
     includeArchived?: boolean;
-    onlyWithNotes?: boolean;  // ✅ NUEVO PARÁMETRO
+    onlyWithNotes?: boolean;
   }) {
     console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}, onlyWithNotes: ${data.onlyWithNotes}`);
     return await this.notificationsService.getDeliveredNotifications(
       data.page || 1,
       data.limit || 20,
       data.includeArchived || false,
-      data.onlyWithNotes || false  // ✅ PASAR EL PARÁMETRO
+      data.onlyWithNotes || false
     );
   }
 
@@ -256,14 +260,14 @@ export class NotificationsController {
     page?: number;
     limit?: number;
     includeArchived?: boolean;
-    onlyWithNotes?: boolean;  // ✅ NUEVO PARÁMETRO
+    onlyWithNotes?: boolean;
   }) {
     console.log(`📦 [Notifications] get_finished_orders_over_three_months - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}, onlyWithNotes: ${data.onlyWithNotes}`);
     return await this.notificationsService.getFinishedOrdersOverThreeMonths(
       data.page || 1,
       data.limit || 20,
       data.includeArchived || false,
-      data.onlyWithNotes || false  // ✅ PASAR EL PARÁMETRO
+      data.onlyWithNotes || false
     );
   }
 
@@ -307,5 +311,86 @@ export class NotificationsController {
       data.page || 1,
       data.limit || 20
     );
+  }
+
+  // ============================================
+  // ✅ NUEVOS HANDLERS PARA NOTIFICATION TRACKING
+  // ============================================
+
+  @MessagePattern({ cmd: 'create_notification_tracking' })
+  async createNotificationTracking(@Payload() data: any) {
+    console.log(`📝 [Notifications] create_notification_tracking - notificationId: ${data.notificationId}`);
+    return await this.trackingService.create(data);
+  }
+
+  @MessagePattern({ cmd: 'get_notification_tracking_history' })
+  async getNotificationTrackingHistory(@Payload() data: { notificationId: string }) {
+    console.log(`📋 [Notifications] get_notification_tracking_history - notificationId: ${data.notificationId}`);
+    const result = await this.trackingService.findByNotificationId(data.notificationId);
+    return { history: result };
+  }
+
+  @MessagePattern({ cmd: 'get_latest_notification_tracking' })
+  async getLatestNotificationTracking(@Payload() data: { notificationId: string }) {
+    console.log(`📋 [Notifications] get_latest_notification_tracking - notificationId: ${data.notificationId}`);
+    return await this.trackingService.findLatestByNotificationId(data.notificationId);
+  }
+
+  @MessagePattern({ cmd: 'update_notification_tracking' })
+  async updateNotificationTracking(@Payload() data: any) {
+    const { id, ...updateDto } = data;
+    console.log(`📝 [Notifications] update_notification_tracking - id: ${id}`);
+    return await this.trackingService.update(id, updateDto);
+  }
+
+  @MessagePattern({ cmd: 'mark_as_called' })
+  async markAsCalled(@Payload() data: any) {
+    console.log(`📞 [Notifications] mark_as_called - notificationId: ${data.notificationId}`);
+    return await this.trackingService.markAsCalled(
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.notes
+    );
+  }
+
+  @MessagePattern({ cmd: 'report_problem' })
+  async reportProblem(@Payload() data: any) {
+    console.log(`⚠️ [Notifications] report_problem - notificationId: ${data.notificationId}`);
+    return await this.trackingService.reportProblem(
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.problemDescription,
+      data.notes
+    );
+  }
+
+  @MessagePattern({ cmd: 'toggle_archive' })
+  async toggleArchive(@Payload() data: any) {
+    console.log(`📦 [Notifications] toggle_archive - notificationId: ${data.notificationId}, archive: ${data.archive}`);
+    return await this.trackingService.toggleArchive(
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.archive
+    );
+  }
+
+  @MessagePattern({ cmd: 'add_note_to_notification' })
+  async addNoteToNotification(@Payload() data: any) {
+    console.log(`📝 [Notifications] add_note_to_notification - notificationId: ${data.notificationId}`);
+    return await this.trackingService.addNote(
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.notes
+    );
+  }
+
+  @MessagePattern({ cmd: 'delete_notification_tracking' })
+  async deleteNotificationTracking(@Payload() data: { id: string }) {
+    console.log(`🗑️ [Notifications] delete_notification_tracking - id: ${data.id}`);
+    return await this.trackingService.remove(data.id);
   }
 }

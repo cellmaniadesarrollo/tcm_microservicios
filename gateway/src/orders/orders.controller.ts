@@ -65,6 +65,7 @@ import { OrdersGatewayService } from './orders.service';
 import { SanitizePurchasePriceInterceptor } from '../common/interceptors/sanitize-purchase-price.interceptor';
 import { UpdateOrderPriceAgreementGatewayDto } from './dto/update-order-price-agreement.gateway.dto';
 import { CreateOrderPriceAgreementGatewayDto } from './dto/create-order-price-agreement.gateway.dto';
+import { UpdateDeviceImeiGatewayDto } from './dto/update-device-imei-gateway.dto';
 
 @Controller('orders')
 @Auth()
@@ -152,7 +153,16 @@ export class OrdersController {
   async updateDevice(@Body() body: UpdateDeviceGatewayDto, @User() user: any) {
     return this.ordersGatewayService.updateDevice(body.deviceId, body, user);
   }
-
+  @Post('device/update-imei')
+  async updateDeviceImei(@Body() body: UpdateDeviceImeiGatewayDto, @User() user: any) {
+    console.log(body)
+    return this.ordersGatewayService.updateDeviceImei(
+      body.deviceId,
+      body.orderId,
+      body,
+      user,
+    );
+  }
   @Get('initialdata')
   async initialData() {
     return this.ordersGatewayService.getInitialData();

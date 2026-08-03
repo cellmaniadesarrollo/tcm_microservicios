@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { RpcException } from '@nestjs/microservices';
@@ -125,5 +125,96 @@ export class UsersEmployeesEventsService {
             createdAt: user.createdAt,
             updatedAt: user.updatedAt ?? user.createdAt,
         };
+    }
+    /**
+ * Busca un usuario/empleado en la caché por su UUID de negocio (campo `id`).
+ */
+    async findUserByI(userId: string): Promise<UserEmployeeCacheDocument> {
+        try {
+            const user = await this.userModel.findOne({ id: userId }).exec();
+
+            if (!user) {
+                throw new RpcException(
+                    new NotFoundException(`Usuario ${userId} no encontrado en la caché`),
+                );
+            }
+
+            return user;
+        } catch (error) {
+            if (error instanceof RpcException) {
+                throw error;
+            }
+
+            throw new RpcException(
+                new InternalServerErrorException('Error interno al obtener datos del usuario'),
+            );
+        }
+    }
+
+    // users-employees-events/users-employees-events.service.ts
+    async findEmployeesByCompany(
+        companyId: string,
+        page = 1,
+        limit = 20,
+    ): Promise<{
+        data: UserEmployeeCacheDocument[];
+        pagination: { page: number; limit: number; total: number; totalPages: number };
+    }> {
+        try {
+            const skip = (page - 1) * limit;
+            const filter = { companyId };
+
+            const [items, total] = await Promise.all([
+                this.userModel
+                    .find(filter)
+                    .sort({ first_name: 1, last_name: 1 })
+                    .skip(skip)
+                    .limit(limit)
+                    .lean(),
+                this.userModel.countDocuments(filter),
+            ]);
+
+            return {
+                data: items,
+                pagination: {
+                    page,
+                    limit,
+                    total,
+                    totalPages: Math.ceil(total / limit) || 1,
+                },
+            };
+        } catch (error) {
+            console.error(error);
+            throw new RpcException(
+                new InternalServerErrorException('Error interno al listar empleados de la compañía'),
+            );
+        }
+    }
+    async findAllEmployeeIdsByCompany(companyId: string): Promise<string[]> {
+        try {
+            const users = await this.userModel.find({ companyId }).select('id').lean();
+            return users.map((u) => u.id);
+        } catch (error) {
+            console.error(error);
+            throw new RpcException(
+                new InternalServerErrorException('Error interno al listar ids de empleados'),
+            );
+        }
+    }
+
+    /** Listado liviano para selects/dropdowns del front (sin paginación) */
+    async findEmployeesLite(companyId: string): Promise<{ id: string; first_name: string; last_name: string; username: string }[]> {
+        try {
+            return await this.userModel
+                .find({ companyId })
+                .select('id first_name last_name username')
+                .sort({ first_name: 1, last_name: 1 })
+                .lean();
+        } catch (error) {
+            console.error(error);
+            throw new RpcException(
+                new InternalServerErrorException('Error interno al listar empleados'),
+            );
+        }
     }
 }

@@ -1,5 +1,5 @@
 // gateway/src/notifications/notifications.controller.ts
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Put, Param, Body, Query, BadRequestException } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 
 @Controller('notifications')
@@ -246,5 +246,209 @@ async getFinishedOrdersOverThreeMonths(
       throw new BadRequestException('orderId es requerido');
     }
     return this.notificationsService.deleteOrderObservationsByOrder(orderId);
+  }
+
+    /**
+   * POST /notifications/tracking
+   * Crear tracking para una notificación
+   */
+  @Post('tracking')
+  async createNotificationTracking(
+    @Body() body: {
+      notificationId: string;
+      notes?: string;
+      isCalled?: boolean;
+      hasProblems?: boolean;
+      problemDescription?: string;
+      calledBy?: string;
+      calledByName?: string;
+      problemReportedBy?: string;
+      problemReportedByName?: string;
+      archivedBy?: string;
+      archivedByName?: string;
+    }
+  ) {
+    if (!body.notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    return this.notificationsService.createNotificationTracking(body);
+  }
+
+  /**
+   * GET /notifications/tracking/notification/:notificationId
+   * Obtener historial completo de tracking
+   */
+  @Get('tracking/notification/:notificationId')
+  async getNotificationTrackingHistory(@Param('notificationId') notificationId: string) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    return this.notificationsService.getNotificationTrackingHistory(notificationId);
+  }
+
+  /**
+   * GET /notifications/tracking/notification/:notificationId/latest
+   * Obtener el tracking más reciente
+   */
+  @Get('tracking/notification/:notificationId/latest')
+  async getLatestNotificationTracking(@Param('notificationId') notificationId: string) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    return this.notificationsService.getLatestNotificationTracking(notificationId);
+  }
+
+  /**
+   * PUT /notifications/tracking/:id
+   * Actualizar tracking existente
+   */
+  @Put('tracking/:id')
+  async updateNotificationTracking(
+    @Param('id') id: string,
+    @Body() body: {
+      notes?: string;
+      isCalled?: boolean;
+      hasProblems?: boolean;
+      problemDescription?: string;
+      calledBy?: string;
+      calledByName?: string;
+      problemReportedBy?: string;
+      problemReportedByName?: string;
+      archivedBy?: string;
+      archivedByName?: string;
+      isArchived?: boolean;
+      unarchivedBy?: string;
+      unarchivedByName?: string;
+    }
+  ) {
+    if (!id) {
+      throw new BadRequestException('id es requerido');
+    }
+    return this.notificationsService.updateNotificationTracking(id, body);
+  }
+
+  /**
+   * POST /notifications/tracking/notification/:notificationId/call
+   * Marcar como llamada realizada
+   */
+  @Post('tracking/notification/:notificationId/call')
+  async markAsCalled(
+    @Param('notificationId') notificationId: string,
+    @Body() body: {
+      userId: string;
+      userName: string;
+      notes?: string;
+    }
+  ) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    if (!body.userId || !body.userName) {
+      throw new BadRequestException('userId y userName son requeridos');
+    }
+    return this.notificationsService.markAsCalled(
+      notificationId,
+      body.userId,
+      body.userName,
+      body.notes
+    );
+  }
+
+  /**
+   * POST /notifications/tracking/notification/:notificationId/problem
+   * Reportar problema
+   */
+  @Post('tracking/notification/:notificationId/problem')
+  async reportProblem(
+    @Param('notificationId') notificationId: string,
+    @Body() body: {
+      userId: string;
+      userName: string;
+      problemDescription: string;
+      notes?: string;
+    }
+  ) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    if (!body.userId || !body.userName || !body.problemDescription) {
+      throw new BadRequestException('userId, userName y problemDescription son requeridos');
+    }
+    return this.notificationsService.reportProblem(
+      notificationId,
+      body.userId,
+      body.userName,
+      body.problemDescription,
+      body.notes
+    );
+  }
+
+  /**
+   * POST /notifications/tracking/notification/:notificationId/archive
+   * Archivar/Desarchivar
+   */
+  @Post('tracking/notification/:notificationId/archive')
+  async toggleArchive(
+    @Param('notificationId') notificationId: string,
+    @Body() body: {
+      userId: string;
+      userName: string;
+      archive: boolean;
+    }
+  ) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    if (!body.userId || !body.userName) {
+      throw new BadRequestException('userId y userName son requeridos');
+    }
+    if (body.archive === undefined || body.archive === null) {
+      throw new BadRequestException('archive es requerido (true/false)');
+    }
+    return this.notificationsService.toggleArchive(
+      notificationId,
+      body.userId,
+      body.userName,
+      body.archive
+    );
+  }
+
+  /**
+   * POST /notifications/tracking/notification/:notificationId/note
+   * Agregar nota
+   */
+  @Post('tracking/notification/:notificationId/note')
+  async addNoteToNotification(
+    @Param('notificationId') notificationId: string,
+    @Body() body: {
+      userId: string;
+      userName: string;
+      notes: string;
+    }
+  ) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    if (!body.userId || !body.userName || !body.notes) {
+      throw new BadRequestException('userId, userName y notes son requeridos');
+    }
+    return this.notificationsService.addNoteToNotification(
+      notificationId,
+      body.userId,
+      body.userName,
+      body.notes
+    );
+  }
+
+  /**
+   * DELETE /notifications/tracking/:id
+   * Eliminar tracking (administración)
+   */
+  @Delete('tracking/:id')
+  async deleteNotificationTracking(@Param('id') id: string) {
+    if (!id) {
+      throw new BadRequestException('id es requerido');
+    }
+    return this.notificationsService.deleteNotificationTracking(id);
   }
 }

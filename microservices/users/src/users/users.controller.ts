@@ -57,4 +57,19 @@ export class UsersController {
 
         return data;
     }
+
+    @MessagePattern({ cmd: 'get_users_by_company' })
+    async getUsersByCompany(@Payload() data: { companyId: string }) {
+    console.log(`🔍 [Users] Buscando usuarios para companyId: ${data.companyId}`);
+    
+    const users = await this.usersService.findByCompany(data.companyId);
+    
+    return users.map((user: any) => ({
+        id: user.id,
+        name: user.name_user,
+        email: user.email_user,
+        isActive: user.state_user,
+        companyId: user.company?.id || null,
+    }));
+    }
 }

@@ -15,6 +15,7 @@ import { Attachment, AttachmentEntityType } from '../order-findings/entities/att
 import { Order } from '../order-workflow/entities/order.entity';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
+import { UpdateDeviceImeiDto } from './dto/update-device-imei.dto';
 @Injectable()
 export class DevicesService {
   constructor(
@@ -275,41 +276,9 @@ export class DevicesService {
     const incomingImeis = dto.imeis ?? [];
 
     // ── Solo evaluamos huérfanos/conflictos si el device está sin IMEI ──────
-    if (deviceSinImeis && incomingImeis.length > 0) {
-      for (const item of incomingImeis) {
-        if (item.imei_id) continue; // ya pertenece a este device, no aplica
-
-        const existente = await this.imeiRepo.findOne({
-          where: { imei_number: item.imei_number, company_id: user.companyId },
-          relations: ['device'],
-        });
-
-        if (!existente) continue; // no hay conflicto, sigue flujo normal
-
-        if (!existente.device) {
-          // 🟢 HUÉRFANO → reasignar automáticamente, sin confirmación
-          existente.device = device;
-          await this.imeiRepo.save(existente);
-
-          // lo agregamos al array en memoria para que syncImeis lo reconozca
-          device.imeis.push(existente);
-          // y le pasamos su imei_id al item entrante, para que syncImeis lo trate como update
-          item.imei_id = existente.imei_id;
-
-        } else if (existente.device.device_id !== device.device_id) {
-          // 🔴 OCUPADO → no se guarda nada, se pide confirmación al frontend
-          const conflictDevice = await this.findDeviceWithModelInfo(existente.device.device_id, user);
-
-          return {
-            ...this.mapToResponse(device),
-            requiresConfirmation: true,
-            conflictImei: item.imei_number,
-            conflictDevice: conflictDevice ?? undefined,
-            message: `El IMEI ${item.imei_number} ya está asignado al dispositivo #${existente.device.device_id}.`,
-          };
-        }
-        // si pertenece al mismo device (caso raro estando sin imeis), se ignora
-      }
+    const conflicto = await this.resolveImeiConflicts(device, incomingImeis, user.companyId, dto.forceLink);
+    if (conflicto) {
+      return { ...this.mapToResponse(device), ...conflicto };
     }
 
     // ── Flujo normal ─────────────────────────────────────────────────────────
@@ -379,7 +348,39 @@ export class DevicesService {
 
     return this.mapToResponse(device);
   }
+  async updateDeviceImei(
+    deviceId: number,
+    orderId: number,
+    user: { companyId: string },
+    dto: UpdateDeviceImeiDto,
+  ): Promise<DeviceResponseDto> {
+    // console.log(deviceId)
+    const device = await this.deviceRepo.findOne({
+      where: { device_id: deviceId, company_id: user.companyId },
+      relations: ['imeis', 'accounts'],
+    });
 
+    if (!device) throw new Error('Device not found');
+
+    const incomingImeis = dto.imeis ?? [];
+
+    const conflicto = await this.resolveImeiConflicts(
+      device,
+      incomingImeis,
+      user.companyId,
+      dto.forceLink,
+    );
+    if (conflicto) {
+      return { ...this.mapToResponse(device), ...conflicto };
+    }
+
+    device.imeis = this.syncImeis(device, incomingImeis, user.companyId);
+    await this.deviceRepo.save(device);
+
+    await this.broadcastDeviceUpdate(device, orderId);
+
+    return this.mapToResponse(device);
+  }
 
 
   // ── Reutilizable: elimina un device completo (cascade borra imeis/accounts) ──
@@ -731,5 +732,109 @@ export class DevicesService {
         models_img_url: device.model.models_img_url,
       } : undefined,
     };
+  }
+
+
+
+  private async resolveImeiConflicts(
+    device: Device,
+    incomingImeis: { imei_id?: number; imei_number: string }[],
+    companyId: string,
+    forceLink = false,
+  ): Promise<{
+    requiresConfirmation: true;
+    conflictImei: string;
+    conflictDevice?: any;
+    message: string;
+  } | null> {
+    const deviceSinImeis = device.imeis.length === 0;
+    if (!deviceSinImeis || incomingImeis.length === 0) return null;
+
+    for (const item of incomingImeis) {
+      if (item.imei_id) continue;
+
+      const existente = await this.imeiRepo.findOne({
+        where: { imei_number: item.imei_number, company_id: companyId },
+        relations: ['device'],
+      });
+
+      if (!existente) continue;
+
+      if (!existente.device) {
+        // 🟢 huérfano → reasignar
+        existente.device = device;
+        await this.imeiRepo.save(existente);
+        device.imeis.push(existente);
+        item.imei_id = existente.imei_id;
+        continue;
+      }
+
+      if (existente.device.device_id !== device.device_id) {
+        if (forceLink) {
+          // usuario ya confirmó reasignar
+          existente.device = device;
+          await this.imeiRepo.save(existente);
+          device.imeis.push(existente);
+          item.imei_id = existente.imei_id;
+          continue;
+        }
+
+        const conflictDevice = await this.findDeviceWithModelInfo(
+          existente.device.device_id,
+          { companyId } as any,
+        );
+
+        return {
+          requiresConfirmation: true,
+          conflictImei: item.imei_number,
+          conflictDevice: conflictDevice ?? undefined,
+          message: `El IMEI ${item.imei_number} ya está asignado al dispositivo #${existente.device.device_id}.`,
+        };
+      }
+    }
+
+    return null;
+  }
+  private async broadcastDeviceUpdate(device: Device, orderId: number): Promise<void> {
+    const deviceFull = await this.deviceRepo.findOne({
+      where: { device_id: device.device_id },
+      relations: ['model', 'model.brand', 'type', 'imeis', 'accounts'],
+    });
+
+    if (!deviceFull) return;
+
+    const deviceSnapshot = {
+      device_id: deviceFull.device_id,
+      serial_number: deviceFull.serial_number ?? null,
+      color: deviceFull.color ?? null,
+      storage: deviceFull.storage ?? null,
+      model: deviceFull.model ? {
+        models_id: deviceFull.model.models_id,
+        models_name: deviceFull.model.models_name,
+        models_img_url: deviceFull.model.models_img_url ?? null,
+        brand_id: deviceFull.model.brand?.brands_id ?? null,
+        brand_name: deviceFull.model.brand?.brands_name ?? null,
+      } : null,
+      type: deviceFull.type ? {
+        id: deviceFull.type.id,
+        name: deviceFull.type.name,
+      } : null,
+      imeis: deviceFull.imeis.map(i => ({
+        imei_id: i.imei_id,
+        imei_number: i.imei_number,
+      })),
+      accounts: deviceFull.accounts.map(a => ({
+        account_id: a.account_id,
+        username: a.username,
+        password: a.password ?? null,
+        account_type: a.account_type,
+      })),
+    };
+
+    await this.broadcastService.publishOrderUpdated(
+      orderId,
+      'device_updated',
+      { device: deviceSnapshot },
+    );
   }
 }

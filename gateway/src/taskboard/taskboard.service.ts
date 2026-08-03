@@ -18,6 +18,24 @@ export class TaskboardService {
     private readonly httpService: HttpService,
   ) {}
 
+  // ========== USERS (para buscar miembros) ==========
+
+  async getAllUsers(user?: any) {
+    console.log('📤 [Gateway] getAllUsers - user:', {
+      id: user?.sub,
+      companyId: user?.companyId
+    });
+    
+    // 🔥 PASAR EL USER AL MICROSERVICIO
+    return lastValueFrom(
+      this.usersClient.send(
+        { cmd: 'get_all_users' },
+        { 
+          internalToken: process.env.INTERNAL_SECRET,
+          user: user // 🔥 Pasar el user completo
+        }
+      )
+    );
   // ========== MÉTODO PARA OBTENER COMPANY ID ==========
   
   async getCompanyIdByUserId(userId: string, tokenPayload?: any): Promise<string> {
@@ -661,6 +679,21 @@ export class TaskboardService {
     }
   }
 
+  async getUserCalendarTasks(userId: string, year: number, month: number) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getUserCalendarTasks - userId: ${userId}, year: ${year}, month: ${month}`);
+    return lastValueFrom(this.taskboardClient.send({ cmd: 'calendar.tasks.findByUser' }, { userId, year, month }));
+  }
+
+  async getAllCalendarTasksForMonth(year: number, month: number, userId?: string, companyId?: string) {
+    console.log(`📤 [Gateway] Enviando a TaskBoard: getAllCalendarTasksForMonth - year: ${year}, month: ${month}, userId: ${userId || 'todos'}`);
+    
+    // 🔥 Pasar companyId en el payload
+    return lastValueFrom(
+      this.taskboardClient.send(
+        { cmd: 'calendar.tasks.findAllForMonth' },
+        { year, month, userId, companyId }
+      )
+    );
   async getUserCalendarTasks(userId: string, year: number, month: number, tokenPayload?: any) {
     console.log(`📤 [Gateway] getUserCalendarTasks - userId: ${userId}, year: ${year}, month: ${month}`);
     try {

@@ -5,6 +5,12 @@ import { Auth } from '../common/auth/decorators/auth.decorator';
 import { GetOrdersFilterDto } from './dto/get-orders-filter.dto.gateway';
 import { GetAdminDashboardRangeDto } from './dto/get-admin-dashboard.dto.gateway';
 import { Groups } from '../common/auth/decorators/groups.decorator';
+import { RegisterOrderPrintDto } from './dto/register-order-print.dto.gateway';
+import { GetPrintStatusDto } from './dto/get-print-status.dto.gateway';
+import { RegisterPrintCopyDto } from './dto/register-print-copy.dto.gateway';
+import { UpdateFineStatusDto } from './dto/update-fine-status.dto';
+import { GetEmployeesFinesDto } from './dto/get-employees-fines.dto';
+import { GetFinesListDto } from './dto/get-fines-list.dto';
 // Importa tu DTO correctamente
 // import { FindCustomerDto } from './dto/find-customer.dto'; 
 
@@ -75,5 +81,53 @@ export class ReportsController {
     @User() user: any,
   ) {
     return this.reportsService.getAdminDashboardRange(user, dto);
+  }
+
+  @Post('print')
+  async registerOrderPrint(
+    @Body() dto: RegisterOrderPrintDto,
+    @User() user: any,
+  ) {
+    return this.reportsService.registerOrderPrint(user, dto);
+  }
+  @Get('print-status')
+  async getPrintStatus(
+    @Query() dto: GetPrintStatusDto,
+  ) {
+    return this.reportsService.getPrintStatus(dto);
+  }
+  @Post('print-copy')
+  async registerPrintCopy(
+    @Body() dto: RegisterPrintCopyDto,
+    @User() user: any,
+  ) {
+    return this.reportsService.registerPrintCopy(user, dto);
+  }
+  @Get('employees-summary')
+  async getEmployeesFinesSummary(@Query() dto: GetEmployeesFinesDto, @User() user: any,) {
+    return this.reportsService.getEmployeesFinesSummary(user, dto);
+  }
+
+  @Patch(':fineId/status')
+  async updateFineStatus(
+    @Param('fineId') fineId: string,
+    @Body() dto: Omit<UpdateFineStatusDto, 'fineId'>,
+    @User() user: any,
+  ) {
+    return this.reportsService.updateFineStatus(user, { ...dto, fineId });
+  }
+  // reports.controller.ts (agregar en tu ReportsController)
+  @Get('fines')
+  async getFinesList(@Query() dto: GetFinesListDto, @User() user: any) {
+    return this.reportsService.getFinesList(user, dto);
+  }
+
+  @Get('fines/employees-filter')
+  async getEmployeesForFilter(@User() user: any) {
+    return this.reportsService.getEmployeesForFilter(user);
+  }
+  @Get('fines/:fineId')
+  async getFineDetail(@Param('fineId') fineId: string, @User() user: any) {
+    return this.reportsService.getFineDetail(user, fineId);
   }
 }

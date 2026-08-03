@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@googleapis/calendar": "^15.0.0",
+    "@nestjs/swagger": "^11.4.6",
+    "swagger-ui-express": "^5.0.1"
+  }
+}

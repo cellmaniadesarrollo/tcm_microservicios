@@ -525,4 +525,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     private async touchSession(sessionId: string): Promise<void> {
         await this.sessionRepo.update(sessionId, { lastUsedAt: new Date() });
     }
+    async getSession(companyId: string, sessionId: string): Promise<WhatsappSession> {
+        const session = await this.sessionRepo.findOne({
+            where: { id: sessionId, companyId },
+            relations: ['routing'],
+        });
+        if (!session) throw new Error(`Sesión ${sessionId} no encontrada`);
+        return session;
+    }
 }

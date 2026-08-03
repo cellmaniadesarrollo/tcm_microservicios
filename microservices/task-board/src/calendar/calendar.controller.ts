@@ -14,6 +14,7 @@ import {
   HttpStatus,
   Res,
   BadRequestException,
+  Headers
   // ❌ ELIMINAR: UseInterceptors
 } from '@nestjs/common';
 import type { Response } from 'express';
@@ -93,6 +94,11 @@ export class CalendarController {
   }
 
   @Get('monthly-tasks')
+  async getAllTasksForMonth(
+    @Query() monthDto: GetMonthTasksDto,
+    @Headers('x-company-id') companyId?: string,
+  ) {
+    return await this.calendarService.getAllTasksForMonth(monthDto, companyId);
   async getAllTasksForMonth(@Query() monthDto: GetMonthTasksDto) {
     // ✅ Extraer companyId del DTO (viene como query param)
     if (!monthDto.companyId) {
@@ -308,18 +314,56 @@ export class CalendarController {
     
     if (!code) {
       console.error('❌ [CALLBACK] No hay código');
-      return res.status(400).json({
-        success: false,
-        error: 'Código de autorización no proporcionado'
-      });
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Error de Autenticación</title>
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
+            .container { text-align: center; padding: 40px; background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .error { color: #dc3545; font-size: 48px; }
+            h1 { color: #333; }
+            p { color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="error">❌</div>
+            <h1>Error de Autenticación</h1>
+            <p>Código de autorización no proporcionado</p>
+            <a href="/">Volver al inicio</a>
+          </div>
+        </body>
+        </html>
+      `);
     }
     
     if (!state) {
       console.error('❌ [CALLBACK] No hay state');
-      return res.status(400).json({
-        success: false,
-        error: 'No se proporcionó el ID de usuario'
-      });
+      return res.status(400).send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Error de Autenticación</title>
+          <style>
+            body { font-family: Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #f5f5f5; }
+            .container { text-align: center; padding: 40px; background: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .error { color: #dc3545; font-size: 48px; }
+            h1 { color: #333; }
+            p { color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="error">❌</div>
+            <h1>Error de Autenticación</h1>
+            <p>No se proporcionó el ID de usuario</p>
+            <a href="/">Volver al inicio</a>
+          </div>
+        </body>
+        </html>
+      `);
     }
 
     try {
@@ -331,6 +375,76 @@ export class CalendarController {
       await this.googleCalendarService.saveUserTokens(state, tokens);
       console.log('✅ [CALLBACK] Tokens guardados');
       
+      // 🔥 REDIRIGIR AL FRONTEND CON ÉXITO
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+      const redirectUrl = `${frontendUrl}/calendar-connected?userId=${state}&success=true`;
+      
+      console.log(`🔍 [CALLBACK] Redirigiendo a: ${redirectUrl}`);
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Google Calendar Conectado</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }
+            .container {
+              text-align: center;
+              padding: 40px;
+              background: white;
+              border-radius: 16px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              max-width: 400px;
+            }
+            .success { color: #28a745; font-size: 64px; margin-bottom: 10px; }
+            h1 { color: #333; margin: 10px 0; }
+            p { color: #666; margin: 10px 0; }
+            .loading {
+              display: inline-block;
+              width: 30px;
+              height: 30px;
+              border: 4px solid #f3f3f3;
+              border-top: 4px solid #28a745;
+              border-radius: 50%;
+              animation: spin 1s linear infinite;
+              margin: 20px auto;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            .redirect-link { color: #667eea; text-decoration: none; font-weight: bold; }
+            .redirect-link:hover { text-decoration: underline; }
+          </style>
+          <script>
+            setTimeout(function() {
+              window.location.href = '${redirectUrl}';
+            }, 2000);
+          </script>
+        </head>
+        <body>
+          <div class="container">
+            <div class="success">✅</div>
+            <h1>¡Google Calendar Conectado!</h1>
+            <p>Tu cuenta ha sido conectada exitosamente.</p>
+            <div class="loading"></div>
+            <p style="font-size: 14px; margin-top: 20px; color: #999;">Redirigiendo al dashboard...</p>
+            <p style="font-size: 12px; margin-top: 10px; color: #bbb;">
+              Si no eres redirigido automáticamente, 
+              <a href="${redirectUrl}" class="redirect-link">haz clic aquí</a>
+            </p>
+          </div>
+        </body>
+        </html>
+      `);
       return res.status(200).json({
         success: true,
         userId: state,
@@ -341,6 +455,81 @@ export class CalendarController {
       const errorMessage = error instanceof Error ? error.message : 'Error desconocido';
       console.error('❌ [CALLBACK] Error:', errorMessage);
       
+      // 🔥 REDIRIGIR AL FRONTEND CON ERROR
+      const frontendUrl = this.configService.get<string>('FRONTEND_URL') || 'http://localhost:4200';
+      const redirectUrl = `${frontendUrl}/calendar-connected?userId=${state}&success=false&error=${encodeURIComponent(errorMessage)}`;
+      
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Error de Conexión</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }
+            .container {
+              text-align: center;
+              padding: 40px;
+              background: white;
+              border-radius: 16px;
+              box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+              max-width: 400px;
+            }
+            .error { color: #dc3545; font-size: 64px; margin-bottom: 10px; }
+            h1 { color: #333; margin: 10px 0; }
+            p { color: #666; margin: 10px 0; }
+            .details {
+              background: #f8f9fa;
+              padding: 12px;
+              border-radius: 8px;
+              margin: 15px 0;
+              font-size: 13px;
+              color: #666;
+              word-break: break-word;
+            }
+            .redirect-link { color: #667eea; text-decoration: none; font-weight: bold; }
+            .redirect-link:hover { text-decoration: underline; }
+            .retry-btn {
+              display: inline-block;
+              padding: 10px 30px;
+              background: #667eea;
+              color: white;
+              text-decoration: none;
+              border-radius: 8px;
+              margin-top: 10px;
+              font-weight: bold;
+            }
+            .retry-btn:hover { background: #5a67d8; }
+          </style>
+          <script>
+            setTimeout(function() {
+              window.location.href = '${redirectUrl}';
+            }, 3000);
+          </script>
+        </head>
+        <body>
+          <div class="container">
+            <div class="error">❌</div>
+            <h1>Error al Conectar</h1>
+            <p>Ocurrió un error al conectar tu cuenta de Google.</p>
+            <div class="details">${errorMessage}</div>
+            <p style="font-size: 14px; color: #999;">Redirigiendo al dashboard...</p>
+            <p style="font-size: 12px; margin-top: 10px; color: #bbb;">
+              Si no eres redirigido automáticamente, 
+              <a href="${redirectUrl}" class="redirect-link">haz clic aquí</a>
+            </p>
+            <a href="/calendar/auth/google/${state}" class="retry-btn">Reintentar</a>
+          </div>
+        </body>
+        </html>
+      `);
       return res.status(500).json({
         success: false,
         error: errorMessage

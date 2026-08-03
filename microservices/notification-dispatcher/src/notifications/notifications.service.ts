@@ -11,6 +11,8 @@ import { isNotifiableOrder } from './helpers/order-type.helper';
 import { ORDER_MESSAGES, REMINDER_MESSAGES } from './helpers/message-builder.helper'
 import { REMINDER_INTERVALS, LAST_REMINDER_STEP, MAX_DAYS_FROM_START, addDays } from './helpers/reminder-schedule.helper';
 import { MessagePurpose } from '../whatsapp/entities/whatsapp-routing.entity';
+import { WhatsappTemplateEvent } from '../whatsapp/entities/whatsapp-template.entity';
+import { ORDER_STATUS_TO_EVENT, reminderStepToEvent } from './helpers/template-event.helper';
 
 // ── Constantes de estado ──────────────────────────────────────────────────────
 const STATUS_TRABAJO_FINALIZADO = 'TRABAJO FINALIZADO';
@@ -56,14 +58,17 @@ export class NotificationsService {
         const phone = await this.getMobileContact(order.customerId);
         if (!phone) return;
 
+        // handleOrderCreated y handleStatusChanged (mismo bloque en ambos)
         await this.dispatch({
             orderId: order.id,
             customerId: order.customerId,
-            companyId: order.companyId,         // 👈
-            purpose: 'NOTIFICATIONS',           // 👈
+            companyId: order.companyId,
+            purpose: 'NOTIFICATIONS',
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
             message: messageFn(order),
+            order,                                          // 👈
+            event: ORDER_STATUS_TO_EVENT[statusKey],         // 👈
         });
     }
 
@@ -95,11 +100,13 @@ export class NotificationsService {
         await this.dispatch({
             orderId: order.id,
             customerId: order.customerId,
-            companyId: order.companyId,         // 👈
-            purpose: 'NOTIFICATIONS',           // 👈
+            companyId: order.companyId,
+            purpose: 'NOTIFICATIONS',
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
             message: messageFn(order),
+            order,                                     // 👈 faltaba esto
+            event: ORDER_STATUS_TO_EVENT[statusKey],   // 👈 y esto
         });
 
         if (statusKey === STATUS_TRABAJO_FINALIZADO) {
@@ -188,15 +195,18 @@ export class NotificationsService {
 
             const phone = await this.getMobileContact(schedule.customerId);
             if (phone) {
+                // processDueReminders
                 await this.dispatch({
                     orderId: schedule.orderId,
                     customerId: schedule.customerId,
-                    companyId: order.companyId,     // 👈
-                    purpose: 'REMINDERS',           // 👈
+                    companyId: order.companyId,
+                    purpose: 'REMINDERS',
                     type: 'PICKUP_REMINDER',
                     sequenceStep: currentStep,
                     recipient: phone,
                     message: messageFn(order),
+                    order,                                    // 👈
+                    event: reminderStepToEvent(currentStep),  // 👈
                 });
             }
 
@@ -285,17 +295,21 @@ export class NotificationsService {
     private async dispatch(params: {
         orderId: number;
         customerId: number;
-        companyId: string;                  // 👈 nuevo
-        purpose: MessagePurpose;            // 👈 nuevo
+        companyId: string;
+        purpose: MessagePurpose;
         type: NotificationLog['type'];
         recipient: string;
         message: string;
+        order: OrderReplica;              // 👈 nuevo
+        event?: WhatsappTemplateEvent;    // 👈 nuevo
         sequenceStep?: number;
     }): Promise<void> {
         try {
             await this.whatsapp.send(params.recipient, params.message, {
                 companyId: params.companyId,
                 purpose: params.purpose,
+                event: params.event,      // 👈
+                order: params.order,      // 👈
             });
             await this.logRepo.save(
                 this.logRepo.create({
