@@ -1,0 +1,63 @@
+# docker/products/docker-compose.yml
+x-node-health: &node-health
+  test: ["CMD", "node", "-e", "require('http').get('http://localhost:3020/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+services:
+  # ============================================
+  # PRODUCT SERVICE - Microservicio principal
+  # ============================================
+  products:
+    build:
+      context: ../../microservices/product-service
+      dockerfile: docker/Dockerfile.dev
+    container_name: ms-products
+    restart: always
+    ports:
+      - "3020:3020"      # HTTP API
+      - "3004:3004"      # TCP RPC
+    volumes:
+      - ../../microservices/product-service:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3020
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET}
+      - DB_NAME_PRODUCTS=${DB_NAME_PRODUCTS:-productsTeamCellmania}
+      - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/${DB_NAME_PRODUCTS:-productsTeamCellmania}?authSource=admin
+      - MONGO_USER=${MONGO_USER:-admin}
+      - MONGO_PASSWORD=${MONGO_PASSWORD:-password}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      - JWT_SECRET=${JWT_SECRET:-miclavesecretaultrasegura}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
+      - ORDER_SERVICE_URL=http://orders:3001
+      - NOTIFICATION_SERVICE_URL=http://notifications:3010
+      - USER_SERVICE_URL=http://users:3001
+      - CORS_ORIGIN=${FRONTEND_URL:-http://localhost:4200}
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - SERVICE_NAME=PRODUCT_SERVICE
+      - SERVICE_PORT=3020
+      - SERVICE_RPC_PORT=3004
+      - CHOKIDAR_USEPOLLING=${CHOKIDAR_USEPOLLING:-true}
+      - CHOKIDAR_INTERVAL=${CHOKIDAR_INTERVAL:-100}
+    networks:
+      - backend
+    depends_on:
+      - mongodb
+      - redis
+    healthcheck: *node-health
+
+networks:
+  backend:
+    external: true
+    name: tcm-network  # Red compartida con otros servicios
