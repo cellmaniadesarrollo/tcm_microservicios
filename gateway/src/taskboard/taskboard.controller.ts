@@ -54,22 +54,18 @@ export class TaskboardController {
   // ============================================================
 
   @Get('users')
-  @Groups('ADMIN', 'MANAGER')
   async getAllUsers(@User() user: any) {
-    // 🔥 PASAR EL USUARIO AL SERVICIO PARA FILTRAR POR COMPANYID
     return this.taskboardService.getAllUsers(user);
   }
 
   @Get('users/search')
-  @Groups('ADMIN', 'MANAGER')
   async searchUsers(@Query('q') search: string, @User() user: any) {
     return this.taskboardService.searchUsers(search);
   }
 
   @Get('users/:id')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getUserById(@Param('id') id: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== id) {
       throw new BadRequestException('No puedes ver el perfil de otro usuario');
     }
@@ -81,21 +77,18 @@ export class TaskboardController {
   // ============================================================
 
   @Get('boards/roles')
-  @Groups('ADMIN', 'MANAGER')
   getRoles(@User() user: any) {
     return this.taskboardService.getRoles();
   }
 
   @Post('boards/roles')
-  @Groups('ADMIN')
   createRole(@Body() data: any, @User() user: any) {
     return this.taskboardService.createRole(data);
   }
 
   @Get('boards/user/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findBoardsByUser(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (isAdmin) {
       return this.taskboardService.findBoardsByUser(userId);
     }
@@ -106,15 +99,13 @@ export class TaskboardController {
   }
 
   @Post('boards')
-  @Groups('ADMIN', 'MANAGER')
   createBoard(@Body() data: any, @User() user: any) {
     return this.taskboardService.createBoard({ ...data, createdBy: user.sub });
   }
 
   @Get('boards')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findAllBoards(@User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (isAdmin) {
       return this.taskboardService.findAllBoards();
     }
@@ -122,32 +113,27 @@ export class TaskboardController {
   }
 
   @Get('boards/:id')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findOneBoard(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.findOneBoard(id);
   }
 
   @Patch('boards/:id')
-  @Groups('ADMIN', 'MANAGER')
   updateBoard(@Param('id') id: string, @Body() data: any, @User() user: any) {
     return this.taskboardService.updateBoard(id, data);
   }
 
   @Delete('boards/:id')
-  @Groups('ADMIN')
   @HttpCode(HttpStatus.NO_CONTENT)
   removeBoard(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.removeBoard(id);
   }
 
   @Get('boards/:id/members')
-  @Groups('ADMIN', 'MANAGER')
   async getBoardMembers(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.getBoardMembersWithDetails(id);
   }
 
   @Post('boards/:id/members/:userId')
-  @Groups('ADMIN', 'MANAGER')
   addMember(
     @Param('id') id: string,
     @Param('userId') userId: string,
@@ -157,7 +143,6 @@ export class TaskboardController {
   }
 
   @Delete('boards/:id/members/:userId')
-  @Groups('ADMIN', 'MANAGER')
   removeMember(
     @Param('id') id: string,
     @Param('userId') userId: string,
@@ -167,7 +152,6 @@ export class TaskboardController {
   }
 
   @Patch('boards/:id/members/:userId/role')
-  @Groups('ADMIN', 'MANAGER')
   async updateMemberRole(
     @Param('id') id: string,
     @Param('userId') userId: string,
@@ -182,7 +166,6 @@ export class TaskboardController {
   // ============================================================
 
   @Post('boards/:id/invitations')
-  @Groups('ADMIN', 'MANAGER')
   async inviteMember(
     @Param('id') id: string,
     @Body() data: { userId: string; roleName: string; expiresInDays?: number },
@@ -192,7 +175,6 @@ export class TaskboardController {
   }
 
   @Post('invitations/:invitationId/accept')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async acceptInvitation(
     @Param('invitationId') invitationId: string,
     @User() user: any
@@ -201,12 +183,11 @@ export class TaskboardController {
   }
 
   @Get('invitations/pending')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getPendingInvitations(
     @Query('userId') userId: string,
     @User() user: any
   ) {
-    if (user?.sub !== userId && !user?.groups?.includes('ADMIN')) {
+    if (user?.sub !== userId && !user?.groups?.includes('ADMINS')) {
       throw new BadRequestException('No puedes ver las invitaciones de otro usuario');
     }
     return this.taskboardService.getPendingInvitations(userId);
@@ -217,15 +198,13 @@ export class TaskboardController {
   // ============================================================
 
   @Post('tasks')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   createTask(@Body() data: any, @User() user: any) {
     return this.taskboardService.createTask({ ...data, createdBy: user.sub });
   }
 
   @Get('tasks')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findAllTasks(@User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (isAdmin) {
       return this.taskboardService.findAllTasks();
     }
@@ -233,15 +212,13 @@ export class TaskboardController {
   }
 
   @Get('tasks/board/:boardId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findTasksByBoard(@Param('boardId') boardId: string, @User() user: any) {
     return this.taskboardService.findTasksByBoard(boardId);
   }
 
   @Get('tasks/user/:userId')
-  @Groups('ADMIN', 'MANAGER')
   findTasksByUser(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin) {
       throw new BadRequestException('No tienes permisos para ver tareas de otros usuarios');
     }
@@ -249,19 +226,16 @@ export class TaskboardController {
   }
 
   @Get('tasks/:id')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findOneTask(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.findOneTask(id);
   }
 
   @Patch('tasks/:id')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   updateTask(@Param('id') id: string, @Body() data: any, @User() user: any) {
     return this.taskboardService.updateTask(id, data);
   }
 
   @Delete('tasks/:id')
-  @Groups('ADMIN', 'MANAGER')
   @HttpCode(HttpStatus.NO_CONTENT)
   removeTask(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.removeTask(id);
@@ -272,13 +246,12 @@ export class TaskboardController {
   // ============================================================
 
   @Post('tasks/:taskId/images')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   @UseInterceptors(FileInterceptor('file'))
   async uploadImage(
-    @Param('taskId') taskId: string,          // ✅ Requerido
-    @UploadedFile() file: any,                // ✅ Requerido
-    @User() user: any,                        // ✅ Requerido (ANTES del opcional)
-    @Body('taskDetailId') taskDetailId?: string // ✅ Opcional (ÚLTIMO)
+    @Param('taskId') taskId: string,
+    @UploadedFile() file: any,
+    @User() user: any,
+    @Body('taskDetailId') taskDetailId?: string
   ) {
     return {
       success: true,
@@ -288,7 +261,6 @@ export class TaskboardController {
   }
 
   @Post('tasks/:taskId/images/base64')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async uploadImageBase64(
     @Param('taskId') taskId: string,
     @Body() body: { file: string; originalName: string; mimeType: string; taskDetailId?: string },
@@ -298,13 +270,11 @@ export class TaskboardController {
   }
 
   @Get('tasks/:taskId/images')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getTaskImages(@Param('taskId') taskId: string, @User() user: any) {
     return this.taskboardService.getTaskImages(taskId);
   }
 
   @Get('tasks/:taskId/images/detail/:taskDetailId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getTaskDetailImages(
     @Param('taskId') taskId: string,
     @Param('taskDetailId') taskDetailId: string,
@@ -314,7 +284,6 @@ export class TaskboardController {
   }
 
   @Get('tasks/:taskId/images/:imageId/url')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getImageUrl(
     @Param('taskId') taskId: string,
     @Param('imageId') imageId: string,
@@ -324,7 +293,6 @@ export class TaskboardController {
   }
 
   @Delete('tasks/:taskId/images/:imageId')
-  @Groups('ADMIN', 'MANAGER')
   async deleteImage(
     @Param('taskId') taskId: string,
     @Param('imageId') imageId: string,
@@ -338,13 +306,11 @@ export class TaskboardController {
   // ============================================================
 
   @Get('tasks/:id/comments')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getTaskComments(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.getTaskComments(id);
   }
 
   @Post('tasks/:id/comments')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async createComment(
     @Param('id') id: string,
     @Body() data: { content: string; userId: string; parentCommentId?: string },
@@ -354,7 +320,6 @@ export class TaskboardController {
   }
 
   @Patch('tasks/comments/:commentId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async updateComment(
     @Param('commentId') commentId: string,
     @Body() data: { content: string },
@@ -364,7 +329,6 @@ export class TaskboardController {
   }
 
   @Delete('tasks/comments/:commentId')
-  @Groups('ADMIN', 'MANAGER')
   async deleteComment(@Param('commentId') commentId: string, @User() user: any) {
     return this.taskboardService.deleteComment(commentId);
   }
@@ -374,13 +338,11 @@ export class TaskboardController {
   // ============================================================
 
   @Get('tasks/:id/subtasks')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getTaskSubtasks(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.getTaskSubtasks(id);
   }
 
   @Post('tasks/:id/subtasks')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async createSubtask(
     @Param('id') id: string,
     @Body() data: { title: string; description?: string; assignedTo?: string; dueDate?: string },
@@ -390,7 +352,6 @@ export class TaskboardController {
   }
 
   @Patch('tasks/subtasks/:subtaskId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async updateSubtask(
     @Param('subtaskId') subtaskId: string,
     @Body() data: any,
@@ -400,7 +361,6 @@ export class TaskboardController {
   }
 
   @Patch('tasks/subtasks/:subtaskId/status')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async updateSubtaskStatus(
     @Param('subtaskId') subtaskId: string,
     @Body() data: { status: string },
@@ -410,7 +370,6 @@ export class TaskboardController {
   }
 
   @Delete('tasks/subtasks/:subtaskId')
-  @Groups('ADMIN', 'MANAGER')
   async deleteSubtask(@Param('subtaskId') subtaskId: string, @User() user: any) {
     return this.taskboardService.deleteSubtask(subtaskId);
   }
@@ -420,13 +379,11 @@ export class TaskboardController {
   // ============================================================
 
   @Get('boards/:id/columns')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getColumns(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.getColumns(id);
   }
 
   @Post('boards/:id/columns')
-  @Groups('ADMIN', 'MANAGER')
   async createColumn(
     @Param('id') id: string,
     @Body() data: any,
@@ -436,7 +393,6 @@ export class TaskboardController {
   }
 
   @Patch('boards/columns/:columnId')
-  @Groups('ADMIN', 'MANAGER')
   async updateColumn(
     @Param('columnId') columnId: string,
     @Body() data: any,
@@ -446,19 +402,16 @@ export class TaskboardController {
   }
 
   @Delete('boards/columns/:columnId')
-  @Groups('ADMIN')
   async deleteColumn(@Param('columnId') columnId: string, @User() user: any) {
     return this.taskboardService.deleteColumn(columnId);
   }
 
   @Post('boards/:id/setup-default-columns')
-  @Groups('ADMIN', 'MANAGER')
   async setupDefaultColumns(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.setupDefaultColumns(id);
   }
 
   @Post('boards/:id/reorder-columns')
-  @Groups('ADMIN', 'MANAGER')
   async reorderColumns(
     @Param('id') id: string,
     @Body('columnIds') columnIds: string[],
@@ -468,7 +421,6 @@ export class TaskboardController {
   }
 
   @Post('boards/:id/move-task')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async moveTask(
     @Param('id') id: string,
     @Body() data: any,
@@ -478,7 +430,6 @@ export class TaskboardController {
   }
 
   @Post('boards/columns/:columnId/tasks/:taskId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async addTaskToColumn(
     @Param('columnId') columnId: string,
     @Param('taskId') taskId: string,
@@ -488,7 +439,6 @@ export class TaskboardController {
   }
 
   @Delete('boards/columns/:columnId/tasks/:taskId')
-  @Groups('ADMIN', 'MANAGER')
   async removeTaskFromColumn(
     @Param('columnId') columnId: string,
     @Param('taskId') taskId: string,
@@ -502,7 +452,6 @@ export class TaskboardController {
   // ============================================================
 
   @Post('tasks/:id/collaborators/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   addCollaborator(
     @Param('id') id: string,
     @Param('userId') userId: string,
@@ -513,13 +462,11 @@ export class TaskboardController {
   }
 
   @Get('tasks/:id/collaborators')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   getCollaborators(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.getCollaborators(id);
   }
 
   @Delete('tasks/:id/collaborators/:userId')
-  @Groups('ADMIN', 'MANAGER')
   removeCollaborator(
     @Param('id') id: string,
     @Param('userId') userId: string,
@@ -533,37 +480,31 @@ export class TaskboardController {
   // ============================================================
 
   @Post('labels')
-  @Groups('ADMIN', 'MANAGER')
   createLabel(@Body() data: any, @User() user: any) {
     return this.taskboardService.createLabel(data);
   }
 
   @Get('labels')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findAllLabels(@User() user: any) {
     return this.taskboardService.findAllLabels();
   }
 
   @Get('labels/board/:boardId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findLabelsByBoard(@Param('boardId') boardId: string, @User() user: any) {
     return this.taskboardService.findLabelsByBoard(boardId);
   }
 
   @Get('labels/:id')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   findOneLabel(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.findOneLabel(id);
   }
 
   @Patch('labels/:id')
-  @Groups('ADMIN', 'MANAGER')
   updateLabel(@Param('id') id: string, @Body() data: any, @User() user: any) {
     return this.taskboardService.updateLabel(id, data);
   }
 
   @Delete('labels/:id')
-  @Groups('ADMIN', 'MANAGER')
   removeLabel(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.removeLabel(id);
   }
@@ -573,13 +514,11 @@ export class TaskboardController {
   // ============================================================
 
   @Get('push-notifications/vapid-public-key')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getVapidPublicKey(@User() user: any) {
     return this.taskboardService.getVapidPublicKey();
   }
 
   @Post('push-notifications/subscribe')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async subscribeToPush(
     @Body('userId') userId: string,
     @Body('subscription') subscription: any,
@@ -595,7 +534,6 @@ export class TaskboardController {
   }
 
   @Delete('push-notifications/unsubscribe')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async unsubscribeFromPush(
     @Body('userId') userId: string,
     @Body('endpoint') endpoint: string,
@@ -608,16 +546,14 @@ export class TaskboardController {
   }
 
   @Get('push-notifications/subscriptions/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getUserPushSubscriptions(@Param('userId') userId: string, @User() user: any) {
-    if (user?.sub !== userId && !user?.groups?.includes('ADMIN')) {
+    if (user?.sub !== userId && !user?.groups?.includes('ADMINS')) {
       throw new BadRequestException('No puedes ver las suscripciones de otro usuario');
     }
     return this.taskboardService.getUserPushSubscriptions(userId);
   }
 
   @Post('push-notifications/send')
-  @Groups('ADMIN', 'MANAGER')
   async sendNotification(@Body() dto: any, @User() user: any) {
     return this.taskboardService.sendNotification(dto);
   }
@@ -627,20 +563,18 @@ export class TaskboardController {
   // ============================================================
 
   @Post('calendar/tasks')
-  @Groups('ADMIN', 'MANAGER')
   async createCalendarTask(@Body() data: any, @User() user: any) {
     return this.taskboardService.createCalendarTask(data);
   }
 
   @Get('calendar/users/:userId/tasks')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getUserCalendarTasks(
     @Param('userId') userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
     @User() user: any
   ) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver las tareas de otro usuario');
     }
@@ -650,7 +584,6 @@ export class TaskboardController {
   }
 
   @Get('calendar/monthly-tasks')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getAllCalendarTasksForMonth(
     @User() user: any,
     @Query('year') year: number,
@@ -660,7 +593,6 @@ export class TaskboardController {
     const currentYear = year || new Date().getFullYear();
     const currentMonth = month !== undefined ? month : new Date().getMonth();
     
-    // 🔥 Pasar companyId del usuario autenticado
     const companyId = user?.companyId;
     
     return this.taskboardService.getAllCalendarTasksForMonth(
@@ -672,7 +604,6 @@ export class TaskboardController {
   }
 
   @Put('calendar/tasks/:id')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async updateCalendarTask(
     @Param('id') id: string,
     @Body() data: any,
@@ -682,19 +613,16 @@ export class TaskboardController {
   }
 
   @Delete('calendar/tasks/:id')
-  @Groups('ADMIN', 'MANAGER')
   async deleteCalendarTask(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.deleteCalendarTask(id);
   }
 
   @Put('calendar/tasks/:id/toggle')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async toggleCalendarTaskComplete(@Param('id') id: string, @User() user: any) {
     return this.taskboardService.toggleCalendarTaskComplete(id);
   }
 
   @Put('calendar/tasks/:id/complete')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async completeCalendarTaskWithPhoto(
     @Param('id') id: string,
     @Body() data: { completionPhotoUrl: string; completionNotes?: string },
@@ -704,9 +632,8 @@ export class TaskboardController {
   }
 
   @Get('calendar/users/:userId/tasks/today')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getTodayCalendarTasks(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver las tareas de otro usuario');
     }
@@ -714,9 +641,8 @@ export class TaskboardController {
   }
 
   @Get('calendar/users/:userId/tasks/pending')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getPendingCalendarTasks(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver las tareas de otro usuario');
     }
@@ -724,14 +650,13 @@ export class TaskboardController {
   }
 
   @Get('calendar/users/:userId/report')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getUserCalendarReport(
     @Param('userId') userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
     @User() user: any
   ) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver el reporte de otro usuario');
     }
@@ -741,14 +666,13 @@ export class TaskboardController {
   }
 
   @Get('calendar/users/:userId/cleaning-stats')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getCleaningStats(
     @Param('userId') userId: string,
     @Query('year') year: number,
     @Query('month') month: number,
     @User() user: any
   ) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver las estadísticas de otro usuario');
     }
@@ -758,7 +682,6 @@ export class TaskboardController {
   }
 
   @Get('calendar/tasks/:taskId/images/:imageId/url')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getCalendarImageUrl(
     @Param('taskId') taskId: string,
     @Param('imageId') imageId: string,
@@ -803,9 +726,8 @@ export class TaskboardController {
   // ============================================================
 
   @Get('calendar/auth/status/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getAuthStatus(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver el estado de otro usuario');
     }
@@ -813,9 +735,8 @@ export class TaskboardController {
   }
 
   @Delete('calendar/auth/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async disconnectGoogle(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes desconectar la cuenta de otro usuario');
     }
@@ -823,9 +744,8 @@ export class TaskboardController {
   }
 
   @Post('calendar/sync-pending/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async syncPendingTasks(@Param('userId') userId: string, @User() user: any) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes sincronizar tareas de otro usuario');
     }
@@ -833,13 +753,12 @@ export class TaskboardController {
   }
 
   @Post('calendar/sync-month/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async syncMonthTasks(
     @Param('userId') userId: string,
     @Body() body: { year: number; month: number },
     @User() user: any
   ) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes sincronizar tareas de otro usuario');
     }
@@ -847,14 +766,13 @@ export class TaskboardController {
   }
 
   @Get('calendar/google-events/:userId')
-  @Groups('ADMIN', 'MANAGER', 'EMPLOYEE')
   async getGoogleEvents(
     @User() user: any,
     @Param('userId') userId: string,
     @Query('timeMin') timeMin?: string,
     @Query('timeMax') timeMax?: string
   ) {
-    const isAdmin = user?.groups?.includes('ADMIN') || user?.groups?.includes('MANAGER');
+    const isAdmin = user?.groups?.includes('ADMINS') || user?.groups?.includes('COMPANY_ADMIN');
     if (!isAdmin && user?.sub !== userId) {
       throw new BadRequestException('No puedes ver eventos de otro usuario');
     }
