@@ -3,7 +3,8 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci
+# ✅ Agregar --legacy-peer-deps
+RUN npm ci --legacy-peer-deps
 
 COPY . .
 RUN npm run build
@@ -12,8 +13,8 @@ RUN npm run build
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-# Instala SOLO dependencias de producción (mucho más liviano)
-RUN npm ci --omit=dev
+# ✅ Agregar --legacy-peer-deps
+RUN npm ci --legacy-peer-deps --omit=dev
 
 # ETAPA 3: Runtime final
 FROM node:20-alpine
