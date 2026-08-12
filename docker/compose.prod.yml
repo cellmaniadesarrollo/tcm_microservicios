@@ -454,77 +454,77 @@ services:
   # INVENTARIO MICROSERVICE
   # ─────────────────────────────────────────
 
-inventario:
-  build:
-    context: ../microservices/inventario
-    dockerfile: Dockerfile
-  container_name: ms-inventario
-  restart: always
-  ports:
-    - "3030:3030"
-    - "3016:3005"
-  environment:
-    - NODE_ENV=production
-    - INTERNAL_SECRET=${INTERNAL_SECRET:-Cellmania13}
-    - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET:-Cellmania13}
-    
-    # ✅ MongoDB para PRODUCTOS (misma que notifications)
-    - DB_NAME_INVENTARIO=${DB_NAME_NOTIFICATIONS}
-    - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
-    
-    # ✅ MongoDB ATLAS para INCOMES (la de incomes)
-    - MONGODB_ATLAS_URI=mongodb+srv://michacp:Oldtwesol980@cluster0.dkw96h2.mongodb.net/teamcellmaniaglobal1?retryWrites=true&w=majority&appName=Cluster0
-    - DB_NAME_ATLAS=teamcellmaniaglobal1
-    
-    # Redis
-    - REDIS_HOST=redis-realtime
-    - REDIS_PORT=6379
-    - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-    - REDIS_DB=0
-    
-    # RabbitMQ
-    - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-    
-    # Kafka
-    - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
-    
-    # JWT
-    - JWT_SECRET=${JWT_SECRET:-miclavesecretaultrasegura}
-    - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
-    
-    # URLs de servicios
-    - ORDER_SERVICE_URL=http://orders:3001
-    - NOTIFICATION_SERVICE_URL=http://notifications:3010
-    - USER_SERVICE_URL=http://users:3001
-    - PRODUCT_SERVICE_URL=http://products:3020
-    
-    # Configuración general
-    - CORS_ORIGIN=${FRONTEND_URL:-http://localhost:4200}
-    - LOG_LEVEL=${LOG_LEVEL:-info}
-    - SERVICE_NAME=INVENTARIO_SERVICE
-    - SERVICE_PORT=3030
-    - SERVICE_RPC_PORT=3005
-    
-    # Backend URL
-    - INCOME_BACKEND_URL=https://host.docker.internal:4004
-    - INVENTORY_BACKEND_URL=https://host.docker.internal:4004
-  extra_hosts:
-    - "host.docker.internal:host-gateway"
-  networks:
-    - backend
-  depends_on:
-    rabbitmq:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-    init-kafka:
-      condition: service_completed_successfully
-  healthcheck:
-    test: ["CMD", "node", "-e", "require('http').get('http://localhost:3030/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
-    interval: 30s
-    timeout: 10s
-    retries: 3
-    start_period: 40s
+  inventario:
+    build:
+      context: ../microservices/inventario
+      dockerfile: Dockerfile
+    container_name: ms-inventario
+    restart: always
+    ports:
+      - "3030:3030"
+      - "3016:3005"
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-Cellmania13}
+      - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET:-Cellmania13}
+      
+      # ✅ MongoDB para PRODUCTOS (misma que notifications)
+      - DB_NAME_INVENTARIO=${DB_NAME_NOTIFICATIONS}
+      - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
+      
+      # ✅ MongoDB ATLAS para INCOMES (la de incomes)
+      - MONGODB_ATLAS_URI=mongodb+srv://michacp:Oldtwesol980@cluster0.dkw96h2.mongodb.net/teamcellmaniaglobal1?retryWrites=true&w=majority&appName=Cluster0
+      - DB_NAME_ATLAS=teamcellmaniaglobal1
+      
+      # Redis
+      - REDIS_HOST=redis-realtime
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
+      
+      # RabbitMQ
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      
+      # Kafka
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      
+      # JWT
+      - JWT_SECRET=${JWT_SECRET:-miclavesecretaultrasegura}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
+      
+      # URLs de servicios
+      - ORDER_SERVICE_URL=http://orders:3001
+      - NOTIFICATION_SERVICE_URL=http://notifications:3010
+      - USER_SERVICE_URL=http://users:3001
+      - PRODUCT_SERVICE_URL=http://products:3020
+      
+      # Configuración general
+      - CORS_ORIGIN=${FRONTEND_URL:-http://localhost:4200}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - SERVICE_NAME=INVENTARIO_SERVICE
+      - SERVICE_PORT=3030
+      - SERVICE_RPC_PORT=3005
+      
+      # Backend URL
+      - INCOME_BACKEND_URL=https://host.docker.internal:4004
+      - INVENTORY_BACKEND_URL=https://host.docker.internal:4004
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3030/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 networks:
   backend:
