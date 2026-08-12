@@ -1,3 +1,4 @@
+# Dockerfile.dev - Gateway (versión mejorada)
 FROM node:20-alpine
 
 # Necesario para chokidar (watching en Docker)
@@ -7,12 +8,12 @@ WORKDIR /app
 
 COPY package*.json ./
 
-# instalar chokidar, ts-node-dev y dependencias
-RUN npm install
+# ✅ Instalar dependencias con legacy-peer-deps para evitar conflictos
+RUN npm install --legacy-peer-deps
 
-# copiar el código FUERA DE aquí, porque usas volumes
+# copiar el código FUERA de aquí, porque usas volumes
 COPY . .
 
 EXPOSE 3000
 
-CMD ["npm", "run", "start"] 
+CMD ["npm", "run", "start"]

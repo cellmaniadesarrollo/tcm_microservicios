@@ -1,0 +1,68 @@
+x-node-health: &node-health
+  test: ["CMD", "node", "-e", "require('http').get('http://localhost:3030/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 40s
+
+services:
+  inventario:
+    build:
+      context: ../../microservices/inventario
+      dockerfile: Dockerfile.dev
+    container_name: ms-inventario
+    restart: always
+    ports:
+      - "3030:3030"
+      - "3016:3005"
+    volumes:
+      - ../../microservices/inventario:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    env_file:
+      - ../.env
+    environment:
+      - NODE_ENV=development
+      - PORT=3030
+      - INTERNAL_SECRET=${INTERNAL_SECRET:-Cellmania13}
+      - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET:-Cellmania13}
+      
+      # ✅ CAMBIAR A MONGODB ATLAS
+      - DB_NAME_INVENTARIO=teamcellmaniaglobal1
+      - MONGODB_URI=mongodb+srv://cellmania13:cellmania13@cluster0.rvn2tob.mongodb.net/teamcellmaniaglobal1?retryWrites=true&w=majority&appName=Cluster0
+      
+      # ❌ YA NO SE NECESITAN PARA ATLAS (opcional, puedes eliminarlas)
+      # - MONGO_USER=${MONGO_USER:-admin}
+      # - MONGO_PASSWORD=${MONGO_PASSWORD:-password}
+      
+      - REDIS_HOST=redis-realtime
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      - JWT_SECRET=${JWT_SECRET:-miclavesecretaultrasegura}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
+      - ORDER_SERVICE_URL=http://orders:3001
+      - NOTIFICATION_SERVICE_URL=http://notifications:3010
+      - USER_SERVICE_URL=http://users:3001
+      - PRODUCT_SERVICE_URL=http://products:3020
+      - CORS_ORIGIN=${FRONTEND_URL:-http://localhost:4200}
+      - LOG_LEVEL=${LOG_LEVEL:-debug}
+      - SERVICE_NAME=INVENTARIO_SERVICE
+      - SERVICE_PORT=3030
+      - SERVICE_RPC_PORT=3005
+      - CHOKIDAR_USEPOLLING=${CHOKIDAR_USEPOLLING:-true}
+      - CHOKIDAR_INTERVAL=${CHOKIDAR_INTERVAL:-100}
+      - INCOME_BACKEND_URL=https://host.docker.internal:4004
+      - INVENTORY_BACKEND_URL=https://host.docker.internal:4004
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - backend
+    healthcheck: *node-health
+
+networks:
+  backend:
+    external: true
+    name: backend
