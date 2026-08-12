@@ -32,6 +32,7 @@ on:
           - notifications
           - task-board
           - notification-dispatcher
+          - inventario
           # ── Infraestructura (solo logs/restart, nunca deploy) ──
           - kafka
           - rabbitmq
@@ -120,6 +121,7 @@ jobs:
                 ["notifications"]="microservices/notifications/"
                 ["task-board"]="microservices/task-board/"
                 ["notification-dispatcher"]="microservices/notification-dispatcher/"
+                ["inventario"]="microservices/inventario/"
               )
 
               for MS in "${!PATHS[@]}"; do
