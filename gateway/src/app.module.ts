@@ -15,6 +15,7 @@ import { ReportsModule } from './reports/reports.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { TaskboardModule } from './taskboard/taskboard.module';  // ✅ Agregar import
 import { NotificationsDispatcherModule } from './notifications-dispatcher/notifications-dispatcher.module';
+import { InventarioModule } from './inventario/inventario.module';
 
 @Module({
   imports: [
@@ -31,7 +32,8 @@ import { NotificationsDispatcherModule } from './notifications-dispatcher/notifi
     ReportsModule,
     NotificationsModule,
     TaskboardModule,  // ✅ Agregar aquí
-    NotificationsDispatcherModule
+    NotificationsDispatcherModule,
+    InventarioModule
   ],
   controllers: [AppController],
   providers: [AppService],

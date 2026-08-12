@@ -1,0 +1,41 @@
+# Dependencias
+node_modules/
+package-lock.json
+yarn.lock
+
+# Compilación
+dist/
+build/
+coverage/
+
+# Variables de entorno
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+*.tmp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker
+docker-compose.override.yml
+
+# Archivos compilados de TypeScript dentro de src
+src/**/*.js
+src/**/*.d.ts
+src/**/*.js.map
+!src/**/*.ts
