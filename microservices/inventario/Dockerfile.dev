@@ -16,4 +16,4 @@ COPY src ./src
 EXPOSE 3030
 EXPOSE 3005
 
-CMD ["npm", "run", "start:dev"]
+CMD ["npm", "run", "start"] 
