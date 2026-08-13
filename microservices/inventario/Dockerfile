@@ -13,7 +13,12 @@ RUN npm install --legacy-peer-deps
 # Copiar código fuente
 COPY src ./src
 
+# 🔴 IMPORTANTE: COMPILAR LA APLICACIÓN
+RUN npm run build
+
+# Limpiar dependencias de desarrollo
+RUN npm prune --production
+
 EXPOSE 3030 3005
 
-# Usar el mismo comando que en desarrollo pero con NODE_ENV=production
-CMD ["npm", "run", "start:prod"]
+CMD ["node", "dist/main.js"]
