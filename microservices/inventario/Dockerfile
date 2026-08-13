@@ -13,8 +13,11 @@ RUN npm install --legacy-peer-deps
 # Copiar código fuente
 COPY src ./src
 
-# 🔴 IMPORTANTE: COMPILAR LA APLICACIÓN
-RUN npm run build
+# Compilar con tsc
+RUN npx tsc
+
+# Verificar que dist existe
+RUN ls -la dist/ || (echo "❌ ERROR: dist no se creó" && exit 1)
 
 # Limpiar dependencias de desarrollo
 RUN npm prune --production
