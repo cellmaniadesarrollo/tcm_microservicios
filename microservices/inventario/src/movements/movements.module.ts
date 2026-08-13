@@ -7,10 +7,11 @@ import { InventoryMovement, InventoryMovementSchema } from './entities/inventory
 
 @Module({
   imports: [
-    // ✅ Usar conexión por defecto (default)
-    MongooseModule.forFeature([
-      { name: InventoryMovement.name, schema: InventoryMovementSchema }
-    ]),
+    // ✅ CORREGIDO: Usar conexión 'default'
+    MongooseModule.forFeature(
+      [{ name: InventoryMovement.name, schema: InventoryMovementSchema }],
+      'default'
+    ),
   ],
   providers: [MovementsService],
   exports: [MovementsService],

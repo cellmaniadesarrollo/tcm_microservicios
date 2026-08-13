@@ -129,6 +129,7 @@ export class ProductsController {
   @ApiOperation({ summary: 'Obtener productos por ID de orden' })
   @ApiResponse({ status: HttpStatus.OK, type: [ProductResponseDto] })
   async findByOrderId(@Param('orderId') orderId: string) {
+    // ✅ Pasar como string, el service lo convertirá a número
     return await this.productsService.findByOrderId(orderId);
   }
 

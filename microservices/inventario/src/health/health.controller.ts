@@ -1,10 +1,13 @@
+// microservicio-inventario/src/health/health.controller.ts
+
 import { Controller, Get } from '@nestjs/common';
 import { InjectConnection } from '@nestjs/mongoose';
 import { Connection } from 'mongoose';
 
 @Controller('health')
 export class HealthController {
-  constructor(@InjectConnection() private readonly connection: Connection) {}
+  // ✅ Especificar la conexión 'default'
+  constructor(@InjectConnection('default') private readonly connection: Connection) {}
 
   @Get()
   check() {

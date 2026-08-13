@@ -16,31 +16,33 @@ import { AppService } from './app.service';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: process.env.NODE_ENV === 'production' 
+        ? '.env.production' 
+        : '.env',
     }),
     
-    // ✅ Conexión 1: PRODUCTOS (default - usa MONGODB_URI_NOTIFICATIONS)
+    // ✅ Conexión 1: PRODUCTOS (default - MongoDB local)
     MongooseModule.forRootAsync({
-      connectionName: 'default', // ✅ Usar connectionName en lugar de name
+      connectionName: 'default',
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        uri: configService.get<string>('MONGODB_URI', 'mongodb://localhost:27017/inventario'),
+        uri: configService.get<string>('MONGODB_URI'),
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        dbName: configService.get<string>('DB_NAME_INVENTARIO', 'inventarioTeamCellmania'),
+        dbName: configService.get<string>('DB_NAME_INVENTARIO'),
       }),
       inject: [ConfigService],
     }),
     
-    // ✅ Conexión 2: INCOMES (usa MongoDB Atlas de incomes)
+    // ✅ Conexión 2: INCOMES (atlas - MongoDB Atlas)
     MongooseModule.forRootAsync({
-      connectionName: 'atlas', // ✅ Usar connectionName en lugar de name
+      connectionName: 'atlas',
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
-        uri: configService.get<string>('MONGODB_ATLAS_URI', 'mongodb+srv://michacp:Oldtwesol980@cluster0.dkw96h2.mongodb.net/teamcellmaniaglobal1?retryWrites=true&w=majority&appName=Cluster0'),
+        uri: configService.get<string>('MONGODB_ATLAS_URI'),
         useNewUrlParser: true,
         useUnifiedTopology: true,
-        dbName: configService.get<string>('DB_NAME_ATLAS', 'teamcellmaniaglobal1'),
+        dbName: configService.get<string>('DB_NAME_ATLAS'),
       }),
       inject: [ConfigService],
     }),

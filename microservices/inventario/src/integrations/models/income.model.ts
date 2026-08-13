@@ -1,6 +1,6 @@
 // microservicio-inventario/src/integrations/models/income.model.ts
 
-import { Schema, Prop, SchemaFactory } from '@nestjs/mongoose';
+import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
 @Schema({ 
@@ -8,19 +8,19 @@ import { Document, Types } from 'mongoose';
   timestamps: true 
 })
 export class Income extends Document {
-  @Prop({ type: String })
+  @Prop({ type: String, default: '0' })
   unit_price: string;
 
-  @Prop({ type: String })
+  @Prop({ type: String, default: '0' })
   unit_sales_price: string;
 
-  @Prop({ type: String })
+  @Prop({ type: String, default: '' })
   observations: string;
 
-  @Prop({ type: Number, required: true })
+  @Prop({ type: Number, required: true, default: 1 })
   quantity: number;
 
-  @Prop({ type: Date, required: true })
+  @Prop({ type: Date, required: true, default: Date.now })
   date_income: Date;
 
   @Prop({ type: Types.ObjectId, required: true })
@@ -32,7 +32,7 @@ export class Income extends Document {
   @Prop({ type: Types.ObjectId, required: true })
   id_coduuid: Types.ObjectId;
 
-  @Prop({ type: String })
+  @Prop({ type: String, default: 'ordenes' })
   user_create: string;
 
   @Prop({ type: Types.ObjectId, required: true })
@@ -45,7 +45,8 @@ export class Income extends Document {
     type: {
       batchNumber: { type: Number },
       identifiers: { type: [String], default: [] }
-    }
+    },
+    default: {}
   })
   batch_snapshot: {
     batchNumber: number;
@@ -62,7 +63,8 @@ export class Income extends Document {
       name_model: { type: String },
       name_color: { type: String },
       name_quality: { type: String }
-    }
+    },
+    required: true
   })
   inventory_snapshot: {
     inventory_id: Types.ObjectId;

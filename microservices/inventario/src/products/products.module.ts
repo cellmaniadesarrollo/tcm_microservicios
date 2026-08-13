@@ -10,10 +10,11 @@ import { IncomeBackendModule } from '../integrations/income-backend.module';
 
 @Module({
   imports: [
-    // ✅ Usar conexión por defecto (default)
-    MongooseModule.forFeature([
-      { name: Product.name, schema: ProductSchema }
-    ]),
+    // ✅ CORREGIDO: Usar conexión 'default'
+    MongooseModule.forFeature(
+      [{ name: Product.name, schema: ProductSchema }],
+      'default'
+    ),
     HttpModule.register({
       timeout: 30000,
       maxRedirects: 5,

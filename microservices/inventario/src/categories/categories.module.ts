@@ -7,10 +7,11 @@ import { Category, CategorySchema } from './entities/category.entity';
 
 @Module({
   imports: [
-    // ✅ Usar conexión por defecto (default)
-    MongooseModule.forFeature([
-      { name: Category.name, schema: CategorySchema }
-    ]),
+    // ✅ CORREGIDO: Usar conexión 'default'
+    MongooseModule.forFeature(
+      [{ name: Category.name, schema: CategorySchema }],
+      'default'
+    ),
   ],
   providers: [CategoriesService],
   exports: [CategoriesService],
