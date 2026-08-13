@@ -23,7 +23,7 @@ export class ProductsService {
   private readonly logger = new Logger(ProductsService.name);
   
   constructor(
-    @InjectModel(Product.name) private productModel: Model<ProductDocument>,
+    @InjectModel(Product.name, 'default') private productModel: Model<ProductDocument>,
     @Inject(forwardRef(() => IncomeBackendService)) private incomeBackendService: IncomeBackendService,
   ) {}
 
@@ -48,10 +48,59 @@ export class ProductsService {
     return `${prefix}-${dateStr}-${sequence}-${random}`;
   }
 
-  // ✅ NUEVO: Generar SKU automático
-  private generateSku(): string {
-    const random = Math.floor(Math.random() * 10000000000000).toString().padStart(14, '0');
-    return `INS-UNI-TRA-INF${random}`;
+  /**
+   * Genera SKU con formato: {COMPONENTE(3 letras)}-{MARCA(3 letras)}-{COLOR(3 letras)}-{SECUENCIAL}
+   * Ejemplo: REP-SAM-NIL-INF00000000000070
+   */
+  private async generateSku(
+    name: string,
+    brand: string,
+    color: string
+  ): Promise<string> {
+    // ✅ Obtener 3 primeras letras de cada parte
+    const componentCode = this.getThreeLetters(name) || 'PRO';
+    const brandCode = this.getThreeLetters(brand) || 'GEN';
+    const colorCode = this.getThreeLetters(color) || 'SIN';
+    
+    // ✅ Generar secuencia usando timestamp o contador
+    const timestamp = Date.now().toString().slice(-8);
+    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const sequence = `${timestamp}${random}`;
+    
+    return `${componentCode}-${brandCode}-${colorCode}-INF${sequence}`;
+  }
+
+  /**
+   * Obtiene las primeras 3 letras de un string, limpiándolo primero
+   */
+  private getThreeLetters(value: string): string {
+    if (!value) return 'XXX';
+    
+    // Limpiar: mayúsculas, sin tildes, solo letras
+    const cleaned = value
+      .toUpperCase()
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '') // eliminar tildes
+      .replace(/[^A-Z]/g, ''); // solo letras
+    
+    // Tomar primeras 3 letras, si tiene menos, completar con X
+    if (cleaned.length >= 3) {
+      return cleaned.substring(0, 3);
+    } else {
+      return cleaned.padEnd(3, 'X');
+    }
+  }
+
+  private cleanString(value: string): string {
+    if (!value) return '';
+    return value
+      .toUpperCase()
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Z0-9]/g, '')
+      .substring(0, 8);
   }
 
   private updateLowStockStatus(product: ProductDocument): void {
@@ -61,7 +110,7 @@ export class ProductsService {
     }
   }
 
-  // ✅ MODIFICADO: Agregar SKU
+  // ✅ CREAR PRODUCTO CON SKU GENERADO
   async create(createProductDto: CreateProductDto): Promise<ProductDocument> {
     // Verificar duplicados
     const existing = await this.productModel.findOne({
@@ -78,13 +127,17 @@ export class ProductsService {
 
     const code = createProductDto.code || (await this.generateProductCode());
     
-    // ✅ Si no tiene SKU, generarlo automáticamente
-    const sku = createProductDto.sku || this.generateSku();
+    // ✅ Generar SKU con el formato correcto
+    const sku = createProductDto.sku || await this.generateSku(
+      createProductDto.name || 'PRODUCTO',
+      createProductDto.brand || 'GENERICO',
+      createProductDto.color || 'SINCOLOR'
+    );
 
     const product = new this.productModel({
       ...createProductDto,
       code,
-      sku, // ✅ Asegurar SKU siempre tenga valor
+      sku,
       createdAt: new Date(),
       updatedAt: new Date(),
       statusHistory: [
@@ -126,7 +179,7 @@ export class ProductsService {
         { brand: { $regex: filters.search, $options: 'i' } },
         { model: { $regex: filters.search, $options: 'i' } },
         { code: { $regex: filters.search, $options: 'i' } },
-        { sku: { $regex: filters.search, $options: 'i' } }, // ✅ Agregar búsqueda por SKU
+        { sku: { $regex: filters.search, $options: 'i' } },
       ];
     }
 
@@ -433,6 +486,13 @@ export class ProductsService {
       const results = [];
       
       for (const component of data.components) {
+        // ✅ Generar SKU con el formato correcto
+        const componentName = component.name || 'PRODUCTO';
+        const brand = component.brand || data.deviceName?.split(' ')[0] || 'GENERICO';
+        const color = component.color || data.deviceColor || 'SINCOLOR';
+        
+        const sku = await this.generateSku(componentName, brand, color);
+        
         const productData: CreateProductDto = {
           name: component.name,
           brand: component.brand || data.deviceName?.split(' ')[0] || 'Genérico',
@@ -451,6 +511,7 @@ export class ProductsService {
           createdById: data.createdById,
           createdByName: data.createdByName,
           supplierName: data.customerName,
+          sku: sku, // ✅ Pasar SKU generado
           metadata: {
             fromOrder: true,
             orderId: data.orderId,
@@ -464,9 +525,9 @@ export class ProductsService {
 
         const product = await this.create(productData);
         
-        this.logger.log(`📤 [createFromOrder] Producto creado: ${product.code}, llamando a syncProduct...`);
+        this.logger.log(`📤 [createFromOrder] Producto creado: ${product.code} - SKU: ${product.sku}, llamando a syncProduct...`);
         
-        // ✅ Sincronizar con incomes
+        // ✅ Sincronizar con incomes (pasar el SKU del producto)
         await this.incomeBackendService.syncProduct(product, data, component);
         
         this.logger.log(`✅ [createFromOrder] syncProduct completado para ${product.code}`);
@@ -475,7 +536,7 @@ export class ProductsService {
           component: component.name,
           productId: product._id,
           code: product.code,
-          sku: product.sku, // ✅ Incluir SKU en la respuesta
+          sku: product.sku,
         });
       }
 
@@ -505,9 +566,31 @@ export class ProductsService {
   }
 
   async findByOrderId(orderId: string): Promise<ProductDocument[]> {
+    const orderIdNumber = parseInt(orderId, 10);
+    
+    this.logger.log(`🔍 Buscando productos por orderId: ${orderId} (como número: ${orderIdNumber})`);
+    
     return this.productModel.find({
-      'metadata.orderId': orderId,
+      'metadata.orderId': orderIdNumber,
       isDeleted: false
     }).exec();
+  }
+
+  async updateSku(productId: string, newSku: string): Promise<ProductDocument> {
+    try {
+      const product = await this.findOne(productId);
+      if (!product) {
+        throw new NotFoundException(`Producto con ID ${productId} no encontrado`);
+      }
+      
+      this.logger.log(`🔄 Actualizando SKU de ${product.sku} a ${newSku}`);
+      product.sku = newSku;
+      product.updatedAt = new Date();
+      
+      return await product.save();
+    } catch (error: any) {
+      this.logger.error(`❌ Error updateSku: ${error.message}`);
+      throw error;
+    }
   }
 }

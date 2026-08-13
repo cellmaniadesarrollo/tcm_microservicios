@@ -339,6 +339,8 @@ export class InventarioService {
 
   async getInventoryByOrder(orderId: string) {
     try {
+      // ✅ Asegurar que el orderId se pasa correctamente
+      this.logger.log(`📤 [Gateway] getInventoryByOrder: ${orderId}`);
       const response = await firstValueFrom(
         this.httpService.get(`${this.inventarioUrl}/api/products/by-order/${orderId}`)
       );
