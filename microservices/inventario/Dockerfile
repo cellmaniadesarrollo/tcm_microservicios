@@ -3,7 +3,6 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-# ✅ Usar npm install en lugar de npm ci (no requiere package-lock.json)
 RUN npm install --legacy-peer-deps
 
 COPY . .
@@ -13,7 +12,6 @@ RUN npm run build
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-# ✅ Usar npm install --omit=dev en lugar de npm ci
 RUN npm install --omit=dev --legacy-peer-deps
 
 # ETAPA 3: Runtime final
@@ -26,5 +24,5 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package*.json ./
 COPY --from=deps /app/node_modules ./node_modules   
 
-EXPOSE 3030
+EXPOSE 3030 3005
 CMD ["node", "dist/main"]
