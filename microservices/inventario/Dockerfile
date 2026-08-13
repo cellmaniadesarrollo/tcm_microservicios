@@ -1,28 +1,19 @@
-# ETAPA 1: Compilación
-FROM node:20-alpine AS builder
+FROM node:20-alpine
+
 WORKDIR /app
 
+# Copiar archivos de configuración
 COPY package*.json ./
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
+
+# Instalar dependencias
 RUN npm install --legacy-peer-deps
 
-COPY . .
-RUN npm run build
-
-# ETAPA 2: Producción - solo deps de prod
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm install --omit=dev --legacy-peer-deps
-
-# ETAPA 3: Runtime final
-FROM node:20-alpine
-WORKDIR /app
-
-ENV NODE_ENV=production
-
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
-COPY --from=deps /app/node_modules ./node_modules   
+# Copiar código fuente
+COPY src ./src
 
 EXPOSE 3030 3005
-CMD ["node", "dist/main"]
+
+# Usar el mismo comando que en desarrollo pero con NODE_ENV=production
+CMD ["npm", "run", "start:prod"]
