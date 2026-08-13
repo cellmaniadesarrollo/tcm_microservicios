@@ -464,54 +464,59 @@ services:
       - "3030:3030"
       - "3016:3005"
     environment:
+      # ─── Configuración general ───
       - NODE_ENV=production
-      - INTERNAL_SECRET=${INTERNAL_SECRET:-Cellmania13}
-      - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET:-Cellmania13}
+      - PORT=3030
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET}
       
-      # ✅ MongoDB para PRODUCTOS (misma que notifications)
-      - DB_NAME_INVENTARIO=${DB_NAME_NOTIFICATIONS}
-      - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
+      # ─── MongoDB CONEXIÓN 1: PRODUCTOS ───
+      - DB_NAME_INVENTARIO=${DB_NAME_INVENTARIO}
+      - MONGODB_URI=${MONGODB_URI_INVENTARIO}
       
-      # ✅ MongoDB ATLAS para INCOMES (la de incomes)
-      - MONGODB_ATLAS_URI=mongodb+srv://michacp:Oldtwesol980@cluster0.dkw96h2.mongodb.net/teamcellmaniaglobal1?retryWrites=true&w=majority&appName=Cluster0
-      - DB_NAME_ATLAS=teamcellmaniaglobal1
+      # ─── MongoDB CONEXIÓN 2: INCOMES (Atlas) ───
+      - MONGODB_ATLAS_URI=${MONGODB_ATLAS_URI}
+      - DB_NAME_ATLAS=${DB_NAME_ATLAS}
       
-      # Redis
+      # ─── Redis ───
       - REDIS_HOST=redis-realtime
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - REDIS_DB=0
       
-      # RabbitMQ
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      # ─── RabbitMQ ───
+      - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
       
-      # Kafka
-      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS:-kafka:9092}
+      # ─── Kafka ───
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
       
-      # JWT
-      - JWT_SECRET=${JWT_SECRET:-miclavesecretaultrasegura}
-      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-1h}
+      # ─── JWT ───
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
       
-      # URLs de servicios
-      - ORDER_SERVICE_URL=http://orders:3001
-      - NOTIFICATION_SERVICE_URL=http://notifications:3010
-      - USER_SERVICE_URL=http://users:3001
-      - PRODUCT_SERVICE_URL=http://products:3020
+      # ─── URLs de servicios ───
+      - ORDER_SERVICE_URL=${ORDER_SERVICE_URL:-http://orders:3001}
+      - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL:-http://notifications:3010}
+      - USER_SERVICE_URL=${USER_SERVICE_URL:-http://users:3001}
+      - PRODUCT_SERVICE_URL=${PRODUCT_SERVICE_URL:-http://products:3020}
       
-      # Configuración general
-      - CORS_ORIGIN=${FRONTEND_URL:-http://localhost:4200}
+      # ─── Configuración de la aplicación ───
+      - CORS_ORIGIN=${CORS_ORIGIN}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - SERVICE_NAME=INVENTARIO_SERVICE
       - SERVICE_PORT=3030
       - SERVICE_RPC_PORT=3005
       
-      # Backend URL
-      - INCOME_BACKEND_URL=https://host.docker.internal:4004
-      - INVENTORY_BACKEND_URL=https://host.docker.internal:4004
+      # ─── URLs de backend ───
+      - INCOME_BACKEND_URL=${INCOME_BACKEND_URL}
+      - INVENTORY_BACKEND_URL=${INVENTORY_BACKEND_URL}
+    
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    
     networks:
       - backend
+    
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -519,6 +524,7 @@ services:
         condition: service_healthy
       init-kafka:
         condition: service_completed_successfully
+    
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3030/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s

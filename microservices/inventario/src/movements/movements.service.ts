@@ -1,3 +1,5 @@
+// microservicio-inventario/src/movements/movements.service.ts
+
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -6,7 +8,8 @@ import { InventoryMovement, InventoryMovementDocument } from './entities/invento
 @Injectable()
 export class MovementsService {
   constructor(
-    @InjectModel(InventoryMovement.name) 
+    // ✅ Agregar 'default' para usar la conexión correcta
+    @InjectModel(InventoryMovement.name, 'default') 
     private movementModel: Model<InventoryMovementDocument>,
   ) {}
 
