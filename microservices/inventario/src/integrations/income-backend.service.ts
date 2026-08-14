@@ -20,6 +20,9 @@ import { CounterBatch } from './models/counter-batch.model';
 import { Counters } from './models/counters.model';
 import { DocumentNumberIncome } from './models/document-number-income.model';
 import { InventoryFlowNameItem } from './models/inventory-flow-name-item.model';
+import { Color } from './models/color.model';
+import { Brand } from './models/brand.model';
+import { TypeInventoryFlow } from './models/type-inventory-flow.model';
 
 @Injectable()
 export class IncomeBackendService {
@@ -34,6 +37,9 @@ export class IncomeBackendService {
     @InjectModel(Counters.name, 'atlas') private countersModel: Model<Counters>,
     @InjectModel(DocumentNumberIncome.name, 'atlas') private documentNumberIncomeModel: Model<DocumentNumberIncome>,
     @InjectModel(InventoryFlowNameItem.name, 'atlas') private inventoryFlowNameItemModel: Model<InventoryFlowNameItem>,
+    @InjectModel(Color.name, 'atlas') private colorModel: Model<Color>,
+    @InjectModel(Brand.name, 'atlas') private brandModel: Model<Brand>,
+    @InjectModel(TypeInventoryFlow.name, 'atlas') private typeInventoryFlowModel: Model<TypeInventoryFlow>,
     @Inject(forwardRef(() => ProductsService)) private productsService: ProductsService,
     private configService: ConfigService,
     private batchCounterHelper: BatchCounterHelper,
@@ -58,6 +64,37 @@ export class IncomeBackendService {
       return new Types.ObjectId(value);
     }
     return defaultValue || new Types.ObjectId();
+  }
+
+  // ============================================
+  // ✅ HELPER - Obtener nombres por ID
+  // ============================================
+
+  private async getTypeNameById(typeId: string): Promise<string> {
+    try {
+      const type = await this.typeInventoryFlowModel.findById(typeId).lean();
+      return type?.type_inventoryflow || 'PRODUCTO';
+    } catch {
+      return 'PRODUCTO';
+    }
+  }
+
+  private async getBrandNameById(brandId: string): Promise<string> {
+    try {
+      const brand = await this.brandModel.findById(brandId).lean();
+      return brand?.name_brands || 'GENERICO';
+    } catch {
+      return 'GENERICO';
+    }
+  }
+
+  private async getColorNameById(colorId: string): Promise<string> {
+    try {
+      const color = await this.colorModel.findById(colorId).lean();
+      return color?.color_name || 'SINCOLOR';
+    } catch {
+      return 'SINCOLOR';
+    }
   }
 
   // ============================================
@@ -101,7 +138,7 @@ export class IncomeBackendService {
   // ✅ HELPER - Crear o obtener InventoryFlow
   // ============================================
 
-  private async getOrCreateInventoryFlow(product: any, orderData: any): Promise<{ inventoryFlowId: Types.ObjectId; sku: string }> {
+  private async getOrCreateInventoryFlow(product: any, orderData: any): Promise<{ inventoryFlowId: Types.ObjectId; sku: string; upc: string }> {
     try {
       // 1️⃣ Buscar por deviceId
       if (orderData?.deviceId) {
@@ -109,59 +146,58 @@ export class IncomeBackendService {
         if (this.isValidObjectId(deviceIdStr)) {
           const flow = await this.inventoryFlowModel.findById(deviceIdStr).lean();
           if (flow) {
-            // ✅ VERIFICAR QUE EL NOMBRE COINCIDA
             const productName = product?.name?.toUpperCase().trim() || '';
             const flowName = flow.name_nameitems?.toUpperCase().trim() || '';
             
+            // ✅ Verificar que el nombre coincida (sin marca porque el modelo no tiene name_brand)
             if (productName && flowName && productName !== flowName) {
               this.logger.warn(`⚠️ El InventoryFlow encontrado por deviceId (${flowName}) NO coincide con el producto (${productName})`);
               this.logger.warn(`⚠️ Se creará un nuevo InventoryFlow para: ${productName}`);
             } else {
               this.logger.log(`✅ InventoryFlow encontrado por deviceId: ${flow._id}, SKU: ${flow.sku}`);
-              return { inventoryFlowId: flow._id, sku: flow.sku };
+              return { inventoryFlowId: flow._id, sku: flow.sku, upc: flow.upc || '' };
             }
           }
         }
       }
       
-      // 2️⃣ Buscar por nombre - SOLO SI EL NOMBRE COINCIDE EXACTAMENTE
+      // 2️⃣ Buscar por nombre exacto
       if (product?.name) {
         const productName = product.name.toUpperCase().trim();
-        
         const flow = await this.inventoryFlowModel.findOne({ 
           name_nameitems: productName 
         }).lean();
         
         if (flow) {
           this.logger.log(`✅ InventoryFlow encontrado por nombre exacto: ${flow._id}, SKU: ${flow.sku}`);
-          // ✅ Si encuentra por nombre exacto, devolver este
-          return { inventoryFlowId: flow._id, sku: flow.sku };
+          return { inventoryFlowId: flow._id, sku: flow.sku, upc: flow.upc || '' };
         }
       }
       
-      // 3️⃣ Buscar por SKU (usar el SKU del Product si existe)
+      // 3️⃣ Buscar por SKU
       if (product?.sku) {
         const flow = await this.inventoryFlowModel.findOne({ sku: product.sku }).lean();
         if (flow) {
           this.logger.log(`✅ InventoryFlow encontrado por SKU: ${flow._id}, SKU: ${flow.sku}`);
-          return { inventoryFlowId: flow._id, sku: flow.sku };
+          return { inventoryFlowId: flow._id, sku: flow.sku, upc: flow.upc || '' };
         }
       }
       
       // 4️⃣ No existe - CREAR NUEVO INVENTORYFLOW
       const nameItemId = await this.getOrCreateInventoryFlowNameItem(product?.name || 'Producto');
       
-      // ✅ Generar SKU con el formato correcto
-      const sku = await this.skuGeneratorHelper.generateSku(
+      // ✅ GENERAR SKU Y UPC CON EL MISMO NÚMERO SECUENCIAL
+      const { sku, upc } = await this.skuGeneratorHelper.generateSku(
         product?.name || 'PRODUCTO',
         product?.brand || orderData?.brand || 'GENERICO',
-        product?.color || orderData?.color || 'SINCOLOR'
+        product?.color || orderData?.color || 'SINCOLOR',
+        'INVENTORYFLOW'
       );
       
-      this.logger.log(`📝 Creando nuevo InventoryFlow para: ${product?.name || 'Producto'} con SKU: ${sku}`);
+      this.logger.log(`📝 Creando nuevo InventoryFlow para: ${product?.name || 'Producto'} con SKU: ${sku}, UPC: ${upc}`);
       
       const newFlow = new this.inventoryFlowModel({
-        upc: product?.upc || '00000000000000',
+        upc: upc,
         sku: sku,
         id_name_items: nameItemId,
         id_model: new Types.ObjectId('67f94785d875ff138dfcb14d'),
@@ -182,8 +218,8 @@ export class IncomeBackendService {
       });
 
       const saved = await newFlow.save();
-      this.logger.log(`✅ InventoryFlow creado: ${saved._id} - ${saved.name_nameitems} - SKU: ${saved.sku}`);
-      return { inventoryFlowId: saved._id, sku: saved.sku };
+      this.logger.log(`✅ InventoryFlow creado: ${saved._id} - ${saved.name_nameitems} - SKU: ${saved.sku} - UPC: ${saved.upc}`);
+      return { inventoryFlowId: saved._id, sku: saved.sku, upc: saved.upc };
 
     } catch (error: any) {
       this.logger.error(`❌ Error creando InventoryFlow: ${error.message}`);
@@ -200,8 +236,8 @@ export class IncomeBackendService {
       this.logger.log(`📤 Sincronizando producto: ${product?.name || 'N/A'}`);
       this.logger.log(`📦 SKU actual del Product: ${product?.sku || 'NO SKU'}`);
 
-      // ✅ Obtener InventoryFlow (y su SKU)
-      const { inventoryFlowId, sku: inventorySku } = await this.getOrCreateInventoryFlow(product, orderData);
+      // ✅ Obtener InventoryFlow (y su SKU y UPC)
+      const { inventoryFlowId, sku: inventorySku, upc: inventoryUpc } = await this.getOrCreateInventoryFlow(product, orderData);
 
       if (!inventoryFlowId) {
         throw new Error(`No se pudo obtener o crear InventoryFlow para: ${product?.name}`);
@@ -215,6 +251,14 @@ export class IncomeBackendService {
         this.logger.log(`✅ SKU del Product actualizado a: ${inventorySku}`);
       }
 
+      // ✅ ACTUALIZAR EL UPC DEL PRODUCT CON EL DEL INVENTORYFLOW
+      if (product?.upc !== inventoryUpc) {
+        this.logger.log(`🔄 Actualizando UPC del Product: ${product?.upc} -> ${inventoryUpc}`);
+        await this.productsService.updateUpc(product._id, inventoryUpc);
+        product.upc = inventoryUpc;
+        this.logger.log(`✅ UPC del Product actualizado a: ${inventoryUpc}`);
+      }
+
       // ✅ Validar customerId
       let supplierId: Types.ObjectId;
       if (orderData?.customerId && this.isValidObjectId(orderData.customerId)) {
@@ -224,7 +268,7 @@ export class IncomeBackendService {
         this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
       }
 
-      // ✅ Construir payload con el SKU correcto
+      // ✅ Construir payload con el SKU y UPC correctos
       const payload = {
         unit_price: component?.purchasePrice?.toString() || '0',
         unit_sales_price: component?.salePrice?.toString() || '0',
@@ -237,8 +281,8 @@ export class IncomeBackendService {
         user_create: orderData?.createdByName || orderData?.createdById || 'ordenes',
         inventory_id: orderData?.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
         inventory_name: orderData?.inventory_name || 'INVENTORYFLOW',
-        sku: inventorySku, // ✅ USAR EL SKU DEL INVENTORYFLOW
-        upc: product?.upc || '',
+        sku: inventorySku,
+        upc: inventoryUpc,
         name_item: product?.name || '',
         name_model: product?.model || '',
         name_color: product?.color || '',
@@ -256,18 +300,19 @@ export class IncomeBackendService {
         observaciones: component?.observations || component?.description || '',
       };
 
-      this.logger.debug(`[syncProduct] id_item: ${payload.id_item}, sku: ${payload.sku}`);
+      this.logger.debug(`[syncProduct] id_item: ${payload.id_item}, sku: ${payload.sku}, upc: ${payload.upc}`);
 
       // ✅ Guardar el income
       const result = await this.saveIncomeFromOrder(payload);
 
-      this.logger.log(`✅ Producto ${product?.name || 'N/A'} sincronizado en incomes - SKU: ${inventorySku}`);
+      this.logger.log(`✅ Producto ${product?.name || 'N/A'} sincronizado en incomes - SKU: ${inventorySku} - UPC: ${inventoryUpc}`);
 
       return {
         success: true,
         incomeId: result.incomeId,
         batchId: result.batchId,
         sku: inventorySku,
+        upc: inventoryUpc,
         batchNumber: result.batchNumber,
         unitPrice: payload.unit_sales_price,
         quantity: payload.quantity
@@ -276,6 +321,34 @@ export class IncomeBackendService {
     } catch (error: any) {
       this.logger.error(`❌ Error sincronizando producto: ${error.message}`);
       this.logger.error(`📄 Stack: ${error.stack}`);
+      throw error;
+    }
+  }
+
+  // ============================================
+  // ✅ GENERATE SKU - CORREGIDO
+  // ============================================
+
+  async generateSku(
+    typeId: string,
+    brandId: string,
+    colorId: string,
+    inventoryName: string = 'INVENTORYFLOW'
+  ): Promise<{ sku: string; upc: string }> {
+    try {
+      // ✅ Obtener los NOMBRES de los IDs
+      const typeName = await this.getTypeNameById(typeId);
+      const brandName = await this.getBrandNameById(brandId);
+      const colorName = await this.getColorNameById(colorId);
+      
+      return await this.skuGeneratorHelper.generateSku(
+        typeName || 'PRODUCTO',
+        brandName || 'GENERICO',
+        colorName || 'SINCOLOR',
+        inventoryName
+      );
+    } catch (error: any) {
+      this.logger.error(`❌ Error generateSku: ${error.message}`);
       throw error;
     }
   }
@@ -387,6 +460,7 @@ export class IncomeBackendService {
         incomeId: saveincomess._id,
         batchId: batchResult?.batchId || null,
         sku: item?.sku || data.sku,
+        upc: item?.upc || data.upc,
         batchNumber: batchResult?.batchNumber || null,
         unitPrice: data.precioventa || data.unit_sales_price || '0',
         quantity: data.cantidad || data.quantity || 1
@@ -782,6 +856,39 @@ export class IncomeBackendService {
   // ============================================
   // ✅ GETTERS
   // ============================================
+
+  async getTypes(): Promise<any[]> {
+    try {
+      return await this.typeInventoryFlowModel.find()
+        .sort({ type_inventoryflow: 1 })
+        .lean();
+    } catch (error: any) {
+      this.logger.error(`❌ Error getTypes: ${error.message}`);
+      return [];
+    }
+  }
+
+  async getBrands(): Promise<any[]> {
+    try {
+      return await this.brandModel.find()
+        .sort({ name_brands: 1 })
+        .lean();
+    } catch (error: any) {
+      this.logger.error(`❌ Error getBrands: ${error.message}`);
+      return [];
+    }
+  }
+
+  async getColors(): Promise<any[]> {
+    try {
+      return await this.colorModel.find()
+        .sort({ color_name: 1 })
+        .lean();
+    } catch (error: any) {
+      this.logger.error(`❌ Error getColors: ${error.message}`);
+      return [];
+    }
+  }
 
   async getIncomeById(id: string): Promise<any> {
     try {

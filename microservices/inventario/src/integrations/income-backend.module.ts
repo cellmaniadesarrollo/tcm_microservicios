@@ -14,9 +14,13 @@ import { Batch, BatchSchema } from './models/batch.model';
 import { BranchBatchStock, BranchBatchStockSchema } from './models/branch-batch-stock.model';
 import { InventoryFlow, InventoryFlowSchema } from './models/inventory-flow.model';
 import { CounterBatch, CounterBatchSchema } from './models/counter-batch.model';
-import { Counters, CountersSchema } from './models/counters.model'; // ✅ Importar
+import { Counters, CountersSchema } from './models/counters.model';
 import { DocumentNumberIncome, DocumentNumberIncomeSchema } from './models/document-number-income.model';
 import { InventoryFlowNameItem, InventoryFlowNameItemSchema } from './models/inventory-flow-name-item.model';
+// ✅ NUEVOS MODELOS
+import { Color, ColorSchema } from './models/color.model';
+import { Brand, BrandSchema } from './models/brand.model';
+import { TypeInventoryFlow, TypeInventoryFlowSchema } from './models/type-inventory-flow.model';
 
 @Module({
   imports: [
@@ -27,9 +31,13 @@ import { InventoryFlowNameItem, InventoryFlowNameItemSchema } from './models/inv
         { name: BranchBatchStock.name, schema: BranchBatchStockSchema },
         { name: InventoryFlow.name, schema: InventoryFlowSchema },
         { name: CounterBatch.name, schema: CounterBatchSchema },
-        { name: Counters.name, schema: CountersSchema }, // ✅ AGREGAR Counters
+        { name: Counters.name, schema: CountersSchema },
         { name: DocumentNumberIncome.name, schema: DocumentNumberIncomeSchema },
         { name: InventoryFlowNameItem.name, schema: InventoryFlowNameItemSchema },
+        // ✅ NUEVOS MODELOS
+        { name: Color.name, schema: ColorSchema },
+        { name: Brand.name, schema: BrandSchema },
+        { name: TypeInventoryFlow.name, schema: TypeInventoryFlowSchema },
       ],
       'atlas'
     ),

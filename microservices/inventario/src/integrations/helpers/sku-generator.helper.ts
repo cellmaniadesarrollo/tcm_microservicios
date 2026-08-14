@@ -13,28 +13,36 @@ export class SkuGeneratorHelper {
   ) {}
 
   /**
-   * Genera SKU con formato: {COMPONENTE(3 letras)}-{MARCA(3 letras)}-{COLOR(3 letras)}-INF{secuencia}
-   * Ejemplo: REP-SAM-NIL-INF00000000000070
+   * Genera SKU y UPC con el mismo número secuencial
+   * SKU: {COMPONENTE(3 letras)}-{MARCA(3 letras)}-{COLOR(3 letras)}-INF{secuencia}
+   * UPC: {secuencia} (14 dígitos)
+   * Ejemplo:
+   *   SKU: ACC-SAM-BLA-INF00000000003531
+   *   UPC: 00000000003531
    */
   async generateSku(
     componentName: string,
     brand: string,
-    color: string
-  ): Promise<string> {
+    color: string,
+    inventoryName: string = 'INVENTORYFLOW'
+  ): Promise<{ sku: string; upc: string }> { // ✅ RETORNA OBJETO CON SKU Y UPC
     const componentCode = this.getThreeLetters(componentName) || 'PRO';
     const brandCode = this.getThreeLetters(brand) || 'GEN';
     const colorCode = this.getThreeLetters(color) || 'SIN';
     
-    // Obtener secuencia del contador
-    const counter = await this.countersModel.findByIdAndUpdate(
-      'sku_sequence',
+    // ✅ Obtener secuencia del contador
+    const counter = await this.countersModel.findOneAndUpdate(
+      { schemaname: inventoryName },
       { $inc: { sequence_value: 1 } },
       { new: true, upsert: true }
     );
     
     const sequence = String(counter.sequence_value).padStart(14, '0');
     
-    return `${componentCode}-${brandCode}-${colorCode}-INF${sequence}`;
+    return {
+      sku: `${componentCode}-${brandCode}-${colorCode}-INF${sequence}`,
+      upc: sequence // ✅ UPC = mismo número secuencial
+    };
   }
 
   /**

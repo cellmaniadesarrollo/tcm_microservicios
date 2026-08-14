@@ -7,10 +7,10 @@ import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { Product, ProductSchema } from './entities/product.entity';
 import { IncomeBackendModule } from '../integrations/income-backend.module';
+import { SharedModule } from '../shared/shared.module'; // ✅ IMPORTAR
 
 @Module({
   imports: [
-    // ✅ CORREGIDO: Usar conexión 'default'
     MongooseModule.forFeature(
       [{ name: Product.name, schema: ProductSchema }],
       'default'
@@ -20,9 +20,13 @@ import { IncomeBackendModule } from '../integrations/income-backend.module';
       maxRedirects: 5,
     }),
     forwardRef(() => IncomeBackendModule),
+    SharedModule, // ✅ AGREGAR
   ],
   controllers: [ProductsController],
-  providers: [ProductsService],
+  providers: [
+    ProductsService,
+    // ❌ ELIMINAR SkuGeneratorHelper de providers (viene de SharedModule)
+  ],
   exports: [ProductsService],
 })
 export class ProductsModule {}

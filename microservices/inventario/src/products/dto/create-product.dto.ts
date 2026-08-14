@@ -26,7 +26,6 @@ export class CreateProductDto {
   })
   code?: string;
 
-  // ✅ AGREGAR SKU
   @ApiPropertyOptional({
     description: 'SKU único del producto (opcional, se genera automáticamente)',
     example: 'INS-UNI-TRA-INF00000000003230',
@@ -34,6 +33,18 @@ export class CreateProductDto {
   @IsOptional()
   @IsString()
   sku?: string;
+
+  // ✅ AGREGAR UPC
+  @ApiPropertyOptional({
+    description: 'UPC del producto (opcional, se genera automáticamente)',
+    example: '00000000003230',
+  })
+  @IsOptional()
+  @IsString()
+  @Matches(/^[0-9]{14}$/, {
+    message: 'El UPC debe tener exactamente 14 dígitos numéricos',
+  })
+  upc?: string;
 
   @ApiProperty({ description: 'Nombre del producto', example: 'iPhone 13 Pro Max' })
   @IsString()
