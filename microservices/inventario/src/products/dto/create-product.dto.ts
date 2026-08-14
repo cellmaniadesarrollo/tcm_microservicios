@@ -12,7 +12,8 @@ import {
   Matches,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ProductCondition, ProductStatus, ProductQuality } from '../entities/product.entity';
+import { ProductCondition, ProductStatus } from '../entities/product.entity';
+// ❌ ELIMINAR ProductQuality
 
 export class CreateProductDto {
   @ApiPropertyOptional({
@@ -34,7 +35,6 @@ export class CreateProductDto {
   @IsString()
   sku?: string;
 
-  // ✅ AGREGAR UPC
   @ApiPropertyOptional({
     description: 'UPC del producto (opcional, se genera automáticamente)',
     example: '00000000003230',
@@ -66,14 +66,15 @@ export class CreateProductDto {
   @IsString()
   color!: string;
 
+  // ✅ CAMBIADO: String sin enum
   @ApiPropertyOptional({
     description: 'Calidad del producto',
-    enum: ProductQuality,
-    default: ProductQuality.B,
+    example: 'B',
+    default: 'B',
   })
   @IsOptional()
-  @IsEnum(ProductQuality)
-  quality?: ProductQuality;
+  @IsString()
+  quality?: string;
 
   @ApiPropertyOptional({
     description: 'Condición del producto',

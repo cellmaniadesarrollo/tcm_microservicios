@@ -53,25 +53,6 @@ export class ProductsService {
   }
 
   /**
-   * ✅ GENERA SKU Y UPC USANDO EL CONTADOR SECUENCIAL
-   * Retorna { sku: string; upc: string }
-   * Formato SKU: {COMPONENTE(3 letras)}-{MARCA(3 letras)}-{COLOR(3 letras)}-INF{secuencia}
-   * Ejemplo: { sku: 'CAM-XIA-BLA-INF00000000003536', upc: '00000000003536' }
-   */
-  private async generateSku(
-    name: string,
-    brand: string,
-    color: string
-  ): Promise<{ sku: string; upc: string }> {
-    return this.skuGeneratorHelper.generateSku(
-      name || 'PRODUCTO',
-      brand || 'GENERICO',
-      color || 'SINCOLOR',
-      'INVENTORYFLOW'
-    );
-  }
-
-  /**
    * Obtiene las primeras 3 letras de un string, limpiándolo primero
    */
   private getThreeLetters(value: string): string {
@@ -109,6 +90,7 @@ export class ProductsService {
     }
   }
 
+  // ✅ CREAR PRODUCTO - SIN GENERAR SKU (se genera en IncomeBackendService)
   async create(createProductDto: CreateProductDto): Promise<ProductDocument> {
     // Verificar duplicados
     const existing = await this.productModel.findOne({
@@ -124,19 +106,19 @@ export class ProductsService {
     }
 
     const code = createProductDto.code || (await this.generateProductCode());
-    
-    // ✅ Desestructurar SKU y UPC
-    const { sku, upc } = await this.generateSku(
-      createProductDto.name || 'PRODUCTO',
-      createProductDto.brand || 'GENERICO',
-      createProductDto.color || 'SINCOLOR'
-    );
+
+    // ❌ NO GENERAR SKU Y UPC AQUÍ
+    // El SKU y UPC se generarán en IncomeBackendService.syncProduct()
+
+    // ✅ USAR EL VALOR DE QUALITY DIRECTAMENTE (sin mapeo)
+    const quality = createProductDto.quality || 'B';
 
     const product = new this.productModel({
       ...createProductDto,
       code,
-      sku,
-      upc, // ✅ GUARDAR UPC
+      quality, // ✅ Guardar el valor tal cual
+      // ❌ NO INCLUIR sku
+      // ❌ NO INCLUIR upc
       createdAt: new Date(),
       updatedAt: new Date(),
       statusHistory: [
@@ -179,7 +161,7 @@ export class ProductsService {
         { model: { $regex: filters.search, $options: 'i' } },
         { code: { $regex: filters.search, $options: 'i' } },
         { sku: { $regex: filters.search, $options: 'i' } },
-        { upc: { $regex: filters.search, $options: 'i' } }, // ✅ Búsqueda por UPC
+        { upc: { $regex: filters.search, $options: 'i' } },
       ];
     }
 
@@ -477,7 +459,7 @@ export class ProductsService {
   }
 
   // ============================================
-  // ✅ CREATE FROM ORDER - CORREGIDO
+  // ✅ CREATE FROM ORDER - SIN GENERAR SKU
   // ============================================
   async createFromOrder(data: any): Promise<any> {
     try {
@@ -486,12 +468,10 @@ export class ProductsService {
       const results = [];
       
       for (const component of data.components) {
-        const componentName = component.name || 'PRODUCTO';
-        const brand = component.brand || data.deviceName?.split(' ')[0] || 'GENERICO';
-        const color = component.color || data.deviceColor || 'SINCOLOR';
+        // ❌ NO GENERAR SKU Y UPC AQUÍ
         
-        // ✅ Desestructurar SKU y UPC
-        const { sku, upc } = await this.generateSku(componentName, brand, color);
+        // ✅ USAR EL VALOR DE QUALITY DIRECTAMENTE
+        const quality = component.quality || 'B';
         
         const productData: CreateProductDto = {
           name: component.name,
@@ -499,7 +479,7 @@ export class ProductsService {
           model: component.model || data.deviceName || 'Dispositivo',
           type: component.type || (data.type === 'COMPLETO' ? 'DISPOSITIVO' : 'PARTE'),
           color: component.color || data.deviceColor || 'No especificado',
-          quality: (component.quality || 'B') as any,
+          quality: quality, // ✅ Guardar el valor tal cual
           condition: (component.condition || 'NUEVO') as any,
           status: ProductStatus.ACTIVO,
           observations: component.description || `Ingreso desde orden ${data.orderNumber}`,
@@ -511,8 +491,8 @@ export class ProductsService {
           createdById: data.createdById,
           createdByName: data.createdByName,
           supplierName: data.customerName,
-          sku: sku,
-          upc: upc, // ✅ GUARDAR UPC
+          // ❌ NO INCLUIR sku
+          // ❌ NO INCLUIR upc
           metadata: {
             fromOrder: true,
             orderId: data.orderId,
@@ -526,18 +506,19 @@ export class ProductsService {
 
         const product = await this.create(productData);
         
-        this.logger.log(`📤 [createFromOrder] Producto creado: ${product.code} - SKU: ${product.sku} - UPC: ${product.upc}, llamando a syncProduct...`);
+        this.logger.log(`📤 [createFromOrder] Producto creado: ${product.code}, llamando a syncProduct...`);
         
+        // ✅ syncProduct generará el SKU y UPC
         await this.incomeBackendService.syncProduct(product, data, component);
         
-        this.logger.log(`✅ [createFromOrder] syncProduct completado para ${product.code}`);
+        this.logger.log(`✅ [createFromOrder] syncProduct completado para ${product.code} - SKU: ${product.sku} - UPC: ${product.upc}`);
         
         results.push({
           component: component.name,
           productId: product._id,
           code: product.code,
           sku: product.sku,
-          upc: product.upc, // ✅ INCLUIR UPC EN RESULTADOS
+          upc: product.upc,
         });
       }
 
