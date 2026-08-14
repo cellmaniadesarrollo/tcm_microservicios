@@ -194,6 +194,42 @@ export class InventarioController {
   }
 
   // ============================================
+  // ✅ NUEVOS ENDPOINTS PARA TYPES, BRANDS, COLORS Y GENERATE SKU
+  // ============================================
+
+  // ✅ GET /types - Obtener todos los tipos de inventario
+  @Get('income-backend/types')
+  @ApiOperation({ summary: 'Obtener todos los tipos de inventario' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de tipos' })
+  async getTypes() {
+    return this.inventarioService.getTypes();
+  }
+
+  // ✅ GET /brands - Obtener todas las marcas
+  @Get('income-backend/brands')
+  @ApiOperation({ summary: 'Obtener todas las marcas' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de marcas' })
+  async getBrands() {
+    return this.inventarioService.getBrands();
+  }
+
+  // ✅ GET /colors - Obtener todos los colores
+  @Get('income-backend/colors')
+  @ApiOperation({ summary: 'Obtener todos los colores' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de colores' })
+  async getColors() {
+    return this.inventarioService.getColors();
+  }
+
+  // ✅ POST /generate-sku - Generar SKU
+  @Post('income-backend/generate-sku')
+  @ApiOperation({ summary: 'Generar SKU' })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'SKU generado' })
+  async generateSku(@Body() data: { typeId: string; brandId: string; colorId: string; inventoryName?: string }) {
+    return this.inventarioService.generateSku(data);
+  }
+
+  // ============================================
   // ✅ NUEVOS ENDPOINTS PARA BODEGA (Income Backend)
   // ============================================
 
