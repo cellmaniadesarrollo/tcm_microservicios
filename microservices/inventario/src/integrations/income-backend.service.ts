@@ -23,6 +23,7 @@ import { InventoryFlowNameItem } from './models/inventory-flow-name-item.model';
 import { Color } from './models/color.model';
 import { Brand } from './models/brand.model';
 import { TypeInventoryFlow } from './models/type-inventory-flow.model';
+import { Quality } from './models/quality.model';
 
 @Injectable()
 export class IncomeBackendService {
@@ -40,6 +41,7 @@ export class IncomeBackendService {
     @InjectModel(Color.name, 'atlas') private colorModel: Model<Color>,
     @InjectModel(Brand.name, 'atlas') private brandModel: Model<Brand>,
     @InjectModel(TypeInventoryFlow.name, 'atlas') private typeInventoryFlowModel: Model<TypeInventoryFlow>,
+    @InjectModel(Quality.name, 'atlas') private qualityModel: Model<Quality>,
     @Inject(forwardRef(() => ProductsService)) private productsService: ProductsService,
     private configService: ConfigService,
     private batchCounterHelper: BatchCounterHelper,
@@ -149,7 +151,7 @@ export class IncomeBackendService {
             const productName = product?.name?.toUpperCase().trim() || '';
             const flowName = flow.name_nameitems?.toUpperCase().trim() || '';
             
-            // ✅ Verificar que el nombre coincida (sin marca porque el modelo no tiene name_brand)
+            // ✅ Verificar que el nombre coincida
             if (productName && flowName && productName !== flowName) {
               this.logger.warn(`⚠️ El InventoryFlow encontrado por deviceId (${flowName}) NO coincide con el producto (${productName})`);
               this.logger.warn(`⚠️ Se creará un nuevo InventoryFlow para: ${productName}`);
@@ -174,7 +176,7 @@ export class IncomeBackendService {
         }
       }
       
-      // 3️⃣ Buscar por SKU
+      // 3️⃣ Buscar por SKU (por si el producto ya tiene SKU)
       if (product?.sku) {
         const flow = await this.inventoryFlowModel.findOne({ sku: product.sku }).lean();
         if (flow) {
@@ -183,7 +185,7 @@ export class IncomeBackendService {
         }
       }
       
-      // 4️⃣ No existe - CREAR NUEVO INVENTORYFLOW
+      // 4️⃣ No existe - CREAR NUEVO INVENTORYFLOW (AQUÍ SE GENERA EL SKU Y UPC - 1 SOLO INCREMENTO)
       const nameItemId = await this.getOrCreateInventoryFlowNameItem(product?.name || 'Producto');
       
       // ✅ GENERAR SKU Y UPC CON EL MISMO NÚMERO SECUENCIAL
@@ -228,32 +230,32 @@ export class IncomeBackendService {
   }
 
   // ============================================
-  // ✅ SYNC PRODUCT - CORREGIDO
+  // ✅ SYNC PRODUCT - GENERA Y ACTUALIZA SKU Y UPC
   // ============================================
 
   async syncProduct(product: any, orderData: any, component: any): Promise<any> {
     try {
       this.logger.log(`📤 Sincronizando producto: ${product?.name || 'N/A'}`);
-      this.logger.log(`📦 SKU actual del Product: ${product?.sku || 'NO SKU'}`);
+      this.logger.log(`📦 SKU actual del Product: ${product?.sku || 'sin SKU'}`);
+      this.logger.log(`📦 UPC actual del Product: ${product?.upc || 'sin UPC'}`);
 
-      // ✅ Obtener InventoryFlow (y su SKU y UPC)
+      // ✅ Obtener InventoryFlow (esto genera el SKU y UPC si no existe - 1 solo incremento)
       const { inventoryFlowId, sku: inventorySku, upc: inventoryUpc } = await this.getOrCreateInventoryFlow(product, orderData);
 
       if (!inventoryFlowId) {
         throw new Error(`No se pudo obtener o crear InventoryFlow para: ${product?.name}`);
       }
 
-      // ✅ ACTUALIZAR EL SKU DEL PRODUCT CON EL DEL INVENTORYFLOW
+      // ✅ ACTUALIZAR EL PRODUCT CON EL SKU Y UPC DEL INVENTORYFLOW
       if (product?.sku !== inventorySku) {
-        this.logger.log(`🔄 Actualizando SKU del Product: ${product?.sku} -> ${inventorySku}`);
+        this.logger.log(`🔄 Actualizando SKU del Product: ${product?.sku || 'sin SKU'} -> ${inventorySku}`);
         await this.productsService.updateSku(product._id, inventorySku);
         product.sku = inventorySku;
         this.logger.log(`✅ SKU del Product actualizado a: ${inventorySku}`);
       }
 
-      // ✅ ACTUALIZAR EL UPC DEL PRODUCT CON EL DEL INVENTORYFLOW
       if (product?.upc !== inventoryUpc) {
-        this.logger.log(`🔄 Actualizando UPC del Product: ${product?.upc} -> ${inventoryUpc}`);
+        this.logger.log(`🔄 Actualizando UPC del Product: ${product?.upc || 'sin UPC'} -> ${inventoryUpc}`);
         await this.productsService.updateUpc(product._id, inventoryUpc);
         product.upc = inventoryUpc;
         this.logger.log(`✅ UPC del Product actualizado a: ${inventoryUpc}`);
@@ -326,7 +328,7 @@ export class IncomeBackendService {
   }
 
   // ============================================
-  // ✅ GENERATE SKU - CORREGIDO
+  // ✅ GENERATE SKU - PARA USO EN FRONTEND
   // ============================================
 
   async generateSku(
@@ -336,7 +338,6 @@ export class IncomeBackendService {
     inventoryName: string = 'INVENTORYFLOW'
   ): Promise<{ sku: string; upc: string }> {
     try {
-      // ✅ Obtener los NOMBRES de los IDs
       const typeName = await this.getTypeNameById(typeId);
       const brandName = await this.getBrandNameById(brandId);
       const colorName = await this.getColorNameById(colorId);
@@ -1026,6 +1027,17 @@ export class IncomeBackendService {
     } catch (error: any) {
       this.logger.error(`❌ Error getInventoryFlowBySku: ${error.message}`);
       throw error;
+    }
+  }
+
+  async getQualities(): Promise<any[]> {
+    try {
+      return await this.qualityModel.find()
+        .sort({ quality_inventoryflow: 1 })
+        .lean();
+    } catch (error: any) {
+      this.logger.error(`❌ Error getQualities: ${error.message}`);
+      return [];
     }
   }
 
