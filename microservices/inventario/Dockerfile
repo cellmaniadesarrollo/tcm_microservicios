@@ -1,28 +1,27 @@
-# ETAPA 1: Compilación
-FROM node:20-alpine AS builder
+FROM node:20-alpine
+
 WORKDIR /app
 
+# Copiar archivos de configuración
 COPY package*.json ./
+COPY tsconfig*.json ./
+COPY nest-cli.json ./
+
+# Instalar dependencias
 RUN npm install --legacy-peer-deps
 
-COPY . .
-RUN npm run build
+# Copiar código fuente
+COPY src ./src
 
-# ETAPA 2: Producción - solo deps de prod
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm install --omit=dev --legacy-peer-deps
+# Compilar con tsc
+RUN npx tsc
 
-# ETAPA 3: Runtime final
-FROM node:20-alpine
-WORKDIR /app
+# Verificar que dist existe
+RUN ls -la dist/ || (echo "❌ ERROR: dist no se creó" && exit 1)
 
-ENV NODE_ENV=production
-
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/package*.json ./
-COPY --from=deps /app/node_modules ./node_modules   
+# Limpiar dependencias de desarrollo
+RUN npm prune --production
 
 EXPOSE 3030 3005
-CMD ["node", "dist/main"]
+
+CMD ["node", "dist/main.js"]

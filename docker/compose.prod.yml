@@ -472,7 +472,7 @@ services:
       
       # ─── MongoDB CONEXIÓN 1: PRODUCTOS ───
       - DB_NAME_INVENTARIO=${DB_NAME_INVENTARIO}
-      - MONGODB_URI=${MONGODB_URI_INVENTARIO}
+      - MONGODB_URI=${MONGODB_URI}
       
       # ─── MongoDB CONEXIÓN 2: INCOMES (Atlas) ───
       - MONGODB_ATLAS_URI=${MONGODB_ATLAS_URI}
