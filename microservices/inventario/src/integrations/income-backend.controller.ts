@@ -166,4 +166,52 @@ export class IncomeBackendController {
     this.logger.log(`📤 GET /inventory-flows/by-sku/${sku}`);
     return this.incomeBackendService.getInventoryFlowBySku(sku);
   }
+
+  // ============================================
+  // ✅ NUEVOS ENDPOINTS PARA TYPES, BRANDS, COLORS Y GENERATE SKU
+  // ============================================
+
+  // ✅ GET /types - Obtener todos los tipos de inventario
+  @Get('types')
+  @ApiOperation({ summary: 'Obtener todos los tipos de inventario' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de tipos' })
+  async getTypes() {
+    this.logger.log(`📤 GET /types`);
+    return this.incomeBackendService.getTypes();
+  }
+
+  // ✅ GET /brands - Obtener todas las marcas
+  @Get('brands')
+  @ApiOperation({ summary: 'Obtener todas las marcas' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de marcas' })
+  async getBrands() {
+    this.logger.log(`📤 GET /brands`);
+    return this.incomeBackendService.getBrands();
+  }
+
+  // ✅ GET /colors - Obtener todos los colores
+  @Get('colors')
+  @ApiOperation({ summary: 'Obtener todos los colores' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de colores' })
+  async getColors() {
+    this.logger.log(`📤 GET /colors`);
+    return this.incomeBackendService.getColors();
+  }
+
+  // ✅ POST /generate-sku - Generar SKU
+  @Post('generate-sku')
+  @ApiOperation({ summary: 'Generar SKU' })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'SKU generado' })
+  async generateSku(@Body() data: { typeId: string; brandId: string; colorId: string; inventoryName?: string }) {
+    this.logger.log(`📤 POST /generate-sku`);
+    const sku = await this.incomeBackendService.generateSku(
+      data.typeId,
+      data.brandId,
+      data.colorId,
+      data.inventoryName || 'INVENTORYFLOW'
+    );
+    
+    // ✅ DEVOLVER OBJETO CON SKU
+    return { sku };
+  }
 }

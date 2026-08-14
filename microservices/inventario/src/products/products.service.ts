@@ -17,6 +17,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { InventoryMovementDto, MovementType } from './dto/inventory-movement.dto';
 import { StatusChangeDto } from './dto/status-change.dto';
 import { IncomeBackendService } from '../integrations/income-backend.service';
+import { SkuGeneratorHelper } from '../integrations/helpers/sku-generator.helper';
 
 @Injectable()
 export class ProductsService {
@@ -25,7 +26,10 @@ export class ProductsService {
   constructor(
     @InjectModel(Product.name, 'default') private productModel: Model<ProductDocument>,
     @Inject(forwardRef(() => IncomeBackendService)) private incomeBackendService: IncomeBackendService,
-  ) {}
+    private skuGeneratorHelper: SkuGeneratorHelper,
+  ) {
+    this.logger.log('✅ ProductsService inicializado');
+  }
 
   private async generateProductCode(): Promise<string> {
     const prefix = 'INV';
@@ -49,25 +53,22 @@ export class ProductsService {
   }
 
   /**
-   * Genera SKU con formato: {COMPONENTE(3 letras)}-{MARCA(3 letras)}-{COLOR(3 letras)}-{SECUENCIAL}
-   * Ejemplo: REP-SAM-NIL-INF00000000000070
+   * ✅ GENERA SKU Y UPC USANDO EL CONTADOR SECUENCIAL
+   * Retorna { sku: string; upc: string }
+   * Formato SKU: {COMPONENTE(3 letras)}-{MARCA(3 letras)}-{COLOR(3 letras)}-INF{secuencia}
+   * Ejemplo: { sku: 'CAM-XIA-BLA-INF00000000003536', upc: '00000000003536' }
    */
   private async generateSku(
     name: string,
     brand: string,
     color: string
-  ): Promise<string> {
-    // ✅ Obtener 3 primeras letras de cada parte
-    const componentCode = this.getThreeLetters(name) || 'PRO';
-    const brandCode = this.getThreeLetters(brand) || 'GEN';
-    const colorCode = this.getThreeLetters(color) || 'SIN';
-    
-    // ✅ Generar secuencia usando timestamp o contador
-    const timestamp = Date.now().toString().slice(-8);
-    const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-    const sequence = `${timestamp}${random}`;
-    
-    return `${componentCode}-${brandCode}-${colorCode}-INF${sequence}`;
+  ): Promise<{ sku: string; upc: string }> {
+    return this.skuGeneratorHelper.generateSku(
+      name || 'PRODUCTO',
+      brand || 'GENERICO',
+      color || 'SINCOLOR',
+      'INVENTORYFLOW'
+    );
   }
 
   /**
@@ -76,15 +77,13 @@ export class ProductsService {
   private getThreeLetters(value: string): string {
     if (!value) return 'XXX';
     
-    // Limpiar: mayúsculas, sin tildes, solo letras
     const cleaned = value
       .toUpperCase()
       .trim()
       .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '') // eliminar tildes
-      .replace(/[^A-Z]/g, ''); // solo letras
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^A-Z]/g, '');
     
-    // Tomar primeras 3 letras, si tiene menos, completar con X
     if (cleaned.length >= 3) {
       return cleaned.substring(0, 3);
     } else {
@@ -110,7 +109,6 @@ export class ProductsService {
     }
   }
 
-  // ✅ CREAR PRODUCTO CON SKU GENERADO
   async create(createProductDto: CreateProductDto): Promise<ProductDocument> {
     // Verificar duplicados
     const existing = await this.productModel.findOne({
@@ -127,8 +125,8 @@ export class ProductsService {
 
     const code = createProductDto.code || (await this.generateProductCode());
     
-    // ✅ Generar SKU con el formato correcto
-    const sku = createProductDto.sku || await this.generateSku(
+    // ✅ Desestructurar SKU y UPC
+    const { sku, upc } = await this.generateSku(
       createProductDto.name || 'PRODUCTO',
       createProductDto.brand || 'GENERICO',
       createProductDto.color || 'SINCOLOR'
@@ -138,6 +136,7 @@ export class ProductsService {
       ...createProductDto,
       code,
       sku,
+      upc, // ✅ GUARDAR UPC
       createdAt: new Date(),
       updatedAt: new Date(),
       statusHistory: [
@@ -180,6 +179,7 @@ export class ProductsService {
         { model: { $regex: filters.search, $options: 'i' } },
         { code: { $regex: filters.search, $options: 'i' } },
         { sku: { $regex: filters.search, $options: 'i' } },
+        { upc: { $regex: filters.search, $options: 'i' } }, // ✅ Búsqueda por UPC
       ];
     }
 
@@ -477,7 +477,7 @@ export class ProductsService {
   }
 
   // ============================================
-  // ✅ CREATE FROM ORDER
+  // ✅ CREATE FROM ORDER - CORREGIDO
   // ============================================
   async createFromOrder(data: any): Promise<any> {
     try {
@@ -486,12 +486,12 @@ export class ProductsService {
       const results = [];
       
       for (const component of data.components) {
-        // ✅ Generar SKU con el formato correcto
         const componentName = component.name || 'PRODUCTO';
         const brand = component.brand || data.deviceName?.split(' ')[0] || 'GENERICO';
         const color = component.color || data.deviceColor || 'SINCOLOR';
         
-        const sku = await this.generateSku(componentName, brand, color);
+        // ✅ Desestructurar SKU y UPC
+        const { sku, upc } = await this.generateSku(componentName, brand, color);
         
         const productData: CreateProductDto = {
           name: component.name,
@@ -511,7 +511,8 @@ export class ProductsService {
           createdById: data.createdById,
           createdByName: data.createdByName,
           supplierName: data.customerName,
-          sku: sku, // ✅ Pasar SKU generado
+          sku: sku,
+          upc: upc, // ✅ GUARDAR UPC
           metadata: {
             fromOrder: true,
             orderId: data.orderId,
@@ -525,9 +526,8 @@ export class ProductsService {
 
         const product = await this.create(productData);
         
-        this.logger.log(`📤 [createFromOrder] Producto creado: ${product.code} - SKU: ${product.sku}, llamando a syncProduct...`);
+        this.logger.log(`📤 [createFromOrder] Producto creado: ${product.code} - SKU: ${product.sku} - UPC: ${product.upc}, llamando a syncProduct...`);
         
-        // ✅ Sincronizar con incomes (pasar el SKU del producto)
         await this.incomeBackendService.syncProduct(product, data, component);
         
         this.logger.log(`✅ [createFromOrder] syncProduct completado para ${product.code}`);
@@ -537,6 +537,7 @@ export class ProductsService {
           productId: product._id,
           code: product.code,
           sku: product.sku,
+          upc: product.upc, // ✅ INCLUIR UPC EN RESULTADOS
         });
       }
 
@@ -590,6 +591,24 @@ export class ProductsService {
       return await product.save();
     } catch (error: any) {
       this.logger.error(`❌ Error updateSku: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async updateUpc(productId: string, newUpc: string): Promise<ProductDocument> {
+    try {
+      const product = await this.findOne(productId);
+      if (!product) {
+        throw new NotFoundException(`Producto con ID ${productId} no encontrado`);
+      }
+      
+      this.logger.log(`🔄 Actualizando UPC de ${product.upc} a ${newUpc}`);
+      product.upc = newUpc;
+      product.updatedAt = new Date();
+      
+      return await product.save();
+    } catch (error: any) {
+      this.logger.error(`❌ Error updateUpc: ${error.message}`);
       throw error;
     }
   }

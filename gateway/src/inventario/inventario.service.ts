@@ -355,6 +355,86 @@ export class InventarioService {
   }
 
   // ============================================
+  // ✅ NUEVOS MÉTODOS PARA TYPES, BRANDS, COLORS, GENERATE SKU
+  // ============================================
+
+  /**
+   * Obtener todos los tipos de inventario
+   */
+  async getTypes(): Promise<any> {
+    this.logger.log(`📤 [Gateway] getTypes`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/types`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getTypes: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener tipos',
+      };
+    }
+  }
+
+  /**
+   * Obtener todas las marcas
+   */
+  async getBrands(): Promise<any> {
+    this.logger.log(`📤 [Gateway] getBrands`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/brands`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getBrands: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener marcas',
+      };
+    }
+  }
+
+  /**
+   * Obtener todos los colores
+   */
+  async getColors(): Promise<any> {
+    this.logger.log(`📤 [Gateway] getColors`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/colors`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getColors: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener colores',
+      };
+    }
+  }
+
+  /**
+   * Generar SKU
+   */
+  async generateSku(data: { typeId: string; brandId: string; colorId: string; inventoryName?: string }): Promise<any> {
+    this.logger.log(`📤 [Gateway] generateSku - typeId: ${data.typeId}, brandId: ${data.brandId}, colorId: ${data.colorId}`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.inventarioUrl}/api/income-backend/generate-sku`, data)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error generateSku: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al generar SKU',
+      };
+    }
+  }
+
+  // ============================================
   // ✅ NUEVOS MÉTODOS PARA BODEGA
   // ============================================
 
