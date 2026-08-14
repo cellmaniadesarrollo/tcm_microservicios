@@ -23,12 +23,13 @@ export enum ProductStatus {
   VENDIDO = 'VENDIDO',
 }
 
-export enum ProductQuality {
-  A = 'A',
-  B = 'B',
-  C = 'C',
-  RECONDICIONADO = 'RECONDICIONADO',
-}
+// ❌ ELIMINAR ESTE ENUM
+// export enum ProductQuality {
+//   A = 'A',
+//   B = 'B',
+//   C = 'C',
+//   RECONDICIONADO = 'RECONDICIONADO',
+// }
 
 @Schema({ timestamps: true, collection: 'products' })
 export class Product {
@@ -51,7 +52,6 @@ export class Product {
   })
   sku!: string;
 
-  // ✅ AGREGAR UPC
   @Prop({ 
     type: String, 
     index: true,
@@ -77,8 +77,9 @@ export class Product {
   @Prop({ type: String, required: true })
   color!: string;
 
-  @Prop({ type: String, enum: ProductQuality, default: ProductQuality.B })
-  quality!: ProductQuality;
+  // ✅ CAMBIADO: String sin enum, con valor por defecto 'B'
+  @Prop({ type: String, default: 'B' })
+  quality!: string;
 
   @Prop({ type: String, enum: ProductCondition, default: ProductCondition.USADO })
   condition!: ProductCondition;
@@ -201,6 +202,6 @@ ProductSchema.index({ stockQuantity: 1 });
 ProductSchema.index({ status: 1, isDeleted: 1 });
 ProductSchema.index({ code: 1 });
 ProductSchema.index({ sku: 1 });
-ProductSchema.index({ upc: 1 }); // ✅ Índice para UPC
+ProductSchema.index({ upc: 1 });
 ProductSchema.index({ categoryId: 1 });
 ProductSchema.index({ createdById: 1, createdAt: -1 });

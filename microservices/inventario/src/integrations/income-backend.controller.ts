@@ -198,6 +198,14 @@ export class IncomeBackendController {
     return this.incomeBackendService.getColors();
   }
 
+  @Get('qualities')
+  @ApiOperation({ summary: 'Obtener todas las calidades' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de calidades' })
+  async getQualities() {
+    this.logger.log(`📤 GET /qualities`);
+    return this.incomeBackendService.getQualities();
+  }
+
   // ✅ POST /generate-sku - Generar SKU
   @Post('generate-sku')
   @ApiOperation({ summary: 'Generar SKU' })

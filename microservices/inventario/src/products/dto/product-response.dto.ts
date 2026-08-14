@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { ProductCondition, ProductStatus, ProductQuality } from '../entities/product.entity';
+import { ProductCondition, ProductStatus } from '../entities/product.entity';
+// ❌ ELIMINAR ProductQuality
 
 export class ProductResponseDto {
   @ApiProperty()
@@ -23,8 +24,9 @@ export class ProductResponseDto {
   @ApiProperty()
   color!: string;
 
-  @ApiProperty({ enum: ProductQuality })
-  quality!: ProductQuality;
+  // ✅ CAMBIADO: quality como string sin enum
+  @ApiProperty({ description: 'Calidad del producto', example: 'B' })
+  quality!: string;
 
   @ApiProperty({ enum: ProductCondition })
   condition!: ProductCondition;

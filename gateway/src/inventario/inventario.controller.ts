@@ -221,6 +221,13 @@ export class InventarioController {
     return this.inventarioService.getColors();
   }
 
+  @Get('income-backend/qualities')
+  @ApiOperation({ summary: 'Obtener todas las calidades' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de calidades' })
+  async getQualities() {
+    return this.inventarioService.getQualities();
+  }
+
   // ✅ POST /generate-sku - Generar SKU
   @Post('income-backend/generate-sku')
   @ApiOperation({ summary: 'Generar SKU' })

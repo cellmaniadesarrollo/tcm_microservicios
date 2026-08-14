@@ -416,6 +416,25 @@ export class InventarioService {
   }
 
   /**
+   * Obtener todas las calidades
+   */
+  async getQualities(): Promise<any> {
+    this.logger.log(`📤 [Gateway] getQualities`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/qualities`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getQualities: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener calidades',
+      };
+    }
+  }
+
+  /**
    * Generar SKU
    */
   async generateSku(data: { typeId: string; brandId: string; colorId: string; inventoryName?: string }): Promise<any> {

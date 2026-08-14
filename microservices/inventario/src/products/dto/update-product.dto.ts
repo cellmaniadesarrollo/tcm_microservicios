@@ -18,4 +18,12 @@ export class UpdateProductDto extends PartialType(CreateProductDto) {
   @IsOptional()
   @IsString()
   updateReason?: string;
+
+  @ApiPropertyOptional({
+    description: 'Calidad del producto',
+    example: 'B',
+  })
+  @IsOptional()
+  @IsString()
+  quality?: string;
 }

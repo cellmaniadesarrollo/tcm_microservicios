@@ -17,10 +17,10 @@ import { CounterBatch, CounterBatchSchema } from './models/counter-batch.model';
 import { Counters, CountersSchema } from './models/counters.model';
 import { DocumentNumberIncome, DocumentNumberIncomeSchema } from './models/document-number-income.model';
 import { InventoryFlowNameItem, InventoryFlowNameItemSchema } from './models/inventory-flow-name-item.model';
-// ✅ NUEVOS MODELOS
 import { Color, ColorSchema } from './models/color.model';
 import { Brand, BrandSchema } from './models/brand.model';
 import { TypeInventoryFlow, TypeInventoryFlowSchema } from './models/type-inventory-flow.model';
+import { Quality, QualitySchema } from './models/quality.model';
 
 @Module({
   imports: [
@@ -34,10 +34,10 @@ import { TypeInventoryFlow, TypeInventoryFlowSchema } from './models/type-invent
         { name: Counters.name, schema: CountersSchema },
         { name: DocumentNumberIncome.name, schema: DocumentNumberIncomeSchema },
         { name: InventoryFlowNameItem.name, schema: InventoryFlowNameItemSchema },
-        // ✅ NUEVOS MODELOS
         { name: Color.name, schema: ColorSchema },
         { name: Brand.name, schema: BrandSchema },
         { name: TypeInventoryFlow.name, schema: TypeInventoryFlowSchema },
+        { name: Quality.name, schema: QualitySchema },
       ],
       'atlas'
     ),
