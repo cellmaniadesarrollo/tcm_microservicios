@@ -27,7 +27,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
     constructor() {
         this.kafka = new Kafka({
-            clientId: 'ms-notification-dispatcher-consumer',
+            clientId: 'ms-notification-dispatcher-consumer1',
             brokers: [process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092'],
             retry: {
                 initialRetryTime: 300,
@@ -41,7 +41,7 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         });
 
         this.consumer = this.kafka.consumer({
-            groupId: 'ms-notification-dispatcher-consumer-group',
+            groupId: 'ms-notification-dispatcher-consumer-group1',
             sessionTimeout: 30000,
             heartbeatInterval: 3000,
             rebalanceTimeout: 30000,
