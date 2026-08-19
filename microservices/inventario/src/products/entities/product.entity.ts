@@ -205,3 +205,7 @@ ProductSchema.index({ sku: 1 });
 ProductSchema.index({ upc: 1 });
 ProductSchema.index({ categoryId: 1 });
 ProductSchema.index({ createdById: 1, createdAt: -1 });
+
+// ✅ Para filtrar rápido productos creados desde órdenes / InventoryFlow seleccionado
+ProductSchema.index({ 'metadata.fromOrder': 1 });
+ProductSchema.index({ 'metadata.inventoryFlowId': 1 });
