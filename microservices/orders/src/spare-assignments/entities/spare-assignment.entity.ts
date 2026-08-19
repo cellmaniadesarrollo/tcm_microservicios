@@ -45,6 +45,9 @@ export class SpareAssignment {
     @Column({ type: 'int' })
     batch_number: number;
 
+    @Column({ type: 'boolean', default: false })
+    is_billable_in_repair_orders: boolean;
+
     @Column({
         type: 'varchar',
         enum: SpareAssignmentStatus,

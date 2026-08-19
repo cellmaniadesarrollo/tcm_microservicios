@@ -47,6 +47,7 @@ import { OrderValidationLockService } from '../order-validation-lock/order-valid
 import { OrderPriceAgreement } from './entities/order-price-agreement.entity';
 import { UpdateOrderPriceAgreementDto } from './dto/update-order-price-agreement.dto';
 import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement.dto';
+import { InvoicesService } from '../invoices/invoices.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -88,6 +89,7 @@ export class OrderWorkflowService {
     @InjectRepository(SpareAssignment)
     private readonly spareAssignmentRepository: Repository<SpareAssignment>,
     private readonly orderValidationLockService: OrderValidationLockService,
+    private readonly invoicesService: InvoicesService
   ) { }
 
   async createOrder(
@@ -1451,7 +1453,7 @@ export class OrderWorkflowService {
   async closeOrder(
     dto: CloseOrderDto,
     user: { userId: string; companyId: string; branchId: string },
-    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [], // ← nuevo
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [],
   ): Promise<OrderDelivery> {
     // ── Validación: comprobante obligatorio si no es EFECTIVO ─────────────
     const EFECTIVO_ID = 1;
@@ -1464,6 +1466,7 @@ export class OrderWorkflowService {
         );
       }
     }
+
     const result = await this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
@@ -1491,6 +1494,37 @@ export class OrderWorkflowService {
           ),
         );
       }
+
+      // ── NUEVO: determinar si corresponde emisión automática de factura ──
+      // Regla de negocio:
+      //   - Sin repuestos asignados (solo mano de obra)          → NO se emite automático.
+      //   - Con repuestos, pero al menos uno no es facturable    → NO se emite automático
+      //     (queda para hacerlo manual, como hasta ahora).
+      //   - Con repuestos y TODOS son facturables                → SÍ se emite automático.
+      const spareAssignments = await manager.getRepository(SpareAssignment).find({
+        where: {
+          order_id: dto.orderId,
+          status: SpareAssignmentStatus.ACTIVE,
+        },
+      });
+
+      const nonBillableSpares = spareAssignments.filter(
+        (sa) => !sa.is_billable_in_repair_orders,
+      );
+
+      const shouldEmitInvoice = spareAssignments.length > 0 && nonBillableSpares.length === 0;
+
+      if (spareAssignments.length === 0) {
+        console.log(`ℹ️ Orden ${dto.orderId} sin repuestos asignados, no aplica emisión automática de factura`);
+      } else if (nonBillableSpares.length > 0) {
+        console.warn(
+          `⚠️ Orden ${dto.orderId} tiene ${nonBillableSpares.length} repuesto(s) no facturable(s), no se emitirá factura automática (queda pendiente de facturación manual)`,
+          nonBillableSpares.map((sa) => sa.sku),
+        );
+      } else {
+        console.log(`✅ Orden ${dto.orderId}: ${spareAssignments.length} repuesto(s), todos facturables → se emitirá factura automática`);
+      }
+      // ──────────────────────────────────────────────────────────────────
 
       const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
       const isOutgoing = order.order_type_id === 3;
@@ -1544,12 +1578,12 @@ export class OrderWorkflowService {
 
       const savedPayment = await manager.save(finalPayment);
 
-      // ── NUEVO: Subir adjuntos a S3 y persistir ────────────────────────────
+      // ── Subir adjuntos a S3 y persistir ────────────────────────────────
       const attachments: Attachment[] = [];
 
       for (const file of files) {
         const buffer = Buffer.from(file.buffer, 'base64');
-        const prefix = `payment/${savedPayment.id}/`;  // ← igual que en registerIncomePayment
+        const prefix = `payment/${savedPayment.id}/`;
         const url = await this.awsS3Service.uploadBuffer(
           buffer,
           file.originalname,
@@ -1558,8 +1592,8 @@ export class OrderWorkflowService {
         );
 
         const attachment = manager.create(Attachment, {
-          entity_type: AttachmentEntityType.PAYMENT,   // ← igual que en registerIncomePayment
-          entity_id: savedPayment.id,                  // ← apunta al pago, no al delivery
+          entity_type: AttachmentEntityType.PAYMENT,
+          entity_id: savedPayment.id,
           file_name: file.originalname,
           file_url: url,
           file_type: file.mimetype,
@@ -1569,7 +1603,7 @@ export class OrderWorkflowService {
 
         attachments.push(await manager.save(attachment));
       }
-      // ─────────────────────────────────────────────────────────────────────
+      // ─────────────────────────────────────────────────────────────────
 
       await manager.getRepository(Order).update(
         { id: order.id, company_id: user.companyId },
@@ -1613,11 +1647,15 @@ export class OrderWorkflowService {
         historyId: historyResult.id,
         savedPayment,
         paymentType,
-        attachments,   // ← nuevo
+        attachments,
+        // ── NUEVO: se llevan fuera de la transacción para decidir si se dispara Kafka ──
+        shouldEmitInvoice,
+        spareAssignments, // los billables ya confirmados si shouldEmitInvoice === true
+        order,
       };
     });
 
-    // ── Fuera de la transacción ───────────────────────────────────────────────
+    // ── Fuera de la transacción ─────────────────────────────────────────
     const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
     await this.emitNotification(
@@ -1656,9 +1694,23 @@ export class OrderWorkflowService {
         company_id: result.savedPayment.company_id,
         branch_id: result.savedPayment.branch_id,
         createdAt: result.savedPayment.createdAt,
-        attachments: result.attachments,   // ← nuevo: adjuntos en el broadcast
+        attachments: result.attachments,
       },
     });
+
+    // ── NUEVO: disparar emisión de factura solo si corresponde ───────────
+    // El armado del payload completo (emisor, tax, details, etc.) lo vemos
+    // en el siguiente paso; acá solo dejamos el punto de entrada condicionado.
+    if (result.shouldEmitInvoice) {
+      const details = await this.invoicesService.buildInvoiceDetails(
+        this.orderRepo.manager,
+        dto.orderId,
+        result.spareAssignments, // ya vienen todos facturables si shouldEmitInvoice === true
+      );
+      await this.invoicesService.requestInvoiceEmission(dto.orderId, details);
+    } else {
+      console.log(`⏭️ Orden ${dto.orderId}: NO se dispara emisión automática de factura (revisar log de validación arriba)`);
+    }
 
     return result.delivery;
   }
