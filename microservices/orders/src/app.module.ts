@@ -23,6 +23,7 @@ import { SpareAssignmentsModule } from './spare-assignments/spare-assignments.mo
 import { ReportingHubModule } from './reporting-hub/reporting-hub.module';
 import { OrderValidationLockModule } from './order-validation-lock/order-validation-lock.module';
 import { OrderExtrasModule } from './order-extras/order-extras.module';
+import { InvoicesModule } from './invoices/invoices.module';
 
 @Module({
   imports: [
@@ -35,7 +36,7 @@ import { OrderExtrasModule } from './order-extras/order-extras.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }), CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule,
+    }), InvoicesModule, CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule,
     MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, ReportingHubModule,
     HealthModule,
     OrderExtrasModule,
@@ -43,8 +44,11 @@ import { OrderExtrasModule } from './order-extras/order-extras.module';
     OrderPotentialPurchaseModule,
     InventoryItemsModule,
     SpareAssignmentsModule,
+
     KafkaModule,
+
     OrderValidationLockModule,
+
 
   ],
   controllers: [AppController],

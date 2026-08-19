@@ -6,6 +6,7 @@ const TOPICS = {
   ORDER_CREATED: 'ms.order.created',
   ORDER_UPDATED: 'ms.order.updated',
   SPARE_CANCELLATION_REQUESTED: 'ms.inventory.spare.cancellation.requested',
+  INVOICE_EMISSION_REQUESTED: 'ms.order.invoice.emission.requested',
 } as const;
 
 @Injectable()
@@ -71,6 +72,18 @@ export class BroadcastService {
       'SPARE_CANCELLATION_REQUESTED',
       request,
       request.movement_id,
+    );
+  }
+
+  async publishInvoiceEmissionRequested(payload: {
+    order_id: number;
+    [key: string]: any;
+  }): Promise<void> {
+    await this.kafkaProducer.emit(
+      TOPICS.INVOICE_EMISSION_REQUESTED,
+      'INVOICE_EMISSION_REQUESTED',
+      payload,
+      payload.order_id?.toString(),
     );
   }
 }

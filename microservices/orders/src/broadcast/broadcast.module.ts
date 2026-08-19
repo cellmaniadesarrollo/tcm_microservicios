@@ -1,4 +1,4 @@
-//microservices\clients\src\broadcast\broadcast.module.ts
+//microservices\orders\src\broadcast\broadcast.module.ts
 import { Module } from '@nestjs/common';
 import { BroadcastService } from './broadcast.service';
 
