@@ -267,7 +267,7 @@ export class IncomeBackendService {
       if (orderData?.customerId && this.isValidObjectId(orderData.customerId)) {
         supplierId = this.toObjectIdSafe(orderData.customerId);
       } else {
-        supplierId = new Types.ObjectId('64eccd1c36843268d5d2b6fc');
+        supplierId = new Types.ObjectId('67f98baed875ff138dfcb942');
         this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
       }
 
@@ -293,11 +293,11 @@ export class IncomeBackendService {
         name_quality: existingInventoryFlow.name_quality || product?.quality || 'ORIGINAL',
         brand: product?.brand || orderData?.brand || 'GENERICO',
         color: product?.color || orderData?.color || 'SINCOLOR',
-        tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2a',
+        tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2b',
         imeis: orderData?.imeis || [],
         numero_documento: `ORD-${orderData?.orderNumber || 'N/A'}`,
         id_proveedor: supplierId,
-        porcentaje: orderData?.porcentaje || '65ae74b9f978d87a5c41fd2a',
+        porcentaje: orderData?.porcentaje || '65d7a93e81594c12686310aa',
         cantidad: component?.quantity || 1,
         precioventa: component?.salePrice || 0,
         preciounit: component?.purchasePrice || 0,
@@ -383,14 +383,14 @@ export class IncomeBackendService {
       if (this.isValidObjectId(data.id_proveedor)) {
         supplierId = this.toObjectIdSafe(data.id_proveedor);
       } else {
-        supplierId = new Types.ObjectId('64eccd1c36843268d5d2b6fc');
+        supplierId = new Types.ObjectId('67f98baed875ff138dfcb942');
       }
 
       const idnumber = await this.findOrCreateDocument(
         data.numero_documento,
-        data.tipo_documento || '65ae74b9f978d87a5c41fd2a',
+        data.tipo_documento || '65ae74b9f978d87a5c41fd2b',
         supplierId,
-        data.porcentaje || '65ae74b9f978d87a5c41fd2a'
+        data.porcentaje || '65d7a93e81594c12686310aa'
       );
 
       if (!idnumber) {
@@ -487,9 +487,9 @@ export class IncomeBackendService {
       // Obtener o crear documento
       const documentId = await this.findOrCreateDocument(
         payload.numero_documento || `INC-${Date.now()}`,
-        payload.tipo_documento || '65ae74b9f978d87a5c41fd2a',
-        payload.id_proveedor || new Types.ObjectId('64eccd1c36843268d5d2b6fc'),
-        payload.porcentaje || '65ae74b9f978d87a5c41fd2a'
+        payload.tipo_documento || '65ae74b9f978d87a5c41fd2b',
+        payload.id_proveedor || new Types.ObjectId('67f98baed875ff138dfcb942'),
+        payload.porcentaje || '65d7a93e81594c12686310aa'
       );
 
       // Construir income
@@ -557,9 +557,14 @@ export class IncomeBackendService {
       }
 
       let isBillable = "no";
-      const facturaIds = ['65ae74b9f978d87a5c41fd2a', '669fce5292dc8027b82650ea', '67f9a68cd12fb6cca2033ef9'];
+      const facturaIds = [
+        '65ae74b9f978d87a5c41fd2a',  // FACTURA
+        '669fce5292dc8027b82650ea',  // LIQUIDACION
+        '67f9a68cd12fb6cca2033ef9',  // NOTA DE VENTA
+        '65ae74b9f978d87a5c41fd2b',  // ORDEN (si aplica)
+      ];
       if (facturaIds.includes(data.tipo_documento)) {
-        isBillable = "yes";
+        isBillable = "no";
       }
 
       const identifiers = Array.isArray(data.imeis)
@@ -671,21 +676,21 @@ export class IncomeBackendService {
       if (this.isValidObjectId(documentType)) {
         docTypeId = this.toObjectIdSafe(documentType);
       } else {
-        docTypeId = new Types.ObjectId('65ae74b9f978d87a5c41fd2a');
+        docTypeId = new Types.ObjectId('65ae74b9f978d87a5c41fd2b');
       }
 
       let supplierObjectId: Types.ObjectId;
       if (this.isValidObjectId(supplierId)) {
         supplierObjectId = this.toObjectIdSafe(supplierId);
       } else {
-        supplierObjectId = new Types.ObjectId('64eccd1c36843268d5d2b6fc');
+        supplierObjectId = new Types.ObjectId('67f98baed875ff138dfcb942');
       }
 
       let taxId: Types.ObjectId;
       if (this.isValidObjectId(taxPercentageId)) {
         taxId = this.toObjectIdSafe(taxPercentageId);
       } else {
-        taxId = new Types.ObjectId('65ae74b9f978d87a5c41fd2a');
+        taxId = new Types.ObjectId('65d7a93e81594c12686310aa');
       }
 
       const existing = await this.documentNumberIncomeModel.findOne({
@@ -918,7 +923,7 @@ export class IncomeBackendService {
       if (orderData?.customerId && this.isValidObjectId(orderData.customerId)) {
         supplierId = this.toObjectIdSafe(orderData.customerId);
       } else {
-        supplierId = new Types.ObjectId('64eccd1c36843268d5d2b6fc');
+        supplierId = new Types.ObjectId('67f98baed875ff138dfcb942');
         this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
       }
 
@@ -943,11 +948,11 @@ export class IncomeBackendService {
         name_quality: product?.quality || 'ORIGINAL',
         brand: product?.brand || orderData?.brand || 'GENERICO',
         color: product?.color || orderData?.color || 'SINCOLOR',
-        tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2a',
+        tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2b',
         imeis: orderData?.imeis || [],
         numero_documento: `ORD-${orderData?.orderNumber || 'N/A'}`,
         id_proveedor: supplierId,
-        porcentaje: orderData?.porcentaje || '65ae74b9f978d87a5c41fd2a',
+        porcentaje: orderData?.porcentaje || '65d7a93e81594c12686310aa',
         cantidad: component?.quantity || 1,
         precioventa: component?.salePrice || 0,
         preciounit: component?.purchasePrice || 0,
