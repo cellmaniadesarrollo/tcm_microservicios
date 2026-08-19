@@ -228,6 +228,13 @@ export class InventarioController {
     return this.inventarioService.getQualities();
   }
 
+  @Get('inventories')
+  @ApiOperation({ summary: 'Obtener todos los inventarios disponibles' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Lista de inventarios' })
+  async getInventories() {
+    return this.inventarioService.getInventories();
+  }
+
   // ✅ POST /generate-sku - Generar SKU
   @Post('income-backend/generate-sku')
   @ApiOperation({ summary: 'Generar SKU' })
@@ -273,5 +280,38 @@ export class InventarioController {
   @ApiResponse({ status: HttpStatus.OK })
   async getAvailableParts(@Param('orderId') orderId: string) {
     return this.inventarioService.getAvailableParts(orderId);
+  }
+
+  /**
+   * GET /api/inventario/search-inventory-flow
+   * Buscar ítems en inventory flow
+   */
+  @Get('search-inventory-flow')
+  @ApiOperation({ summary: 'Buscar ítems en inventory flow' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async searchInventoryFlowItems(@Query() query: any) {
+    return this.inventarioService.searchInventoryFlowItems(query);
+  }
+
+  /**
+   * GET /api/inventario/inventory-flow/:id
+   * Obtener inventory flow por ID
+   */
+  @Get('inventory-flow/:id')
+  @ApiOperation({ summary: 'Obtener inventory flow por ID' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async getInventoryFlowById(@Param('id') id: string) {
+    return this.inventarioService.getInventoryFlowById(id);
+  }
+
+  /**
+   * POST /api/inventario/from-inventory-flow
+   * Crear producto desde inventory flow existente
+   */
+  @Post('from-inventory-flow')
+  @ApiOperation({ summary: 'Crear producto desde inventory flow existente' })
+  @ApiResponse({ status: HttpStatus.CREATED })
+  async createProductFromInventoryFlow(@Body() payload: any) {
+    return this.inventarioService.createProductFromInventoryFlow(payload);
   }
 }

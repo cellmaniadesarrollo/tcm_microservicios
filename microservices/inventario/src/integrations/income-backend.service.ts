@@ -24,6 +24,7 @@ import { Color } from './models/color.model';
 import { Brand } from './models/brand.model';
 import { TypeInventoryFlow } from './models/type-inventory-flow.model';
 import { Quality } from './models/quality.model';
+import { NameInventory } from './models/name-inventory.model';
 
 @Injectable()
 export class IncomeBackendService {
@@ -42,6 +43,7 @@ export class IncomeBackendService {
     @InjectModel(Brand.name, 'atlas') private brandModel: Model<Brand>,
     @InjectModel(TypeInventoryFlow.name, 'atlas') private typeInventoryFlowModel: Model<TypeInventoryFlow>,
     @InjectModel(Quality.name, 'atlas') private qualityModel: Model<Quality>,
+    @InjectModel(NameInventory.name, 'atlas') private nameInventoryModel: Model<NameInventory>,
     @Inject(forwardRef(() => ProductsService)) private productsService: ProductsService,
     private configService: ConfigService,
     private batchCounterHelper: BatchCounterHelper,
@@ -137,7 +139,7 @@ export class IncomeBackendService {
   }
 
   // ============================================
-  // ✅ HELPER - Crear o obtener InventoryFlow
+  // ✅ HELPER - Crear o obtener InventoryFlow (SOLO para syncProduct normal)
   // ============================================
 
   private async getOrCreateInventoryFlow(product: any, orderData: any): Promise<{ inventoryFlowId: Types.ObjectId; sku: string; upc: string }> {
@@ -151,7 +153,6 @@ export class IncomeBackendService {
             const productName = product?.name?.toUpperCase().trim() || '';
             const flowName = flow.name_nameitems?.toUpperCase().trim() || '';
             
-            // ✅ Verificar que el nombre coincida
             if (productName && flowName && productName !== flowName) {
               this.logger.warn(`⚠️ El InventoryFlow encontrado por deviceId (${flowName}) NO coincide con el producto (${productName})`);
               this.logger.warn(`⚠️ Se creará un nuevo InventoryFlow para: ${productName}`);
@@ -185,10 +186,9 @@ export class IncomeBackendService {
         }
       }
       
-      // 4️⃣ No existe - CREAR NUEVO INVENTORYFLOW (AQUÍ SE GENERA EL SKU Y UPC - 1 SOLO INCREMENTO)
+      // 4️⃣ No existe - CREAR NUEVO INVENTORYFLOW
       const nameItemId = await this.getOrCreateInventoryFlowNameItem(product?.name || 'Producto');
       
-      // ✅ GENERAR SKU Y UPC CON EL MISMO NÚMERO SECUENCIAL
       const { sku, upc } = await this.skuGeneratorHelper.generateSku(
         product?.name || 'PRODUCTO',
         product?.brand || orderData?.brand || 'GENERICO',
@@ -230,35 +230,36 @@ export class IncomeBackendService {
   }
 
   // ============================================
-  // ✅ SYNC PRODUCT - GENERA Y ACTUALIZA SKU Y UPC
+  // ✅ SYNC PRODUCT WITH EXISTING FLOW (CUANDO EL USUARIO SELECCIONA UN INVENTORY FLOW)
   // ============================================
 
-  async syncProduct(product: any, orderData: any, component: any): Promise<any> {
+  async syncProductWithExistingInventoryFlow(
+    product: any, 
+    orderData: any, 
+    component: any,
+    existingInventoryFlow: any
+  ): Promise<any> {
     try {
-      this.logger.log(`📤 Sincronizando producto: ${product?.name || 'N/A'}`);
-      this.logger.log(`📦 SKU actual del Product: ${product?.sku || 'sin SKU'}`);
-      this.logger.log(`📦 UPC actual del Product: ${product?.upc || 'sin UPC'}`);
+      // ✅ USAR SKU Y UPC DEL PAYLOAD O DEL INVENTORYFLOW
+      const inventorySku = orderData.sku || existingInventoryFlow.sku;
+      const inventoryUpc = orderData.upc || existingInventoryFlow.upc || '';
+      
+      this.logger.log(`📤 Sincronizando producto con InventoryFlow existente: ${inventorySku}`);
+      this.logger.log(`📦 Producto: ${product?.name || 'N/A'}`);
 
-      // ✅ Obtener InventoryFlow (esto genera el SKU y UPC si no existe - 1 solo incremento)
-      const { inventoryFlowId, sku: inventorySku, upc: inventoryUpc } = await this.getOrCreateInventoryFlow(product, orderData);
+      const inventoryFlowId = existingInventoryFlow._id;
 
-      if (!inventoryFlowId) {
-        throw new Error(`No se pudo obtener o crear InventoryFlow para: ${product?.name}`);
-      }
-
-      // ✅ ACTUALIZAR EL PRODUCT CON EL SKU Y UPC DEL INVENTORYFLOW
+      // ✅ ACTUALIZAR SKU Y UPC DEL PRODUCTO CON LOS DEL INVENTORYFLOW
       if (product?.sku !== inventorySku) {
         this.logger.log(`🔄 Actualizando SKU del Product: ${product?.sku || 'sin SKU'} -> ${inventorySku}`);
         await this.productsService.updateSku(product._id, inventorySku);
         product.sku = inventorySku;
-        this.logger.log(`✅ SKU del Product actualizado a: ${inventorySku}`);
       }
 
       if (product?.upc !== inventoryUpc) {
         this.logger.log(`🔄 Actualizando UPC del Product: ${product?.upc || 'sin UPC'} -> ${inventoryUpc}`);
         await this.productsService.updateUpc(product._id, inventoryUpc);
         product.upc = inventoryUpc;
-        this.logger.log(`✅ UPC del Product actualizado a: ${inventoryUpc}`);
       }
 
       // ✅ Validar customerId
@@ -270,7 +271,7 @@ export class IncomeBackendService {
         this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
       }
 
-      // ✅ Construir payload con el SKU y UPC correctos
+      // ✅ Construir payload - USAR SKU DEL INVENTORYFLOW
       const payload = {
         unit_price: component?.purchasePrice?.toString() || '0',
         unit_sales_price: component?.salePrice?.toString() || '0',
@@ -283,12 +284,13 @@ export class IncomeBackendService {
         user_create: orderData?.createdByName || orderData?.createdById || 'ordenes',
         inventory_id: orderData?.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
         inventory_name: orderData?.inventory_name || 'INVENTORYFLOW',
+        // ✅ USAR SKU DEL INVENTORYFLOW
         sku: inventorySku,
         upc: inventoryUpc,
-        name_item: product?.name || '',
-        name_model: product?.model || '',
-        name_color: product?.color || '',
-        name_quality: product?.quality || 'ORIGINAL',
+        name_item: existingInventoryFlow.name_nameitems || product?.name || '',
+        name_model: existingInventoryFlow.name_model || product?.model || '',
+        name_color: existingInventoryFlow.name_color || product?.color || '',
+        name_quality: existingInventoryFlow.name_quality || product?.quality || 'ORIGINAL',
         brand: product?.brand || orderData?.brand || 'GENERICO',
         color: product?.color || orderData?.color || 'SINCOLOR',
         tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2a',
@@ -302,12 +304,12 @@ export class IncomeBackendService {
         observaciones: component?.observations || component?.description || '',
       };
 
-      this.logger.debug(`[syncProduct] id_item: ${payload.id_item}, sku: ${payload.sku}, upc: ${payload.upc}`);
+      this.logger.log(`📦 Payload sku: ${payload.sku}`);
+      this.logger.log(`📦 Payload id_item: ${payload.id_item}`);
 
-      // ✅ Guardar el income
       const result = await this.saveIncomeFromOrder(payload);
 
-      this.logger.log(`✅ Producto ${product?.name || 'N/A'} sincronizado en incomes - SKU: ${inventorySku} - UPC: ${inventoryUpc}`);
+      this.logger.log(`✅ Producto ${product?.name || 'N/A'} sincronizado - SKU: ${inventorySku}`);
 
       return {
         success: true,
@@ -317,12 +319,12 @@ export class IncomeBackendService {
         upc: inventoryUpc,
         batchNumber: result.batchNumber,
         unitPrice: payload.unit_sales_price,
-        quantity: payload.quantity
+        quantity: payload.quantity,
+        inventoryFlowId: inventoryFlowId
       };
 
     } catch (error: any) {
-      this.logger.error(`❌ Error sincronizando producto: ${error.message}`);
-      this.logger.error(`📄 Stack: ${error.stack}`);
+      this.logger.error(`❌ Error sincronizando con InventoryFlow existente: ${error.message}`);
       throw error;
     }
   }
@@ -473,43 +475,53 @@ export class IncomeBackendService {
     }
   }
 
-  // ============================================
-  // ✅ GUARDAR INCOME (método original)
-  // ============================================
-
   async saveIncome(payload: any): Promise<any> {
     try {
-      this.logger.log(`📤 Guardando income...`);
+      this.logger.log(`📤 Guardando income directamente...`);
 
+      // Validar campos requeridos
+      if (!payload.id_item) {
+        throw new Error('El ID del item es requerido');
+      }
+
+      // Obtener o crear documento
       const documentId = await this.findOrCreateDocument(
-        payload.numero_documento || 'S/N',
+        payload.numero_documento || `INC-${Date.now()}`,
         payload.tipo_documento || '65ae74b9f978d87a5c41fd2a',
         payload.id_proveedor || new Types.ObjectId('64eccd1c36843268d5d2b6fc'),
         payload.porcentaje || '65ae74b9f978d87a5c41fd2a'
       );
 
-      const incomeData = this.buildIncomeData(payload, documentId);
-      const newIncome = new this.incomeModel(incomeData);
-      const savedIncome = await newIncome.save();
+      // Construir income
+      const inco = {
+        unit_price: payload.preciounit?.toString() || payload.unit_price || '0',
+        date_income: payload.date_income || new Date(),
+        observations: payload.observaciones || payload.observations || '',
+        quantity: Number(payload.cantidad || payload.quantity || 1),
+        id_document_number: documentId,
+        id_item: this.toObjectIdSafe(payload.id_item),
+        id_coduuid: new Types.ObjectId(),
+        id_status: new Types.ObjectId('65bba1f9089b1af39563eaf5'),
+        unit_sales_price: payload.precioventa?.toString() || payload.unit_sales_price || '0',
+        user_create: payload.user_create || payload.createdByName || 'Sistema',
+        inventory_snapshot: {
+          sku: payload.sku || '',
+          upc: payload.upc || '',
+          name_item: payload.name_item || '',
+          name_model: payload.name_model || '',
+          name_color: payload.name_color || '',
+          name_quality: payload.name_quality || 'ORIGINAL',
+          inventory_id: payload.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
+          inventory_name: payload.inventory_name || 'INVENTORYFLOW'
+        },
+        batch_snapshot: {
+          batchNumber: null,
+          identifiers: payload.imeis || []
+        }
+      };
+
+      const savedIncome = await this.incomeModel.create(inco);
       this.logger.log(`✅ Income guardado: ${savedIncome._id}`);
-
-      try {
-        const batch = await this.createBatch(payload, savedIncome);
-        this.logger.log(`✅ Batch creado: ${batch._id}`);
-
-        await this.incomeModel.findByIdAndUpdate(savedIncome._id, {
-          $set: {
-            batch_id: batch._id,
-            'batch_snapshot.batchNumber': batch.batchNumber,
-            'batch_snapshot.identifiers': batch.identifiers.map((i: any) => i.code)
-          }
-        });
-
-        await this.createStock(batch, payload);
-        this.logger.log(`✅ Stock creado para batch: ${batch._id}`);
-      } catch (batchError: any) {
-        this.logger.warn(`⚠️ No se pudo crear batch/stock: ${batchError.message}`);
-      }
 
       return {
         success: true,
@@ -527,57 +539,7 @@ export class IncomeBackendService {
   }
 
   // ============================================
-  // 🔧 CREAR BATCH (método original) - CON batchNumber
-  // ============================================
-
-  private async createBatch(payload: any, income: any): Promise<any> {
-    try {
-      let itemId: Types.ObjectId;
-      if (this.isValidObjectId(payload.id_item)) {
-        itemId = this.toObjectIdSafe(payload.id_item);
-      } else {
-        throw new Error(`ID de item inválido: ${payload.id_item}`);
-      }
-
-      const itemInfo = await this.inventoryFlowModel.findById(itemId).lean();
-      if (!itemInfo) {
-        throw new Error(`❌ No se encontró el item con ID: ${itemId}`);
-      }
-
-      const facturaIds = ['65ae74b9f978d87a5c41fd2a', '669fce5292dc8027b82650ea', '67f9a68cd12fb6cca2033ef9'];
-      const isBillable = facturaIds.includes(payload.tipo_documento) ? 'yes' : 'no';
-
-      const identifiers = Array.isArray(payload.imeis)
-        ? payload.imeis.map((code: string) => ({ code }))
-        : [];
-
-      const batchNumber = await this.batchCounterHelper.getNextBatchNumber(itemId);
-
-      const newBatch = new this.batchModel({
-        item: itemId,
-        sku: payload.sku || itemInfo.sku,
-        productName: `${itemInfo.name_nameitems || ''} ${itemInfo.name_model || ''}`.trim() || 'Producto',
-        unitPrice: Number(payload.unit_sales_price) || 0,
-        hasTax: true,
-        isBillable: isBillable,
-        batchNumber: batchNumber,
-        incomes_id: income._id,
-        legacy_incomes_id: [],
-        identifiers: identifiers,
-        notes: payload.observations || '',
-      });
-
-      const savedBatch = await newBatch.save();
-      return savedBatch;
-
-    } catch (error: any) {
-      this.logger.error(`❌ Error creando batch: ${error.message}`);
-      throw error;
-    }
-  }
-
-  // ============================================
-  // 🔧 CREAR BATCH DESDE INCOME - CON batchNumber
+  // 🔧 CREAR BATCH DESDE INCOME
   // ============================================
 
   private async createBatchFromIncome(data: any, income: any): Promise<any> {
@@ -604,7 +566,9 @@ export class IncomeBackendService {
         ? data.imeis.map((code: string) => ({ code }))
         : [];
 
+      // ✅ OBTENER EL BATCH NUMBER SECUENCIAL
       const batchNumber = await this.batchCounterHelper.getNextBatchNumber(itemId);
+      this.logger.log(`📦 Batch number obtenido: ${batchNumber}`);
 
       const nuevoBatch = new this.batchModel({
         item: itemId,
@@ -613,7 +577,7 @@ export class IncomeBackendService {
         unitPrice: Number(data.precioventa) || 0,
         hasTax: true,
         isBillable: isBillable,
-        batchNumber: batchNumber,
+        batchNumber: batchNumber, // ✅ AHORA USA EL NÚMERO SECUENCIAL
         incomes_id: income._id,
         legacy_incomes_id: [],
         identifiers: identifiers,
@@ -621,6 +585,7 @@ export class IncomeBackendService {
       });
 
       const savedBatch = await nuevoBatch.save();
+      this.logger.log(`✅ Batch creado con batchNumber: ${savedBatch.batchNumber}`);
 
       await this.incomeModel.findByIdAndUpdate(income._id, {
         $set: {
@@ -634,47 +599,6 @@ export class IncomeBackendService {
 
     } catch (error: any) {
       this.logger.error(`❌ Error creando batch: ${error.message}`);
-      throw error;
-    }
-  }
-
-  // ============================================
-  // 🔧 CREAR STOCK
-  // ============================================
-
-  private async createStock(batch: any, payload: any): Promise<any> {
-    try {
-      const branchId = new Types.ObjectId('64eccd1c36843268d5d2b6fc');
-      const branchName = 'PRINCIPAL';
-      const quantity = Number(payload.quantity) || 1;
-
-      let stock = await this.branchBatchStockModel.findOne({
-        batchId: batch._id,
-        branchId: branchId,
-        isWarehouse: true
-      });
-
-      if (stock) {
-        stock.quantity += quantity;
-        stock.lastUpdatedAt = new Date();
-        return await stock.save();
-      }
-
-      const newStock = new this.branchBatchStockModel({
-        batchId: batch._id,
-        branchId: branchId,
-        id_name_inventory: payload.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
-        last_item_id: batch.item,
-        branchName: branchName,
-        quantity: quantity,
-        isWarehouse: true,
-        status: 'active',
-      });
-
-      return await newStock.save();
-
-    } catch (error: any) {
-      this.logger.error(`❌ Error creando stock: ${error.message}`);
       throw error;
     }
   }
@@ -791,70 +715,6 @@ export class IncomeBackendService {
   }
 
   // ============================================
-  // 🔧 MÉTODOS PRIVADOS AUXILIARES
-  // ============================================
-
-  private async getTypeUuid(type: string): Promise<Types.ObjectId> {
-    return new Types.ObjectId('6659dafad31672b6ed063b49');
-  }
-
-  private async getStatusIncome(status: string): Promise<Types.ObjectId> {
-    return new Types.ObjectId('65bba1f9089b1af39563eaf5');
-  }
-
-  private buildIncomeData(payload: any, documentId: Types.ObjectId): any {
-    const defaultId = new Types.ObjectId();
-
-    return {
-      unit_price: this.getField(payload, ['unit_price', 'preciounit', 'unitPrice'], '0'),
-      unit_sales_price: this.getField(payload, ['unit_sales_price', 'precioventa', 'unitSalesPrice'], '0'),
-      observations: this.getField(payload, ['observations', 'observaciones', 'descripcion', 'description'], ''),
-      quantity: Number(this.getField(payload, ['quantity', 'cantidad', 'qty'], 1)),
-      date_income: this.getField(payload, ['date_income', 'fecha', 'date', 'createdAt'], new Date()),
-      id_document_number: documentId,
-      id_item: this.toObjectIdSafe(
-        this.getField(payload, ['id_item', 'productId', 'itemId']),
-        defaultId
-      ),
-      id_coduuid: this.toObjectIdSafe(
-        this.getField(payload, ['id_coduuid', 'coduuid', 'uuid']),
-        defaultId
-      ),
-      id_status: this.toObjectIdSafe(
-        this.getField(payload, ['id_status', 'statusId', 'estadoId']),
-        new Types.ObjectId('65bba1f9089b1af39563eaf5')
-      ),
-      user_create: this.getField(payload, ['user_create', 'usuario', 'user'], 'ordenes'),
-      inventory_snapshot: {
-        inventory_id: this.toObjectIdSafe(
-          this.getField(payload, ['inventory_id', 'inventoryId', 'bodegaId']),
-          new Types.ObjectId('67b3bc26b850b543c94ca47d')
-        ),
-        inventory_name: this.getField(payload, ['inventory_name', 'inventoryName', 'bodega'], 'INVENTORYFLOW'),
-        sku: this.getField(payload, ['sku', 'codigo', 'code'], ''),
-        upc: this.getField(payload, ['upc', 'codigoBarra', 'barcode'], ''),
-        name_item: this.getField(payload, ['name_item', 'nameItem', 'nombre', 'productName'], ''),
-        name_model: this.getField(payload, ['name_model', 'nameModel', 'modelo', 'model'], ''),
-        name_color: this.getField(payload, ['name_color', 'nameColor', 'color'], ''),
-        name_quality: this.getField(payload, ['name_quality', 'nameQuality', 'calidad', 'quality'], 'ORIGINAL')
-      },
-      batch_snapshot: {
-        batchNumber: 0,
-        identifiers: []
-      }
-    };
-  }
-
-  private getField(payload: any, keys: string[], defaultValue: any = null): any {
-    for (const key of keys) {
-      if (payload && payload[key] !== undefined && payload[key] !== null) {
-        return payload[key];
-      }
-    }
-    return defaultValue;
-  }
-
-  // ============================================
   // ✅ GETTERS
   // ============================================
 
@@ -891,145 +751,6 @@ export class IncomeBackendService {
     }
   }
 
-  async getIncomeById(id: string): Promise<any> {
-    try {
-      const income = await this.incomeModel.findById(id).lean();
-      if (!income) {
-        throw new NotFoundException(`Income con ID ${id} no encontrado`);
-      }
-      return income;
-    } catch (error: any) {
-      this.logger.error(`❌ Error getIncomeById: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async getIncomesByOrderId(orderId: string): Promise<any[]> {
-    try {
-      return await this.incomeModel.find({
-        'observations': { $regex: `ORDEN ${orderId}`, $options: 'i' }
-      }).lean();
-    } catch (error: any) {
-      this.logger.error(`❌ Error getIncomesByOrderId: ${error.message}`);
-      return [];
-    }
-  }
-
-  async getIncomesByItemId(itemId: string): Promise<any[]> {
-    try {
-      return await this.incomeModel.find({
-        id_item: new Types.ObjectId(itemId)
-      }).sort({ createdAt: -1 }).lean();
-    } catch (error: any) {
-      this.logger.error(`❌ Error getIncomesByItemId: ${error.message}`);
-      return [];
-    }
-  }
-
-  async listIncomes(page: number = 1, limit: number = 10, search?: string): Promise<any> {
-    try {
-      const skip = (page - 1) * limit;
-      const query: any = {};
-
-      if (search) {
-        query.$or = [
-          { 'inventory_snapshot.name_item': { $regex: search, $options: 'i' } },
-          { 'inventory_snapshot.name_model': { $regex: search, $options: 'i' } },
-          { 'inventory_snapshot.sku': { $regex: search, $options: 'i' } },
-        ];
-      }
-
-      const [data, total] = await Promise.all([
-        this.incomeModel.find(query)
-          .sort({ createdAt: -1 })
-          .skip(skip)
-          .limit(limit)
-          .lean(),
-        this.incomeModel.countDocuments(query)
-      ]);
-
-      return {
-        data,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      };
-    } catch (error: any) {
-      this.logger.error(`❌ Error listIncomes: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async getBatchByIncomeId(incomeId: string): Promise<any> {
-    try {
-      const batch = await this.batchModel.findOne({
-        $or: [
-          { incomes_id: new Types.ObjectId(incomeId) },
-          { legacy_incomes_id: new Types.ObjectId(incomeId) }
-        ]
-      }).lean();
-
-      if (!batch) {
-        throw new NotFoundException(`Batch para income ${incomeId} no encontrado`);
-      }
-      return batch;
-    } catch (error: any) {
-      this.logger.error(`❌ Error getBatchByIncomeId: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async getBatchById(id: string): Promise<any> {
-    try {
-      const batch = await this.batchModel.findById(id).lean();
-      if (!batch) {
-        throw new NotFoundException(`Batch con ID ${id} no encontrado`);
-      }
-      return batch;
-    } catch (error: any) {
-      this.logger.error(`❌ Error getBatchById: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async getStockByBatchId(batchId: string): Promise<any[]> {
-    try {
-      return await this.branchBatchStockModel.find({
-        batchId: new Types.ObjectId(batchId)
-      }).lean();
-    } catch (error: any) {
-      this.logger.error(`❌ Error getStockByBatchId: ${error.message}`);
-      return [];
-    }
-  }
-
-  async getInventoryFlowById(id: string): Promise<any> {
-    try {
-      const flow = await this.inventoryFlowModel.findById(id).lean();
-      if (!flow) {
-        throw new NotFoundException(`InventoryFlow con ID ${id} no encontrado`);
-      }
-      return flow;
-    } catch (error: any) {
-      this.logger.error(`❌ Error getInventoryFlowById: ${error.message}`);
-      throw error;
-    }
-  }
-
-  async getInventoryFlowBySku(sku: string): Promise<any> {
-    try {
-      const flow = await this.inventoryFlowModel.findOne({ sku }).lean();
-      if (!flow) {
-        throw new NotFoundException(`InventoryFlow con SKU ${sku} no encontrado`);
-      }
-      return flow;
-    } catch (error: any) {
-      this.logger.error(`❌ Error getInventoryFlowBySku: ${error.message}`);
-      throw error;
-    }
-  }
-
   async getQualities(): Promise<any[]> {
     try {
       return await this.qualityModel.find()
@@ -1041,6 +762,124 @@ export class IncomeBackendService {
     }
   }
 
+  async getInventories(): Promise<any[]> {
+    try {
+      this.logger.log('📤 Obteniendo lista de inventarios...');
+      
+      const inventories = await this.nameInventoryModel.find()
+        .sort({ inventory_name: 1 })
+        .lean()
+        .exec();
+      
+      this.logger.log(`✅ ${inventories.length} inventarios encontrados`);
+      return inventories;
+    } catch (error: any) {
+      this.logger.error(`❌ Error getInventories: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async getInventoryFlowById(id: string): Promise<any> {
+    try {
+      const flow = await this.inventoryFlowModel.findById(id).lean();
+      if (!flow) {
+        throw new NotFoundException(`InventoryFlow con ID ${id} no encontrado`);
+      }
+      
+      this.logger.log(`✅ InventoryFlow encontrado: ${flow._id} - SKU: ${flow.sku}`);
+      return flow;
+    } catch (error: any) {
+      this.logger.error(`❌ Error getInventoryFlowById: ${error.message}`);
+      throw error;
+    }
+  }
+
+  async searchInventoryFlowItems(query: any): Promise<any> {
+    try {
+      const searchTerm = query.q || '';
+      const inventoryId = query.inventoryId || null;
+      const limit = parseInt(query.limit) || 20;
+      const page = parseInt(query.page) || 1;
+      const skip = (page - 1) * limit;
+
+      const filter: any = {};
+
+      if (inventoryId) {
+        filter.id_type_inventory = new Types.ObjectId(inventoryId);
+      }
+
+      if (searchTerm) {
+        filter.$or = [
+          { sku: { $regex: searchTerm, $options: 'i' } },
+          { name_nameitems: { $regex: searchTerm, $options: 'i' } },
+          { name_model: { $regex: searchTerm, $options: 'i' } },
+          { upc: { $regex: searchTerm, $options: 'i' } },
+        ];
+      }
+
+      const [items, total] = await Promise.all([
+        this.inventoryFlowModel.find(filter)
+          .sort({ name_nameitems: 1 })
+          .skip(skip)
+          .limit(limit)
+          .lean()
+          .exec(),
+        this.inventoryFlowModel.countDocuments(filter),
+      ]);
+
+      const inventoryIds = items
+        .map(item => item.id_type_inventory)
+        .filter(id => id);
+
+      let inventoryNames: any[] = [];
+      if (inventoryIds.length > 0) {
+        inventoryNames = await this.nameInventoryModel.find({
+          _id: { $in: inventoryIds }
+        }).lean().exec();
+      }
+
+      const inventoryNameMap = new Map();
+      inventoryNames.forEach(n => {
+        inventoryNameMap.set(n._id.toString(), n.inventory_name);
+      });
+
+      return {
+        success: true,
+        data: items.map(item => ({
+          _id: item._id,
+          sku: item.sku || '',
+          upc: item.upc || '',
+          name: item.name_nameitems || '',
+          brand: '',
+          model: item.name_model || '',
+          type: '',
+          color: item.name_color || '',
+          quality: item.name_quality || '',
+          condition: '',
+          purchasePrice: null,
+          salePrice: null,
+          stockQuantity: 0,
+          name_item: item.name_nameitems,
+          name_model: item.name_model,
+          name_color: item.name_color,
+          name_quality: item.name_quality,
+          id_type_inventory: item.id_type_inventory,
+          inventory_name: inventoryNameMap.get(item.id_type_inventory?.toString()) || '',
+          inventoryFlowId: item._id,
+        })),
+        pagination: {
+          total,
+          page,
+          limit,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error: any) {
+      this.logger.error(`❌ Error buscando ítems en inventoryflow: ${error.message}`);
+      throw error;
+    }
+  }
+
   // ============================================
   // ⚠️ MÉTODOS DE COMPATIBILIDAD
   // ============================================
@@ -1048,5 +887,89 @@ export class IncomeBackendService {
   async saveInventoryFromOrder(payload: any): Promise<any> {
     this.logger.log(`📤 saveInventoryFromOrder llamado - OrderId: ${payload.orderId || 'N/A'}`);
     return this.productsService.createFromOrder(payload);
+  }
+
+  async syncProductNormal(product: any, orderData: any, component: any): Promise<any> {
+    try {
+      this.logger.log(`📤 Sincronizando producto normal: ${product?.name || 'N/A'}`);
+
+      // ✅ Obtener o crear InventoryFlow
+      const { inventoryFlowId, sku: inventorySku, upc: inventoryUpc } = await this.getOrCreateInventoryFlow(product, orderData);
+
+      if (!inventoryFlowId) {
+        throw new Error(`No se pudo obtener o crear InventoryFlow para: ${product?.name}`);
+      }
+
+      // ✅ Actualizar SKU y UPC del producto SOLO SI ES DIFERENTE
+      if (product?.sku !== inventorySku) {
+        this.logger.log(`🔄 Actualizando SKU del Product: ${product?.sku || 'sin SKU'} -> ${inventorySku}`);
+        await this.productsService.updateSku(product._id, inventorySku);
+        product.sku = inventorySku;
+      }
+
+      if (product?.upc !== inventoryUpc) {
+        this.logger.log(`🔄 Actualizando UPC del Product: ${product?.upc || 'sin UPC'} -> ${inventoryUpc}`);
+        await this.productsService.updateUpc(product._id, inventoryUpc);
+        product.upc = inventoryUpc;
+      }
+
+      // ✅ Validar customerId
+      let supplierId: Types.ObjectId;
+      if (orderData?.customerId && this.isValidObjectId(orderData.customerId)) {
+        supplierId = this.toObjectIdSafe(orderData.customerId);
+      } else {
+        supplierId = new Types.ObjectId('64eccd1c36843268d5d2b6fc');
+        this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
+      }
+
+      // ✅ Construir payload
+      const payload = {
+        unit_price: component?.purchasePrice?.toString() || '0',
+        unit_sales_price: component?.salePrice?.toString() || '0',
+        observations: component?.observations || component?.description || `Ingreso desde orden ${orderData?.orderNumber || 'N/A'}`,
+        quantity: component?.quantity || 1,
+        date_income: new Date(),
+        id_item: inventoryFlowId,
+        id_coduuid: new Types.ObjectId(),
+        id_status: new Types.ObjectId('65bba1f9089b1af39563eaf5'),
+        user_create: orderData?.createdByName || orderData?.createdById || 'ordenes',
+        inventory_id: orderData?.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
+        inventory_name: orderData?.inventory_name || 'INVENTORYFLOW',
+        sku: inventorySku,
+        upc: inventoryUpc,
+        name_item: product?.name || '',
+        name_model: product?.model || '',
+        name_color: product?.color || '',
+        name_quality: product?.quality || 'ORIGINAL',
+        brand: product?.brand || orderData?.brand || 'GENERICO',
+        color: product?.color || orderData?.color || 'SINCOLOR',
+        tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2a',
+        imeis: orderData?.imeis || [],
+        numero_documento: `ORD-${orderData?.orderNumber || 'N/A'}`,
+        id_proveedor: supplierId,
+        porcentaje: orderData?.porcentaje || '65ae74b9f978d87a5c41fd2a',
+        cantidad: component?.quantity || 1,
+        precioventa: component?.salePrice || 0,
+        preciounit: component?.purchasePrice || 0,
+        observaciones: component?.observations || component?.description || '',
+      };
+
+      const result = await this.saveIncomeFromOrder(payload);
+
+      return {
+        success: true,
+        incomeId: result.incomeId,
+        batchId: result.batchId,
+        sku: inventorySku,
+        upc: inventoryUpc,
+        batchNumber: result.batchNumber,
+        unitPrice: payload.unit_sales_price,
+        quantity: payload.quantity
+      };
+
+    } catch (error: any) {
+      this.logger.error(`❌ Error sincronizando producto normal: ${error.message}`);
+      throw error;
+    }
   }
 }

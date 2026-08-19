@@ -7,7 +7,7 @@ import { ProductsController } from './products.controller';
 import { ProductsService } from './products.service';
 import { Product, ProductSchema } from './entities/product.entity';
 import { IncomeBackendModule } from '../integrations/income-backend.module';
-import { SharedModule } from '../shared/shared.module'; // ✅ IMPORTAR
+import { SharedModule } from '../shared/shared.module';
 
 @Module({
   imports: [
@@ -20,12 +20,12 @@ import { SharedModule } from '../shared/shared.module'; // ✅ IMPORTAR
       maxRedirects: 5,
     }),
     forwardRef(() => IncomeBackendModule),
-    SharedModule, // ✅ AGREGAR
+    SharedModule, // ✅ SharedModule exporta BatchCounterHelper y SkuGeneratorHelper
   ],
   controllers: [ProductsController],
   providers: [
     ProductsService,
-    // ❌ ELIMINAR SkuGeneratorHelper de providers (viene de SharedModule)
+    // ❌ NO DECLARAR AQUÍ - ya vienen de SharedModule
   ],
   exports: [ProductsService],
 })

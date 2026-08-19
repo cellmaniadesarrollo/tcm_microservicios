@@ -25,7 +25,7 @@ export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 
   // ============================================
-  // CRUD BÁSICO
+  // POST
   // ============================================
 
   @Post()
@@ -34,6 +34,24 @@ export class ProductsController {
   async create(@Body() createProductDto: CreateProductDto) {
     return await this.productsService.create(createProductDto);
   }
+
+  @Post('from-order')
+  @ApiOperation({ summary: 'Crear productos en inventario desde una orden' })
+  @ApiResponse({ status: HttpStatus.CREATED, description: 'Productos creados exitosamente' })
+  async createFromOrder(@Body() data: any) {
+    return await this.productsService.createFromOrder(data);
+  }
+
+  @Post('from-inventory-flow')
+  @ApiOperation({ summary: 'Crear producto desde inventory flow existente' })
+  @ApiResponse({ status: HttpStatus.CREATED })
+  async createProductFromInventoryFlow(@Body() payload: any) {
+    return await this.productsService.createProductFromInventoryFlow(payload);
+  }
+
+  // ============================================
+  // ✅ GET - RUTAS ESPECÍFICAS (SIN PARÁMETROS) - PRIMERO
+  // ============================================
 
   @Get()
   @ApiOperation({ summary: 'Obtener todos los productos' })
@@ -60,11 +78,37 @@ export class ProductsController {
     return await this.productsService.findLowStock();
   }
 
-  @Get(':id')
-  @ApiOperation({ summary: 'Obtener producto por ID' })
-  @ApiResponse({ status: HttpStatus.OK, type: ProductResponseDto })
-  async findOne(@Param('id') id: string) {
-    return await this.productsService.findOne(id);
+  // ✅ INVENTORY FLOW - RUTAS ESPECÍFICAS (DEBEN IR ANTES DE :id)
+  @Get('search-inventory-flow')
+  @ApiOperation({ summary: 'Buscar ítems en inventory flow' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async searchInventoryFlowItems(@Query() query: any) {
+    return await this.productsService.searchInventoryFlowItems(query);
+  }
+
+  @Get('inventory-flow/:id')
+  @ApiOperation({ summary: 'Obtener inventory flow por ID' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async getInventoryFlowById(@Param('id') id: string) {
+    return await this.productsService.getInventoryFlowById(id);
+  }
+
+  // ============================================
+  // ✅ GET - RUTAS CON PARÁMETROS ESPECÍFICOS
+  // ============================================
+
+  @Get('device/:deviceId')
+  @ApiOperation({ summary: 'Obtener productos por ID de dispositivo' })
+  @ApiResponse({ status: HttpStatus.OK, type: [ProductResponseDto] })
+  async findByDeviceId(@Param('deviceId') deviceId: string) {
+    return await this.productsService.findByDeviceId(parseInt(deviceId, 10));
+  }
+
+  @Get('by-order/:orderId')
+  @ApiOperation({ summary: 'Obtener productos por ID de orden' })
+  @ApiResponse({ status: HttpStatus.OK, type: [ProductResponseDto] })
+  async findByOrderId(@Param('orderId') orderId: string) {
+    return await this.productsService.findByOrderId(orderId);
   }
 
   @Get('code/:code')
@@ -73,6 +117,21 @@ export class ProductsController {
   async findByCode(@Param('code') code: string) {
     return await this.productsService.findByCode(code);
   }
+
+  // ============================================
+  // ✅ GET - RUTA CON PARÁMETRO ID (AL FINAL)
+  // ============================================
+
+  @Get(':id')
+  @ApiOperation({ summary: 'Obtener producto por ID' })
+  @ApiResponse({ status: HttpStatus.OK, type: ProductResponseDto })
+  async findOne(@Param('id') id: string) {
+    return await this.productsService.findOne(id);
+  }
+
+  // ============================================
+  // ✅ PUT, PATCH, DELETE
+  // ============================================
 
   @Put(':id')
   @ApiOperation({ summary: 'Actualizar producto' })
@@ -93,54 +152,16 @@ export class ProductsController {
     return await this.productsService.changeStatus(id, statusChangeDto);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'Eliminar producto (soft delete)' })
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async delete(@Param('id') id: string, @Body() body: any) {
-    await this.productsService.softDelete(id, body.deletedById, body.deletedByName);
-  }
-
   @Patch(':id/restore')
   @ApiOperation({ summary: 'Restaurar producto eliminado' })
   async restore(@Param('id') id: string) {
     return await this.productsService.restore(id);
   }
 
-  // ============================================
-  // ✅ NUEVOS ENDPOINTS PARA INTEGRACIÓN CON ÓRDENES
-  // ============================================
-
-  /**
-   * Buscar productos por ID de dispositivo
-   * GET /api/products/device/:deviceId
-   */
-  @Get('device/:deviceId')
-  @ApiOperation({ summary: 'Obtener productos por ID de dispositivo' })
-  @ApiResponse({ status: HttpStatus.OK, type: [ProductResponseDto] })
-  async findByDeviceId(@Param('deviceId') deviceId: string) {
-    return await this.productsService.findByDeviceId(parseInt(deviceId, 10));
-  }
-
-  /**
-   * Buscar productos por ID de orden (metadata.orderId)
-   * GET /api/products/by-order/:orderId
-   */
-  @Get('by-order/:orderId')
-  @ApiOperation({ summary: 'Obtener productos por ID de orden' })
-  @ApiResponse({ status: HttpStatus.OK, type: [ProductResponseDto] })
-  async findByOrderId(@Param('orderId') orderId: string) {
-    // ✅ Pasar como string, el service lo convertirá a número
-    return await this.productsService.findByOrderId(orderId);
-  }
-
-  /**
-   * Crear productos desde una orden (múltiples componentes)
-   * POST /api/products/from-order
-   */
-  @Post('from-order')
-  @ApiOperation({ summary: 'Crear productos en inventario desde una orden' })
-  @ApiResponse({ status: HttpStatus.CREATED, description: 'Productos creados exitosamente' })
-  async createFromOrder(@Body() data: any) {
-    return await this.productsService.createFromOrder(data);
+  @Delete(':id')
+  @ApiOperation({ summary: 'Eliminar producto (soft delete)' })
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async delete(@Param('id') id: string, @Body() body: any) {
+    await this.productsService.softDelete(id, body.deletedById, body.deletedByName);
   }
 }

@@ -21,6 +21,7 @@ import { Color, ColorSchema } from './models/color.model';
 import { Brand, BrandSchema } from './models/brand.model';
 import { TypeInventoryFlow, TypeInventoryFlowSchema } from './models/type-inventory-flow.model';
 import { Quality, QualitySchema } from './models/quality.model';
+import { NameInventory, NameInventorySchema } from './models/name-inventory.model'; // ✅ IMPORTAR
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { Quality, QualitySchema } from './models/quality.model';
         { name: Brand.name, schema: BrandSchema },
         { name: TypeInventoryFlow.name, schema: TypeInventoryFlowSchema },
         { name: Quality.name, schema: QualitySchema },
+        { name: NameInventory.name, schema: NameInventorySchema }, // ✅ AGREGAR
       ],
       'atlas'
     ),
