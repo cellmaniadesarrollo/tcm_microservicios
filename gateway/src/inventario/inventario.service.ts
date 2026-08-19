@@ -435,6 +435,25 @@ export class InventarioService {
   }
 
   /**
+   * Obtener todos los inventarios disponibles
+   */
+  async getInventories(): Promise<any> {
+    this.logger.log(`📤 [Gateway] getInventories`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/inventories`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getInventories: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener inventarios',
+      };
+    }
+  }
+
+  /**
    * Generar SKU
    */
   async generateSku(data: { typeId: string; brandId: string; colorId: string; inventoryName?: string }): Promise<any> {
@@ -575,6 +594,65 @@ export class InventarioService {
       throw {
         statusCode: error.response?.status || 500,
         message: error.response?.data?.message || error.message || `Error al obtener partes disponibles para la orden ${orderId}`,
+      };
+    }
+  }
+
+  /**
+   * Buscar ítems en inventory flow
+   */
+  async searchInventoryFlowItems(query: any): Promise<any> {
+    this.logger.log(`📤 [Gateway] searchInventoryFlowItems - q: ${query.q}, inventoryId: ${query.inventoryId}`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/search-inventory-flow`, { 
+          params: query 
+        })
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error searchInventoryFlowItems: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al buscar ítems en inventory flow',
+      };
+    }
+  }
+
+  /**
+   * Obtener inventory flow por ID
+   */
+  async getInventoryFlowById(id: string): Promise<any> {
+    this.logger.log(`📤 [Gateway] getInventoryFlowById: ${id}`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/products/inventory-flow/${id}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getInventoryFlowById: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || `Error al obtener inventory flow ${id}`,
+      };
+    }
+  }
+
+  /**
+   * Crear producto desde inventory flow existente
+   */
+  async createProductFromInventoryFlow(payload: any): Promise<any> {
+    this.logger.log(`📤 [Gateway] createProductFromInventoryFlow - inventoryFlowId: ${payload.inventoryFlowId}`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.post(`${this.inventarioUrl}/api/products/from-inventory-flow`, payload)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error createProductFromInventoryFlow: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al crear producto desde inventory flow',
       };
     }
   }
