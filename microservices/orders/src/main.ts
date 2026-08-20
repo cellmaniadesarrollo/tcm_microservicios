@@ -3,7 +3,7 @@ import { AppModule } from './app.module';
 import { InternalAuthInterceptor } from './interceptors/internal-auth.interceptor';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-
+ 
 async function bootstrap() {
   try {
     // ── 1. Crear la aplicación NestJS con Fastify ──

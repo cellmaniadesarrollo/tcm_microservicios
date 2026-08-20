@@ -32,6 +32,7 @@ on:
           - notifications
           - task-board
           - notification-dispatcher
+          - inventario
           # ── Infraestructura (solo logs/restart, nunca deploy) ──
           - kafka
           - rabbitmq
@@ -99,8 +100,8 @@ jobs:
             cd docker
             SERVICES_TO_PROCESS=""
 
-            # Solo microservicios de aplicación (kafka/rabbitmq/init-kafka excluidos)
-            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway"
+            # ✅ AGREGAR inventario a la lista de servicios de aplicación
+            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario"
 
             if [ "$ACTION" == "deploy_smart" ]; then
               echo "🔍 Analizando cambios automáticos..."
@@ -120,6 +121,7 @@ jobs:
                 ["notifications"]="microservices/notifications/"
                 ["task-board"]="microservices/task-board/"
                 ["notification-dispatcher"]="microservices/notification-dispatcher/"
+                ["inventario"]="microservices/inventario/"
               )
 
               for MS in "${!PATHS[@]}"; do
@@ -152,7 +154,7 @@ jobs:
               docker compose -f compose.prod.yml up -d --build --force-recreate "$MS"
 
               case "$MS" in
-                gateway|realtime) sleep 12 ;;
+                gateway|realtime|inventario) sleep 12 ;;  # ✅ Agregar inventario al sleep
                 *) sleep 8 ;;
               esac
               echo "✅ $MS listo."
