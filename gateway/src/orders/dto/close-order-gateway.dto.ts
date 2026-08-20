@@ -1,5 +1,25 @@
-// dto/close-order-gateway.dto.ts
-import { IsInt, IsPositive, IsOptional, IsString, IsBoolean, Min } from 'class-validator';
+import {
+    IsInt,
+    IsPositive,
+    IsOptional,
+    IsString,
+    IsBoolean,
+    Min,
+    ValidateNested,
+    IsDefined
+} from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class BillingSnapshotDto {
+    @IsString()
+    id: string;
+
+    @IsString()
+    name: string;
+
+    @IsString()
+    idNumber: string;
+}
 
 export class CloseOrderGatewayDto {
     @IsInt()
@@ -8,11 +28,11 @@ export class CloseOrderGatewayDto {
 
     @IsOptional()
     @IsInt()
-    receivedByCustomerId?: number;         // ID del cliente si está registrado en cache
+    receivedByCustomerId?: number; // ID del cliente si está registrado en cache
 
     @IsOptional()
     @IsString()
-    receivedByName?: string;               // Nombre manual si no es cliente registrado
+    receivedByName?: string; // Nombre manual si no es cliente registrado
 
     @IsOptional()
     @IsBoolean()
@@ -23,9 +43,14 @@ export class CloseOrderGatewayDto {
     paymentMethodId?: number;
 
     @Min(0, { message: 'El monto final debe ser mayor o igual a cero' })
-    amount: number;
+    amount?: number;
 
     @IsOptional()
     @IsString()
     closureObservation?: string;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BillingSnapshotDto)
+    billing?: BillingSnapshotDto; // 👈 Objeto agrupado con validación anidada
 }

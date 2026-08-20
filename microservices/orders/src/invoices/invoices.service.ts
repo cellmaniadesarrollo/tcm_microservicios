@@ -5,6 +5,8 @@ import { BroadcastService } from '../broadcast/broadcast.service';
 import { OrderExtraService } from '../order-extras/entities/order-extra-service.entity';
 import { OrderFinding } from '../order-findings/entities/order-finding.entity';
 import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
+import { BillingSnapshotDto } from '../order-findings/dto/close-order.dto';
+import { OrderInvoice, InvoiceEmissionStatus } from './entities/order-invoice.entity';
 
 export interface InvoiceDetailLine {
     movement_id?: string;
@@ -13,9 +15,7 @@ export interface InvoiceDetailLine {
     discount: number;
     unit_price: number;
 }
-
-// TODO: confirmar si es un código único fijo para todo el sistema, o varía
-// por tipo de servicio/sucursal.
+const INVOICE_TYPE_ID = 'FACTURA'; // órdenes solo emite este tipo
 const GENERIC_LABOR_SERVICE_CODE = 'MANO_DE_OBRA_ORDENES';
 
 @Injectable()
@@ -26,14 +26,15 @@ export class InvoicesService {
         private readonly extraServiceRepo: Repository<OrderExtraService>,
         @InjectRepository(OrderFinding)
         private readonly findingRepo: Repository<OrderFinding>,
+        @InjectRepository(OrderInvoice)
+        private readonly orderInvoiceRepo: Repository<OrderInvoice>,
     ) { }
 
     async onModuleInit() {
-        // Pequeña espera para que el producer ya esté conectado
         setTimeout(async () => {
             try {
                 await this.broadcastService.publishInvoiceEmissionRequested({
-                    order_id: 999999, // id de prueba
+                    order_id: 999999,
                     test: true,
                     message: '✅ Mensaje de prueba: el módulo de facturas se inicializó correctamente',
                 });
@@ -45,50 +46,59 @@ export class InvoicesService {
     }
 
     /**
-     * Publica el evento INVOICE_EMISSION_REQUESTED con el payload que consumirá
-     * el handler de Kafka del legacy (kafka/handlers/invoiceHandler.js → emitInvoice).
-     *
-     * TODO: todavía falta agregar al payload:
-     *   - user_id (del customer de la orden — pendiente confirmar mapeo Order.customer → Mongo user_id)
-     *   - emisor_id (objeto: _id, identification, issuer_name, trade_name, cellphone)
-     *   - emisor.establishment
-     *   - tax_id
-     *   - type_id
-     *   - payment_method
-     * Hasta que esos campos estén definidos, este payload NO alcanza para que
-     * emitInvoice() del legacy pueda emitir la factura — solo deja armada la
-     * parte de `details[]`.
+     * Guarda el snapshot de la factura en `order_invoices` (status PENDING) y
+     * publica el evento INVOICE_EMISSION_REQUESTED. El registro local sirve como:
+     *   1. Fuente de reconciliación bulk para el legacy (pull por updatedAt).
+     *   2. Blindaje: si Kafka falla o el legacy no responde, queda evidencia
+     *      de que la orden debía facturarse, con status PENDING para reintentar.
      */
+
+
     async requestInvoiceEmission(
         orderId: number,
+        companyId: string,
+        branchId: string,
+        closedByUserId: string,
+        paymentMethodId: number | null,
         details: InvoiceDetailLine[],
-    ): Promise<{ ok: boolean }> {
-        await this.broadcastService.publishInvoiceEmissionRequested({
+        billing: BillingSnapshotDto,
+    ): Promise<OrderInvoice> {
+        const invoice = this.orderInvoiceRepo.create({
             order_id: orderId,
+            company_id: companyId,
+            branch_id: branchId,
+            closed_by_user_id: closedByUserId,
+            payment_method_id: paymentMethodId ?? undefined,
+            type_id: INVOICE_TYPE_ID,
+            billing_id: billing.id,
+            billing_name: billing.name,
+            billing_id_number: billing.idNumber,
             details,
-            // TODO: user_id, emisor_id, emisor, tax_id, type_id, payment_method
+            status: InvoiceEmissionStatus.PENDING,
         });
-        return { ok: true };
-    }
 
+        const saved = await this.orderInvoiceRepo.save(invoice);
+
+        try {
+            await this.broadcastService.publishInvoiceEmissionRequested({
+                order_id: orderId,
+                details,
+                emisor_id: billing.id,
+                user_id: closedByUserId,
+                emisor: {
+                    establishment: branchId,
+                },
+                payment_method: paymentMethodId,
+                type_id: INVOICE_TYPE_ID,
+            });
+        } catch (err: any) {
+            console.error(`❌ Error publicando INVOICE_EMISSION_REQUESTED para orden ${orderId}:`, err.message);
+        }
+
+        return saved;
+    }
     /**
      * Arma el `details[]` que va en el payload de INVOICE_EMISSION_REQUESTED.
-     * Se llama desde closeOrder() DESPUÉS del commit de la transacción, solo
-     * cuando `shouldEmitInvoice === true` (todos los repuestos asignados son
-     * is_billable_in_repair_orders).
-     *
-     * Resolución de ids de Mongo (product_id / batche_id / service_id) es
-     * responsabilidad del LEGACY (invoiceService.js), no de este microservicio:
-     *   - Repuestos: se manda `movement_id` (SpareAssignment.movement_id). El
-     *     legacy busca ese movimiento en Mongo y de ahí saca product_id y batche_id.
-     *   - Mano de obra: se manda un `service_code` genérico y estable. El legacy
-     *     hace find-or-create sobre RepairService con ese código.
-     *
-     * @param manager - EntityManager de la transacción de closeOrder (para leer
-     *   datos consistentes con lo que se acaba de commitear).
-     * @param orderId
-     * @param billableSpareAssignments - ya filtrados: status ACTIVE +
-     *   is_billable_in_repair_orders === true.
      */
     async buildInvoiceDetails(
         manager: EntityManager,
@@ -97,19 +107,17 @@ export class InvoicesService {
     ): Promise<InvoiceDetailLine[]> {
         const details: InvoiceDetailLine[] = [];
 
-        // ── 1. Repuestos facturables ─────────────────────────────────────
         for (const sa of billableSpareAssignments) {
             details.push({
-                movement_id: sa.movement_id, // el legacy resuelve product_id/batche_id a partir de esto
+                movement_id: sa.movement_id,
                 quantity: sa.quantity,
                 discount: 0,
-                unit_price: Number(sa.unit_price), // precio con el que se asignó el repuesto en la orden
+                unit_price: Number(sa.unit_price),
             });
         }
 
-        // ── 2. Mano de obra combinada (extras + procedimientos) ─────────
         const extraServices = await manager.getRepository(OrderExtraService).find({
-            where: { order_id: orderId }, // soft-delete de TypeORM excluye deletedAt por default
+            where: { order_id: orderId },
         });
 
         const totalExtras = extraServices.reduce(
@@ -142,4 +150,38 @@ export class InvoicesService {
 
         return details;
     }
+
+    /**
+     * Reconciliación bulk: usado por el consumer de RabbitMQ que el legacy
+     * llama con fromCache (mismo patrón que spare-assignments-handler).
+     */
+    async getInvoicesUpdatedAfter(fromCache: Date | null): Promise<OrderInvoice[]> {
+        if (!fromCache) {
+            return this.orderInvoiceRepo.find({ order: { updatedAt: 'ASC' } as any });
+        }
+        return this.orderInvoiceRepo
+            .createQueryBuilder('inv')
+            .where('inv.updatedAt > :fromCache', { fromCache })
+            .orderBy('inv.updatedAt', 'ASC')
+            .getMany();
+    }
+
+    /**
+     * Actualiza el status cuando el legacy confirma o rechaza la emisión.
+     * Se llama desde el handler que consume la respuesta del legacy.
+     */
+    async confirmEmission(orderId: number, legacyInvoiceNumber: string): Promise<void> {
+        await this.orderInvoiceRepo.update(
+            { order_id: orderId },
+            { status: InvoiceEmissionStatus.CONFIRMED, legacy_invoice_number: legacyInvoiceNumber },
+        );
+    }
+
+    async failEmission(orderId: number, errorMessage: string): Promise<void> {
+        await this.orderInvoiceRepo.update(
+            { order_id: orderId },
+            { status: InvoiceEmissionStatus.ERROR, error_message: errorMessage },
+        );
+    }
 }
+
