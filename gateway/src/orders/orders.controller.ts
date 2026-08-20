@@ -295,6 +295,13 @@ export class OrdersController {
       receivedByName: formData.receivedByName || undefined,
       signatureCollected: formData.signatureCollected === 'true',
       closureObservation: formData.closureObservation || undefined,
+      billing: formData.billingId    // 👈 NUEVO: solo arma el objeto si viene el id
+        ? {
+          id: formData.billingId,
+          name: formData.billingName || '',
+          idNumber: formData.billingIdNumber || '',
+        }
+        : undefined,
     };
 
     return this.ordersGatewayService.closeOrder(
