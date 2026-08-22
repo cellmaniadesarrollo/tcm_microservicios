@@ -522,12 +522,12 @@ export class ProductsService {
       this.logger.log(`📦 inventoryFlowId recibido: ${data.inventoryFlowId}`);
       this.logger.log(`📦 sku recibido: ${data.sku}`);
       this.logger.log(`📦 upc recibido: ${data.upc}`);
+      this.logger.log(`📱 IMEIS recibidos en createFromOrder: ${data.imeis?.length || 0} - ${JSON.stringify(data.imeis || [])}`);
       
       const results = [];
       
       for (const component of data.components) {
         const quality = component.quality || 'B';
-        // ✅ Si viene inventoryFlowId, es de Inventory Flow seleccionado
         const isFromInventoryFlow = Boolean(data.inventoryFlowId);
         const isSerializedDevice = (component.type || data.type) === 'COMPLETO';
         
@@ -543,29 +543,27 @@ export class ProductsService {
 
           this.logger.log(`✅ InventoryFlow encontrado: ${existingInventoryFlow.sku} - ${existingInventoryFlow.name_nameitems}`);
           
-          // ✅ USAR EL SKU Y UPC DEL PAYLOAD (DEL INVENTORYFLOW SELECCIONADO)
           const skuToUse = data.sku || existingInventoryFlow.sku;
           const upcToUse = data.upc || existingInventoryFlow.upc || '';
           
           this.logger.log(`📦 SKU a usar: ${skuToUse}`);
           this.logger.log(`📦 UPC a usar: ${upcToUse}`);
           
-          // ✅ Buscar producto existente por SKU (NO por nombre)
+          // ✅ Buscar producto existente por SKU
           const existingProduct = await this.productModel.findOne({
             sku: skuToUse,
             isDeleted: false,
           });
           
           if (existingProduct && !isSerializedDevice) {
-            // ✅ Actualizar stock del producto existente
             const quantity = component.quantity || 1;
             existingProduct.stockQuantity = (existingProduct.stockQuantity || 0) + quantity;
             existingProduct.updatedAt = new Date();
             await existingProduct.save();
             product = existingProduct;
-            this.logger.log(`📦 Stock actualizado en producto existente: ${product.code} - SKU: ${product.sku}`);
+            this.logger.log(`📦 Stock actualizado en producto existente: ${product.code}`);
           } else {
-            // ✅ Crear producto con SKU DEL INVENTORYFLOW SELECCIONADO
+            // ✅ Crear producto
             const productData: CreateProductDto = {
               name: component.name || existingInventoryFlow.name_nameitems || 'Dispositivo',
               brand: component.brand || 'Genérico',
@@ -584,7 +582,6 @@ export class ProductsService {
               createdById: data.createdById,
               createdByName: data.createdByName,
               supplierName: data.customerName,
-              // ✅ USAR SKU Y UPC DEL INVENTORYFLOW SELECCIONADO
               sku: skuToUse,
               upc: upcToUse,
               metadata: {
@@ -604,11 +601,35 @@ export class ProductsService {
             this.logger.log(`📦 Nuevo producto creado: ${product.code} - SKU: ${product.sku}`);
           }
           
-          // ✅ Sincronizar con el InventoryFlow SELECCIONADO (NO CREAR NUEVO)
-          this.logger.log(`📤 [createFromOrder] Sincronizando con InventoryFlow existente: ${skuToUse}`);
+          // ✅ CONSTRUIR syncData CON IMEIS EXPLÍCITOS
+          const syncData = {
+            orderId: data.orderId,
+            orderNumber: data.orderNumber,
+            deviceId: data.deviceId,
+            deviceName: data.deviceName,
+            deviceColor: data.deviceColor,
+            customerName: data.customerName,
+            customerId: data.customerId,
+            brand: component.brand || data.brand,
+            color: component.color || data.deviceColor,
+            sku: skuToUse,
+            upc: upcToUse,
+            // ✅ PASAR IMEIS EXPLÍCITAMENTE
+            imeis: data.imeis || [],
+            inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
+            inventory_name: data.inventory_name || 'INVENTORYFLOW',
+            tipo_documento: data.tipo_documento || '65ae74b9f978d87a5c41fd2b',
+            porcentaje: data.porcentaje || '65d7a93e81594c12686310aa',
+            createdByName: data.createdByName,
+            createdById: data.createdById,
+          };
+          
+          this.logger.log(`📱 syncData.imeis: ${syncData.imeis.length} - ${JSON.stringify(syncData.imeis)}`);
+          
+          // ✅ Sincronizar con el InventoryFlow PASANDO syncData CON IMEIS
           await this.incomeBackendService.syncProductWithExistingInventoryFlow(
             product,
-            data,
+            syncData,  // ✅ Aquí pasamos syncData con los IMEIS
             component,
             existingInventoryFlow
           );
@@ -648,7 +669,12 @@ export class ProductsService {
           this.logger.log(`📦 Nuevo producto creado: ${product.code}`);
           
           // ✅ Sincronizar con syncProduct normal (crea InventoryFlow si no existe)
-          await this.incomeBackendService.syncProductNormal(product, data, component);
+          // ✅ También pasamos los IMEIS aquí
+          const syncDataNormal = {
+            ...data,
+            imeis: data.imeis || []
+          };
+          await this.incomeBackendService.syncProductNormal(product, syncDataNormal, component);
         }
         
         results.push({
