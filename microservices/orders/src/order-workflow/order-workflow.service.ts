@@ -1524,6 +1524,14 @@ export class OrderWorkflowService {
       } else {
         console.log(`✅ Orden ${dto.orderId}: ${spareAssignments.length} repuesto(s), todos facturables → se emitirá factura automática`);
       }
+      // ── NUEVO: bloquear el cierre si corresponde facturar pero falta billingId ──
+      if (shouldEmitInvoice && !dto.billing) {
+        throw new RpcException(
+          new BadRequestException(
+            'Esta orden requiere emisión automática de factura (todos los repuestos son facturables), pero no se proporcionó información de facturación. Registre los datos de facturación del cliente antes de cerrar la orden.',
+          ),
+        );
+      }
       // ──────────────────────────────────────────────────────────────────
 
       const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
@@ -1542,6 +1550,9 @@ export class OrderWorkflowService {
         amount: dto.amount,
         payment_method_id: dto.paymentMethodId ?? null,
         closure_observation: dto.closureObservation ?? null,
+        billing_id: dto.billing?.id ?? null,             // 👈 sigue siendo columnas planas en la tabla
+        billing_name: dto.billing?.name ?? null,
+        billing_id_number: dto.billing?.idNumber ?? null,
         company_id: user.companyId,
         branch_id: user.branchId,
       };
@@ -1651,6 +1662,7 @@ export class OrderWorkflowService {
         // ── NUEVO: se llevan fuera de la transacción para decidir si se dispara Kafka ──
         shouldEmitInvoice,
         spareAssignments, // los billables ya confirmados si shouldEmitInvoice === true
+        billing: dto.billing,
         order,
       };
     });
@@ -1701,17 +1713,24 @@ export class OrderWorkflowService {
     // ── NUEVO: disparar emisión de factura solo si corresponde ───────────
     // El armado del payload completo (emisor, tax, details, etc.) lo vemos
     // en el siguiente paso; acá solo dejamos el punto de entrada condicionado.
-    if (result.shouldEmitInvoice) {
+    if (result.shouldEmitInvoice && result.billing) {
       const details = await this.invoicesService.buildInvoiceDetails(
         this.orderRepo.manager,
         dto.orderId,
-        result.spareAssignments, // ya vienen todos facturables si shouldEmitInvoice === true
+        result.spareAssignments,
       );
-      await this.invoicesService.requestInvoiceEmission(dto.orderId, details);
+      await this.invoicesService.requestInvoiceEmission(
+        dto.orderId,
+        user.companyId,
+        user.branchId,
+        user.userId,           // 👈 quien cerró la orden
+        dto.paymentMethodId ?? null,  // 👈 el método de pago del cierre
+        details,
+        result.billing,
+      );
     } else {
       console.log(`⏭️ Orden ${dto.orderId}: NO se dispara emisión automática de factura (revisar log de validación arriba)`);
     }
-
     return result.delivery;
   }
 

@@ -99,12 +99,16 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
 
             this.isRunning = true;
 
-            await this.consumer.run({
+            // 🔥 Importante: NO usar await
+            this.consumer.run({
                 autoCommit: false,
                 partitionsConsumedConcurrently: 3,
                 eachMessage: async (payload: EachMessagePayload) => {
                     await this.processMessage(payload);
                 },
+            }).catch((error: any) => {
+                console.error('❌ Error en consumer.run():', error.message);
+                this.isRunning = false;
             });
 
         } catch (error: any) {
