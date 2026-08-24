@@ -308,7 +308,7 @@ services:
       - NODE_ENV=production
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - DB_NAME=${MONGODB_DB_REPORTS}
-      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_URI=${MONGODB_URI_REPORTS}
     networks:
       - backend
     healthcheck:
@@ -474,7 +474,7 @@ services:
       
       # ─── MongoDB CONEXIÓN 1: PRODUCTOS ───
       - DB_NAME_INVENTARIO=${DB_NAME_INVENTARIO}
-      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
       
       # ─── MongoDB CONEXIÓN 2: INCOMES (Atlas) ───
       - MONGODB_ATLAS_URI=${MONGODB_ATLAS_URI}
