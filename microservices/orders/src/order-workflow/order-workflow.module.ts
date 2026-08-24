@@ -28,12 +28,14 @@ import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.
 import { OrderValidationLockModule } from '../order-validation-lock/order-validation-lock.module';
 import { OrderPriceAgreement } from './entities/order-price-agreement.entity';
 import { InvoicesModule } from '../invoices/invoices.module';
+import { WarehousePayment } from './entities/warehouse-payment.entity';
 
 @Module({
   imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module,
     TypeOrmModule.forFeature([Order, UserEmployeeCache, Device, OrderStatusHistory,
       OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment,
-      Attachment, OrderNote, OrderNoteLog, OrderShipping, OrderPotentialPurchase, SpareAssignment, OrderPriceAgreement]),
+      Attachment, OrderNote, OrderNoteLog, OrderShipping, OrderPotentialPurchase,
+      SpareAssignment, OrderPriceAgreement, WarehousePayment]),
     BroadcastModule, SearchHistoryModule, DevicesModule, OrderValidationLockModule, InvoicesModule],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService, OrderShippingService],
