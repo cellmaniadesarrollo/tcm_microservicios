@@ -305,5 +305,103 @@ export class OrderWorkflowController {
       data.user,
     );
   }
+  @MessagePattern({ cmd: 'pasar_a_bodega' })
+  async pasarABodega(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      const result = await this.orderWorkflowService.pasarABodega(
+        data.dto,
+        data.files ?? [],
+        data.user,
+      );
+
+      console.log('✅ MS Órdenes - Pasar a bodega exitoso');
+      return result;
+
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (pasarABodega):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'get_warehouse_attachments' })
+  async getWarehouseAttachments(@Payload() data: any) {
+    try {
+      if (!data.orderId || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta orderId o user');
+      }
+
+      return await this.orderWorkflowService.getWarehouseAttachments(data.orderId, data.user);
+
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (getWarehouseAttachments):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'create_warehouse_payment' })
+  async createWarehousePayment(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      const result = await this.orderWorkflowService.createWarehousePayment(
+        data.dto,
+        data.files ?? [],
+        data.user,
+      );
+
+      console.log('✅ MS Órdenes - Pago de bodega registrado');
+      return result;
+
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (createWarehousePayment):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'get_warehouse_payments' })
+  async getWarehousePayments(@Payload() data: any) {
+    try {
+      if (!data.orderId || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta orderId o user');
+      }
+
+      return await this.orderWorkflowService.getWarehousePayments(data.orderId, data.user);
+
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (getWarehousePayments):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
 }
 
