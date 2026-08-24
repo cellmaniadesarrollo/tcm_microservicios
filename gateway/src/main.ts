@@ -10,7 +10,7 @@ import fastifyStatic from '@fastify/static';
 import { join } from 'path';
 import { RpcToHttpInterceptor } from './common/interceptors/rpc-to-http.interceptor';
 import multipart from '@fastify/multipart';
- 
+
 async function bootstrap() {
   const isProduction = process.env.NODE_ENV === 'production';
 
