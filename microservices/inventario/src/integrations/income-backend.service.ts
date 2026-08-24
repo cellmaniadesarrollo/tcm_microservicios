@@ -1019,12 +1019,46 @@ export class IncomeBackendService {
   async syncProductNormal(product: any, orderData: any, component: any): Promise<any> {
     try {
       this.logger.log(`📤 Sincronizando producto normal: ${product?.name || 'N/A'}`);
+      
+      // ✅ LOG DEL COMPONENTE PARA VERIFICAR
+      this.logger.log(`📦 Componente recibido:`, JSON.stringify({
+        name: component?.name,
+        inventoryFlowId: component?.inventoryFlowId,
+        inventoryFlowSku: component?.inventoryFlowSku,
+        inventoryFlowUpc: component?.inventoryFlowUpc
+      }));
 
-      // ✅ Obtener o crear InventoryFlow
-      const { inventoryFlowId, sku: inventorySku, upc: inventoryUpc } = await this.getOrCreateInventoryFlow(product, orderData);
+      let inventoryFlowId: Types.ObjectId;
+      let inventorySku: string;
+      let inventoryUpc: string;
 
-      if (!inventoryFlowId) {
-        throw new Error(`No se pudo obtener o crear InventoryFlow para: ${product?.name}`);
+      // ✅ SI EL COMPONENTE TIENE inventoryFlowId, USARLO
+      if (component?.inventoryFlowId) {
+        this.logger.log(`🔍 Buscando InventoryFlow por ID: ${component.inventoryFlowId}`);
+        
+        // Buscar el InventoryFlow por ID
+        const existingFlow = await this.inventoryFlowModel.findById(component.inventoryFlowId).lean();
+        
+        if (existingFlow) {
+          inventoryFlowId = existingFlow._id;
+          inventorySku = existingFlow.sku || component.inventoryFlowSku || '';
+          inventoryUpc = existingFlow.upc || component.inventoryFlowUpc || '';
+          this.logger.log(`✅ Usando InventoryFlow del componente: ${inventorySku} (${inventoryFlowId})`);
+        } else {
+          this.logger.warn(`⚠️ InventoryFlow no encontrado: ${component.inventoryFlowId}, creando uno nuevo por nombre`);
+          // Si no existe, crear uno nuevo
+          const result = await this.getOrCreateInventoryFlow(product, orderData);
+          inventoryFlowId = result.inventoryFlowId;
+          inventorySku = result.sku;
+          inventoryUpc = result.upc;
+        }
+      } else {
+        // ✅ Crear o obtener InventoryFlow por nombre (comportamiento original)
+        this.logger.log(`ℹ️ No hay inventoryFlowId en el componente, creando/obteniendo por nombre`);
+        const result = await this.getOrCreateInventoryFlow(product, orderData);
+        inventoryFlowId = result.inventoryFlowId;
+        inventorySku = result.sku;
+        inventoryUpc = result.upc;
       }
 
       // ✅ Actualizar SKU y UPC del producto SOLO SI ES DIFERENTE
@@ -1049,7 +1083,7 @@ export class IncomeBackendService {
         this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
       }
 
-      // ✅ Construir payload
+      // ✅ Construir payload con los datos correctos
       const payload = {
         unit_price: component?.purchasePrice?.toString() || '0',
         unit_sales_price: component?.salePrice?.toString() || '0',
@@ -1072,6 +1106,9 @@ export class IncomeBackendService {
         color: product?.color || orderData?.color || 'SINCOLOR',
         tipo_documento: orderData?.tipo_documento || '65ae74b9f978d87a5c41fd2b',
         imeis: orderData?.imeis || [],
+        customerId: orderData?.customerId || '',
+        customerName: orderData?.customerName || '',
+        customerContacts: orderData?.customerContacts || [],
         numero_documento: `ORD-${orderData?.orderNumber || 'N/A'}`,
         id_proveedor: supplierId,
         porcentaje: orderData?.porcentaje || '65d7a93e81594c12686310aa',
@@ -1080,6 +1117,9 @@ export class IncomeBackendService {
         preciounit: component?.purchasePrice || 0,
         observaciones: component?.observations || component?.description || '',
       };
+
+      this.logger.log(`📦 Payload id_item: ${payload.id_item}`);
+      this.logger.log(`📦 Payload sku: ${payload.sku}`);
 
       const result = await this.saveIncomeFromOrder(payload);
 

@@ -717,10 +717,24 @@ export class ProductsService {
     
     this.logger.log(`🔍 Buscando productos por orderId: ${orderId} (como número: ${orderIdNumber})`);
     
-    return this.productModel.find({
+    const products = await this.productModel.find({
       'metadata.orderId': orderIdNumber,
       isDeleted: false
     }).exec();
+    
+    // ✅ LOG PARA VER QUÉ DEVUELVE
+    this.logger.log(`📦 Productos encontrados: ${products.length}`);
+    this.logger.log(`📦 Datos: ${JSON.stringify(products.map(p => ({
+      id: p._id,
+      name: p.name,
+      orderId: p.metadata?.orderId,
+      orderNumber: p.metadata?.orderNumber,
+      lastOrderId: p.metadata?.lastOrderId,
+      lastOrderNumber: p.metadata?.lastOrderNumber,
+      sku: p.sku
+    })), null, 2)}`);
+    
+    return products;
   }
 
   async updateSku(productId: string, newSku: string): Promise<ProductDocument> {
