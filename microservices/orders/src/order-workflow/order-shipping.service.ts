@@ -7,6 +7,7 @@ import { SaveInboundDto } from './dto/save-inbound.dto';
 import { SaveOutboundDto } from './dto/save-outbound.dto';
 import { RpcException } from '@nestjs/microservices';
 import { OrderValidationLockService } from '../order-validation-lock/order-validation-lock.service';
+import { BroadcastService } from '../broadcast/broadcast.service';
 
 @Injectable()
 export class OrderShippingService {
@@ -16,6 +17,7 @@ export class OrderShippingService {
         @InjectRepository(Order)
         private readonly orderRepo: Repository<Order>,
         private readonly orderValidationLockService: OrderValidationLockService,
+        private readonly broadcastService: BroadcastService,
     ) { }
 
     // ── Recepción ────────────────────────────────────────────────────────────
@@ -47,7 +49,14 @@ export class OrderShippingService {
         }
 
         const saved = await this.shippingRepo.save(shipping);
+        // Activar flag en la orden solo si no estaba ya activo (evita eventos redundantes)
+        if (!order.is_national) {
+            await this.orderRepo.update(orderId, { is_national: true });
 
+            await this.broadcastService.publishOrderUpdated(orderId, 'national_flag_set', {
+                is_national: true,
+            });
+        }
         // Activar flag en la orden
         await this.orderRepo.update(orderId, { is_national: true });
 
