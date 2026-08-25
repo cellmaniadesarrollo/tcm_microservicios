@@ -324,6 +324,14 @@ export class InventarioService {
 
   async createInventoryFromOrder(data: any) {
     try {
+      // ✅ LOG DE ENTRADA
+      this.logger.log(`📦 [Gateway] createInventoryFromOrder - OrderId: ${data.orderId}`);
+      this.logger.log(`📦 [Gateway] public_id recibido: ${data.public_id}`);
+      this.logger.log(`📦 [Gateway] data completa: ${JSON.stringify(data, null, 2)}`);
+      
+      // ✅ Verificar que public_id esté en el body que se envía
+      this.logger.log(`📦 [Gateway] Enviando al microservicio con public_id: ${data.public_id}`);
+      
       const response = await firstValueFrom(
         this.httpService.post(`${this.inventarioUrl}/api/products/from-order`, data)
       );

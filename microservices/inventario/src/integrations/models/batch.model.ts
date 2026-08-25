@@ -48,6 +48,9 @@ export class Batch extends Document {
 
   @Prop({ type: String })
   notes: string;
+
+  @Prop({ type: String, index: true })
+  orderPublicId: string;
 }
 
 export const BatchSchema = SchemaFactory.createForClass(Batch);
