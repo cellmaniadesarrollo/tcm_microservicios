@@ -66,6 +66,8 @@ import { SanitizePurchasePriceInterceptor } from '../common/interceptors/sanitiz
 import { UpdateOrderPriceAgreementGatewayDto } from './dto/update-order-price-agreement.gateway.dto';
 import { CreateOrderPriceAgreementGatewayDto } from './dto/create-order-price-agreement.gateway.dto';
 import { UpdateDeviceImeiGatewayDto } from './dto/update-device-imei-gateway.dto';
+import { PasarABodegaGatewayDto } from './dto/pasar-a-bodega-gateway.dto';
+import { CreateWarehousePaymentGatewayDto } from './dto/create-warehouse-payment-gateway.dto';
 
 @Controller('orders')
 @Auth()
@@ -660,5 +662,56 @@ export class OrdersController {
   @Get('employees-basic')
   async getEmployeesBasic(@User() user: any) {
     return this.ordersGatewayService.getEmployeesBasic(user);
+  }
+
+  @Post('pasar-a-bodega')
+  async pasarABodega(@Req() request: FastifyRequest, @User() user: any) {
+    const { files, formData } = await parseMultipartRequest(request);
+    const processedFiles = await processAndValidateFiles(files);
+
+    const dto: PasarABodegaGatewayDto = {
+      orderId: Number(formData.orderId),
+      observation: formData.observation || undefined,
+    };
+
+    return this.ordersGatewayService.pasarABodega(
+      dto,
+      serializeFilesForMicroservice(processedFiles),
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
+  }
+  @Get(':orderId/warehouse-attachments')
+  async getWarehouseAttachments(@Param('orderId') orderId: string, @User() user: any) {
+    return this.ordersGatewayService.getWarehouseAttachments(
+      Number(orderId),
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
+  }
+  @Post('warehouse-payments')
+  async createWarehousePayment(@Req() request: FastifyRequest, @User() user: any) {
+    const { files, formData } = await parseMultipartRequest(request);
+    const processedFiles = await processAndValidateFiles(files);
+
+    const dto: CreateWarehousePaymentGatewayDto = {
+      orderId: Number(formData.orderId),
+      amount: Number(formData.amount),
+      paymentTypeId: Number(formData.paymentTypeId),
+      paymentMethodId: Number(formData.paymentMethodId),
+      reference: formData.reference || undefined,
+      observation: formData.observation || undefined,
+    };
+
+    return this.ordersGatewayService.createWarehousePayment(
+      dto,
+      serializeFilesForMicroservice(processedFiles),
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
+  }
+  @Get(':orderId/warehouse-payments')
+  async getWarehousePayments(@Param('orderId') orderId: string, @User() user: any) {
+    return this.ordersGatewayService.getWarehousePayments(
+      Number(orderId),
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
   }
 }

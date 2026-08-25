@@ -339,6 +339,19 @@ export class OrdersRelayService {
                     },
                 );
                 break;
+
+            // ── Envío nacional ──────────────────────────────────────────────────────
+            case 'national_flag_set':
+                await this.orderModel.findOneAndUpdate(
+                    { id: orderId },
+                    {
+                        $set: {
+                            is_national: payload.is_national,
+                            updatedAt: ts,
+                        },
+                    },
+                );
+                break;
             default:
                 console.warn(`⚠️ changed_scope desconocido: ${scope} | order: ${orderId}`);
         }
