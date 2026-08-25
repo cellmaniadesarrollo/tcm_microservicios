@@ -357,4 +357,44 @@ export class OrdersGatewayService {
     getEmployeesBasic(user: any) {
         return this.send('get_employees_basic', { user });
     }
+    async pasarABodega(dto: any, files: any[], user: any) {
+        try {
+            return await this.send('pasar_a_bodega', { dto, files, user });
+        } catch (error: any) {
+            throw new HttpException(
+                error.message || 'Error interno en la comunicación con el microservicio',
+                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+    async getWarehouseAttachments(orderId: number, user: any) {
+        try {
+            return await this.send('get_warehouse_attachments', { orderId, user });
+        } catch (error: any) {
+            throw new HttpException(
+                error.message || 'Error interno en la comunicación con el microservicio',
+                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+    async createWarehousePayment(dto: any, files: any[], user: any) {
+        try {
+            return await this.send('create_warehouse_payment', { dto, files, user });
+        } catch (error: any) {
+            throw new HttpException(
+                error.message || 'Error interno en la comunicación con el microservicio',
+                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
+    async getWarehousePayments(orderId: number, user: any) {
+        try {
+            return await this.send('get_warehouse_payments', { orderId, user });
+        } catch (error: any) {
+            throw new HttpException(
+                error.message || 'Error interno en la comunicación con el microservicio',
+                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
 }

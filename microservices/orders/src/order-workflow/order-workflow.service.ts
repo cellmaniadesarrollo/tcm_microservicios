@@ -48,6 +48,8 @@ import { OrderPriceAgreement } from './entities/order-price-agreement.entity';
 import { UpdateOrderPriceAgreementDto } from './dto/update-order-price-agreement.dto';
 import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement.dto';
 import { InvoicesService } from '../invoices/invoices.service';
+import { CreateWarehousePaymentDto } from './dto/create-warehouse-payment.dto';
+import { WarehousePayment, WarehousePaymentFlowType } from './entities/warehouse-payment.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -78,7 +80,8 @@ export class OrderWorkflowService {
     private readonly orderNoteRepository: Repository<OrderNote>,
     @InjectRepository(OrderNoteLog)
     private readonly orderNoteLogRepository: Repository<OrderNoteLog>,
-
+    @InjectRepository(WarehousePayment)
+    private readonly warehousePaymentRepository: Repository<WarehousePayment>,
 
 
     private readonly notificationsService: NotificationsService,
@@ -968,10 +971,12 @@ export class OrderWorkflowService {
         unit_price: s.unit_price,
         batch_number: s.batch_number,
         status: s.status,
+        is_billable_in_repair_orders: s.is_billable_in_repair_orders,
         created_at: s.created_at,
       }));
       // ──────────────────────────────────────────────────────────────────────
-
+      (order as any).spares = spares;
+      (order as any).requiresAutomaticInvoice = spares.length > 0 && spares.every(s => s.is_billable_in_repair_orders === true);
       // ─── CARGA MANUAL DE ATTACHMENTS ──────────────────────────────────────
       const whereConditions: any[] = [
         { entity_type: AttachmentEntityType.ORDER, entity_id: order.id, is_active: true },
@@ -1006,7 +1011,7 @@ export class OrderWorkflowService {
       });
 
       (order as any).attachments = attachmentsMap.get(`${AttachmentEntityType.ORDER}_${order.id}`) || [];
-      (order as any).spares = spares;
+      // (order as any).spares = spares;
 
       order.findings?.forEach((finding) => {
         finding.attachments = attachmentsMap.get(`${AttachmentEntityType.FINDING}_${finding.id}`) || [];
@@ -1173,9 +1178,6 @@ export class OrderWorkflowService {
   ) {
     const { orderId, toStatusId, observation } = dto;
 
-    const ESTADO_INGRESADO = 1;
-    const ESTADO_VISTA = 2;
-
     const order = await this.orderRepo.findOne({
       where: { id: orderId, company_id: user.companyId },
       relations: ['currentStatus'],
@@ -1184,69 +1186,21 @@ export class OrderWorkflowService {
     if (!order) {
       throw new RpcException(new NotFoundException('Orden no encontrada'));
     }
-    // ─── BLOQUEO POR VALIDACIÓN ──────────────────────────────────────────────
+
     await this.orderValidationLockService.assertEditable(order.id);
-    // ────────────────────────────────────────────────────────────────────────
-    if (order.current_status_id === toStatusId) {
-      throw new RpcException(new BadRequestException('La orden ya tiene este estado'));
-    }
 
-    const fromStatusId = order.current_status_id;
-    const fromStatusName = order.currentStatus?.name ?? '';
-
-    // ─── VALIDACIÓN DE REGRESIÓN DE ESTADOS ─────────────────────────────────
-    if (toStatusId === ESTADO_INGRESADO) {
-      throw new RpcException(
-        new BadRequestException('No se puede regresar una orden al estado INGRESADO'),
-      );
-    }
-
-    if (toStatusId === ESTADO_VISTA && fromStatusId > ESTADO_VISTA) {
-      throw new RpcException(
-        new BadRequestException('No se puede regresar una orden al estado VISTA'),
-      );
-    }
-    // ────────────────────────────────────────────────────────────────────────
-
-    const toStatus = await this.orderRepo.manager.findOne(OrderStatus, {
-      where: { id: toStatusId },
-    });
-
-    if (!toStatus) {
-      throw new RpcException(new NotFoundException('Estado destino no encontrado'));
-    }
-
-    order.current_status_id = toStatusId;
-    order.currentStatus = { id: toStatusId } as any;
-    await this.orderRepo.save(order);
-
-    const history = this.orderStatusHistoryRepository.create({
-      order_id: order.id,
-      from_status_id: fromStatusId,
-      to_status_id: toStatusId,
-      changed_by_id: user.userId,
-      company_id: user.companyId,
-      branch_id: user.branchId,
-      observation,
-    });
-
-    await this.orderStatusHistoryRepository.save(history);
+    const { toStatus, history, fromStatusId, fromStatusName } =
+      await this.applyStatusChange(this.orderRepo.manager, order, toStatusId, observation, user);
 
     const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
     await this.emitNotification(
-      order.id,
-      user.companyId,
-      user.userId,
-      'status_changed',
-      'Se actualizó el estado de la orden',
+      order.id, user.companyId, user.userId,
+      'status_changed', 'Se actualizó el estado de la orden',
     );
 
     await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
-      currentStatus: {
-        id: toStatusId,
-        name: toStatus.name,
-      },
+      currentStatus: { id: toStatusId, name: toStatus.name },
       statusHistoryEntry: {
         id: history.id,
         fromStatus: fromStatusId ? { id: fromStatusId, name: fromStatusName } : null,
@@ -1531,7 +1485,7 @@ export class OrderWorkflowService {
             'Esta orden requiere emisión automática de factura (todos los repuestos son facturables), pero no se proporcionó información de facturación. Registre los datos de facturación del cliente antes de cerrar la orden.',
           ),
         );
-      }
+      } //1720
       // ──────────────────────────────────────────────────────────────────
 
       const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
@@ -3104,6 +3058,298 @@ export class OrderWorkflowService {
 
       return saved;
     });
+  }
+  private readonly ESTADO_BODEGA = 9;
+
+  async pasarABodega(
+    dto: { orderId: number; observation?: string },
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
+    user: { userId: string; companyId: string; branchId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: dto.orderId, company_id: user.companyId },
+        relations: ['currentStatus'],
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      await this.orderValidationLockService.assertEditable(order.id);
+
+      const observation =
+        dto.observation?.trim() || 'Orden enviada a bodega para gestión de inventario';
+
+      const { toStatus, history, fromStatusId, fromStatusName } =
+        await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);
+
+      // 📎 Adjuntos opcionales (se sugiere incluir foto de la cédula del cliente)
+      const attachments: Attachment[] = [];
+
+      for (const file of files) {
+        const buffer = Buffer.from(file.buffer, 'base64');
+        const prefix = `order/${order.id}/bodega/`;
+        const url = await this.awsS3Service.uploadBuffer(
+          buffer, file.originalname, file.mimetype, prefix,
+        );
+
+        const attachment = manager.create(Attachment, {
+          entity_type: AttachmentEntityType.WAREHOUSE_HANDOVER,
+          entity_id: order.id,
+          file_name: file.originalname,
+          file_url: url,
+          file_type: file.mimetype,
+          uploaded_by_id: user.userId,
+          is_public: true,
+        });
+
+        attachments.push(await manager.save(attachment));
+      }
+
+      const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
+
+      await this.emitNotification(
+        order.id, user.companyId, user.userId,
+        'status_changed', 'La orden fue enviada a bodega',
+      );
+
+      await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
+        currentStatus: { id: this.ESTADO_BODEGA, name: toStatus.name },
+        statusHistoryEntry: {
+          id: history.id,
+          fromStatus: fromStatusId ? { id: fromStatusId, name: fromStatusName } : null,
+          toStatus: { id: this.ESTADO_BODEGA, name: toStatus.name },
+          changedBy: mapUser(userEntity),
+          observation,
+          changed_at: history.changed_at,
+        },
+        attachments: attachments.map(a => ({ id: a.id, file_url: a.file_url, file_name: a.file_name })),
+      });
+
+      return {
+        success: true,
+        message: 'Orden enviada a bodega correctamente',
+        orderId: order.id,
+        fromStatusId,
+        toStatusId: this.ESTADO_BODEGA,
+        attachments,
+      };
+    });
+  }
+  private async applyStatusChange(
+    manager: EntityManager,
+    order: Order,
+    toStatusId: number,
+    observation: string | undefined,
+    user: { userId: string; companyId: string; branchId: string },
+  ) {
+    const ESTADO_INGRESADO = 1;
+    const ESTADO_VISTA = 2;
+
+    if (order.current_status_id === toStatusId) {
+      throw new RpcException(new BadRequestException('La orden ya tiene este estado'));
+    }
+
+    const fromStatusId = order.current_status_id;
+    const fromStatusName = order.currentStatus?.name ?? '';
+
+    if (toStatusId === ESTADO_INGRESADO) {
+      throw new RpcException(
+        new BadRequestException('No se puede regresar una orden al estado INGRESADO'),
+      );
+    }
+
+    if (toStatusId === ESTADO_VISTA && fromStatusId > ESTADO_VISTA) {
+      throw new RpcException(
+        new BadRequestException('No se puede regresar una orden al estado VISTA'),
+      );
+    }
+
+    const toStatus = await manager.findOne(OrderStatus, { where: { id: toStatusId } });
+    if (!toStatus) {
+      throw new RpcException(new NotFoundException('Estado destino no encontrado'));
+    }
+
+    order.current_status_id = toStatusId;
+    order.currentStatus = { id: toStatusId } as any;
+    await manager.save(order);
+
+    const history = manager.create(OrderStatusHistory, {
+      order_id: order.id,
+      from_status_id: fromStatusId,
+      to_status_id: toStatusId,
+      changed_by_id: user.userId,
+      company_id: user.companyId,
+      branch_id: user.branchId,
+      observation,
+    });
+    await manager.save(history);
+
+    return { toStatus, history, fromStatusId, fromStatusName };
+  }
+  async getWarehouseAttachments(
+    orderId: number,
+    user: { companyId: string },
+  ) {
+    const order = await this.orderRepo.findOne({
+      where: { id: orderId, company_id: user.companyId },
+      select: ['id', 'order_number'],
+    });
+
+    if (!order) {
+      throw new RpcException(new NotFoundException('Orden no encontrada'));
+    }
+
+    const attachments = await this.attachmentRepository.find({
+      where: {
+        entity_type: AttachmentEntityType.WAREHOUSE_HANDOVER,
+        entity_id: orderId,
+        is_active: true,
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    // Reutilizamos el mismo firmado de URLs que usa getOrderFullData,
+    // envolviendo el array en un objeto liviano compatible.
+    const wrapper: any = { attachments };
+    await this.enrichAttachmentsWithSignedUrls(wrapper);
+
+    return {
+      orderId: order.id,
+      orderNumber: order.order_number,
+      attachments: wrapper.attachments,
+    };
+  }
+  async createWarehousePayment(
+    dto: CreateWarehousePaymentDto,
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
+    user: { userId: string; companyId: string; branchId: string },
+  ) {
+    return this.orderRepo.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: dto.orderId, company_id: user.companyId },
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      if (!dto.amount || dto.amount <= 0) {
+        throw new RpcException(new BadRequestException('El monto debe ser mayor a 0'));
+      }
+
+      if (!dto.paymentTypeId || !dto.paymentMethodId) {
+        throw new RpcException(new BadRequestException('Tipo y método de pago son requeridos'));
+      }
+
+      const payment = manager.create(WarehousePayment, {
+        order_id: order.id,
+        amount: dto.amount,
+        flow_type: WarehousePaymentFlowType.INGRESO,
+        payment_type_id: dto.paymentTypeId,
+        payment_method_id: dto.paymentMethodId,
+        paid_at: new Date(),
+        received_by_id: user.userId,
+        reference: dto.reference,
+        observation: dto.observation,
+        company_id: user.companyId,
+        branch_id: user.branchId,
+      });
+
+      const savedPayment = await manager.save(payment);
+
+      // 📎 Comprobante(s) opcional(es)
+      const attachments: Attachment[] = [];
+      for (const file of files) {
+        const buffer = Buffer.from(file.buffer, 'base64');
+        const prefix = `order/${order.id}/warehouse-payments/${savedPayment.id}/`;
+        const url = await this.awsS3Service.uploadBuffer(
+          buffer, file.originalname, file.mimetype, prefix,
+        );
+
+        const attachment = manager.create(Attachment, {
+          entity_type: AttachmentEntityType.WAREHOUSE_PAYMENT,
+          entity_id: savedPayment.id,
+          file_name: file.originalname,
+          file_url: url,
+          file_type: file.mimetype,
+          uploaded_by_id: user.userId,
+          is_public: true,
+        });
+
+        attachments.push(await manager.save(attachment));
+      }
+
+      await this.emitNotification(
+        order.id, user.companyId, user.userId,
+        'warehouse_payment_registered', 'Se registró un pago de bodega',
+      );
+
+      await this.broadcastService.publishOrderUpdated(order.id, 'warehouse_payment_registered', {
+        warehousePayment: {
+          ...savedPayment,
+          attachments: attachments.map(a => ({ id: a.id, file_url: a.file_url, file_name: a.file_name })),
+        },
+      });
+
+      return { ...savedPayment, attachments };
+    });
+  }
+  async getWarehousePayments(
+    orderId: number,
+    user: { companyId: string },
+  ) {
+    const order = await this.orderRepo.findOne({
+      where: { id: orderId, company_id: user.companyId },
+      select: ['id', 'order_number'],
+    });
+
+    if (!order) {
+      throw new RpcException(new NotFoundException('Orden no encontrada'));
+    }
+
+    const payments = await this.warehousePaymentRepository.find({
+      where: { order_id: orderId },
+      relations: ['paymentType', 'paymentMethod'],
+      order: { createdAt: 'ASC' },
+    });
+
+    if (!payments.length) {
+      return { orderId: order.id, orderNumber: order.order_number, payments: [] };
+    }
+
+    const paymentIds = payments.map(p => p.id);
+
+    const attachments = await this.attachmentRepository.find({
+      where: {
+        entity_type: AttachmentEntityType.WAREHOUSE_PAYMENT,
+        entity_id: In(paymentIds),
+        is_active: true,
+      },
+      order: { createdAt: 'ASC' },
+    });
+
+    const attachmentsMap = new Map<number, Attachment[]>();
+    attachments.forEach(att => {
+      if (!attachmentsMap.has(att.entity_id)) attachmentsMap.set(att.entity_id, []);
+      attachmentsMap.get(att.entity_id)!.push(att);
+    });
+
+    // Firmamos las URLs reutilizando el mismo helper (opera sobre el array `attachments`)
+    const wrapper: any = { attachments };
+    await this.enrichAttachmentsWithSignedUrls(wrapper);
+
+    const result = payments.map(p => ({
+      ...p,
+      attachments: attachmentsMap.get(p.id) || [],
+    }));
+
+    return {
+      orderId: order.id,
+      orderNumber: order.order_number,
+      payments: result,
+    };
   }
 }
 

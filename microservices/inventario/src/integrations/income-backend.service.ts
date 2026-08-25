@@ -329,6 +329,7 @@ export class IncomeBackendService {
       this.logger.log(`👤 customerId recibido en syncProductWithExistingInventoryFlow: ${orderData?.customerId}`);
       this.logger.log(`👤 customerName recibido en syncProductWithExistingInventoryFlow: ${orderData?.customerName}`);
       this.logger.log(`👤 customerContacts recibido en syncProductWithExistingInventoryFlow: ${JSON.stringify(orderData?.customerContacts || [])}`);
+      this.logger.log(`📦 orderPublicId recibido en syncProductWithExistingInventoryFlow: ${orderData?.orderPublicId || orderData?.public_id || 'NO DISPONIBLE'}`);
 
       const inventoryFlowId = existingInventoryFlow._id;
 
@@ -373,6 +374,7 @@ export class IncomeBackendService {
         customerId: orderData?.customerId || '',
         customerName: orderData?.customerName || '',
         customerContacts: orderData?.customerContacts || [],
+        orderPublicId: orderData?.orderPublicId || orderData?.public_id || null,
         porcentaje: orderData?.porcentaje || '65d7a93e81594c12686310aa',
         cantidad: component?.quantity || 1,
         precioventa: component?.salePrice || 0,
@@ -385,6 +387,7 @@ export class IncomeBackendService {
       this.logger.log(`📱 Payload imeis: ${payload.imeis.length} - ${JSON.stringify(payload.imeis)}`);
       this.logger.log(`👤 Payload customerId: ${payload.customerId}`);
       this.logger.log(`👤 Payload customerName: ${payload.customerName}`);
+      this.logger.log(`📦 Payload orderPublicId: ${payload.orderPublicId}`);
 
       const result = await this.saveIncomeFromOrder(payload);
 
@@ -400,7 +403,8 @@ export class IncomeBackendService {
         unitPrice: payload.unit_sales_price,
         quantity: payload.quantity,
         inventoryFlowId: inventoryFlowId,
-        imeis: imeis
+        imeis: imeis,
+        orderPublicId: payload.orderPublicId
       };
 
     } catch (error: any) {
@@ -441,142 +445,145 @@ export class IncomeBackendService {
   // ============================================
 
   async saveIncomeFromOrder(data: any): Promise<any> {
-      try {
-        this.logger.log(`📤 Guardando income desde orden...`);
+    try {
+      this.logger.log(`📤 Guardando income desde orden...`);
 
-        if (!data.numero_documento) {
-          throw new Error('El número de documento es requerido');
-        }
-        if (!data.id_item) {
-          throw new Error('El ID del item es requerido');
-        }
-
-        let itemId: Types.ObjectId;
-        if (this.isValidObjectId(data.id_item)) {
-          itemId = this.toObjectIdSafe(data.id_item);
-        } else {
-          this.logger.warn(`⚠️ id_item inválido: ${data.id_item}, usando ID por defecto`);
-          itemId = new Types.ObjectId('67f94790d875ff138dfcb165');
-        }
-
-        // ✅ OBTENER O CREAR SUPPLIER DESDE DATOS DEL CLIENTE
-        let supplierId: Types.ObjectId;
-        
-        // Construir customerData desde los datos de la orden
-        const customerData = {
-          idNumber: data.customerId || '',
-          firstName: data.customerName?.split(' ')[0] || '',
-          lastName: data.customerName?.split(' ').slice(1).join(' ') || '',
-          contacts: data.customerContacts || [],
-        };
-
-        // Si tenemos customerId, intentar obtener o crear supplier
-        if (data.customerId) {
-          supplierId = await this.getOrCreateSupplier(customerData);
-          this.logger.log(`✅ Supplier obtenido/creado: ${supplierId} para cliente: ${data.customerId}`);
-        } else {
-          // Si no hay customerId, usar ID por defecto
-          supplierId = new Types.ObjectId('67f98baed875ff138dfcb942');
-          this.logger.warn(`⚠️ No hay customerId, usando ID por defecto: ${supplierId}`);
-        }
-
-        const idnumber = await this.findOrCreateDocument(
-          data.numero_documento,
-          data.tipo_documento || '65ae74b9f978d87a5c41fd2b',
-          supplierId,
-          data.porcentaje || '65d7a93e81594c12686310aa'
-        );
-
-        if (!idnumber) {
-          throw new Error('No se pudo obtener el ID del documento');
-        }
-
-        let item = null;
-        try {
-          item = await this.inventoryFlowModel.findById(itemId).lean();
-          if (!item) {
-            this.logger.warn(`⚠️ Producto no encontrado: ${itemId}, continuando con datos del payload`);
-          } else {
-            this.logger.log(`✅ Producto encontrado: ${item.name_nameitems} (${item._id})`);
-          }
-        } catch (error: any) {
-          this.logger.warn(`⚠️ Error buscando producto: ${error.message}`);
-        }
-
-        const uuidsave = new Types.ObjectId();
-        const typeincome = new Types.ObjectId('65bba1f9089b1af39563eaf5');
-
-        // ✅ OBTENER IMEIS DEL DISPOSITIVO (desde data.imeis)
-        const imeis = data.imeis || [];
-
-        this.logger.log(`📱 IMEIs recibidos: ${imeis.length} - ${JSON.stringify(imeis)}`);
-
-        const inco = {
-          unit_price: data.preciounit?.toString() || data.unit_price || '0',
-          date_income: data.date_income || new Date(),
-          observations: data.observaciones || data.observations || '',
-          quantity: Number(data.cantidad || data.quantity || 1),
-          id_document_number: idnumber,
-          id_item: itemId,
-          id_coduuid: uuidsave,
-          id_status: typeincome,
-          unit_sales_price: data.precioventa?.toString() || data.unit_sales_price || '0',
-          user_create: data.user_create || data.createdByName || 'Sistema',
-          imeis: imeis,
-          // ✅ GUARDAR EL SUPPLIER ID EN EL INCOME
-          id_supplier: supplierId,
-          inventory_snapshot: {
-            sku: item?.sku || data.sku || '',
-            upc: item?.upc || data.upc || '',
-            name_item: item?.name_nameitems || data.name_item || '',
-            name_model: item?.name_model || data.name_model || '',
-            name_color: item?.name_color || data.name_color || '',
-            name_quality: item?.name_quality || data.name_quality || 'ORIGINAL',
-            inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
-            inventory_name: data.inventory_name || 'INVENTORYFLOW'
-          },
-          batch_snapshot: {
-            batchNumber: null,
-            identifiers: []
-          }
-        };
-
-        const saveincomess = await this.incomeModel.create(inco);
-        this.logger.log(`✅ Income guardado: ${saveincomess._id} con ${imeis.length} IMEIs y supplier: ${supplierId}`);
-
-        let batchResult = null;
-        if (item) {
-          try {
-            const newBatch = await this.createBatchFromIncome({ ...data, id_item: itemId, imeis: imeis }, saveincomess);
-            await this.createStockFromBatch(newBatch, { ...data, id_item: itemId });
-            batchResult = {
-              batchId: newBatch._id,
-              batchNumber: newBatch.batchNumber
-            };
-            this.logger.log(`✅ Batch creado: ${newBatch._id} con ${newBatch.identifiers?.length || 0} identifiers`);
-          } catch (batchError: any) {
-            this.logger.warn(`⚠️ No se pudo crear batch/stock: ${batchError.message}`);
-          }
-        } else {
-          this.logger.warn(`⚠️ No se creó batch porque el item no existe en inventoryflows: ${itemId}`);
-        }
-
-        return {
-          incomeId: saveincomess._id,
-          batchId: batchResult?.batchId || null,
-          sku: item?.sku || data.sku,
-          upc: item?.upc || data.upc,
-          batchNumber: batchResult?.batchNumber || null,
-          unitPrice: data.precioventa || data.unit_sales_price || '0',
-          quantity: data.cantidad || data.quantity || 1,
-          imeis: imeis,
-          supplierId: supplierId
-        };
-
-      } catch (error: any) {
-        this.logger.error(`❌ Error en saveIncomeFromOrder: ${error.message}`);
-        throw error;
+      if (!data.numero_documento) {
+        throw new Error('El número de documento es requerido');
       }
+      if (!data.id_item) {
+        throw new Error('El ID del item es requerido');
+      }
+
+      let itemId: Types.ObjectId;
+      if (this.isValidObjectId(data.id_item)) {
+        itemId = this.toObjectIdSafe(data.id_item);
+      } else {
+        this.logger.warn(`⚠️ id_item inválido: ${data.id_item}, usando ID por defecto`);
+        itemId = new Types.ObjectId('67f94790d875ff138dfcb165');
+      }
+
+      // ✅ OBTENER O CREAR SUPPLIER DESDE DATOS DEL CLIENTE
+      let supplierId: Types.ObjectId;
+      
+      const customerData = {
+        idNumber: data.customerId || '',
+        firstName: data.customerName?.split(' ')[0] || '',
+        lastName: data.customerName?.split(' ').slice(1).join(' ') || '',
+        contacts: data.customerContacts || [],
+      };
+
+      if (data.customerId) {
+        supplierId = await this.getOrCreateSupplier(customerData);
+        this.logger.log(`✅ Supplier obtenido/creado: ${supplierId} para cliente: ${data.customerId}`);
+      } else {
+        supplierId = new Types.ObjectId('67f98baed875ff138dfcb942');
+        this.logger.warn(`⚠️ No hay customerId, usando ID por defecto: ${supplierId}`);
+      }
+
+      const idnumber = await this.findOrCreateDocument(
+        data.numero_documento,
+        data.tipo_documento || '65ae74b9f978d87a5c41fd2b',
+        supplierId,
+        data.porcentaje || '65d7a93e81594c12686310aa'
+      );
+
+      if (!idnumber) {
+        throw new Error('No se pudo obtener el ID del documento');
+      }
+
+      let item = null;
+      try {
+        item = await this.inventoryFlowModel.findById(itemId).lean();
+        if (!item) {
+          this.logger.warn(`⚠️ Producto no encontrado: ${itemId}, continuando con datos del payload`);
+        } else {
+          this.logger.log(`✅ Producto encontrado: ${item.name_nameitems} (${item._id})`);
+        }
+      } catch (error: any) {
+        this.logger.warn(`⚠️ Error buscando producto: ${error.message}`);
+      }
+
+      const uuidsave = new Types.ObjectId();
+      const typeincome = new Types.ObjectId('65bba1f9089b1af39563eaf5');
+
+      const imeis = data.imeis || [];
+      this.logger.log(`📱 IMEIs recibidos: ${imeis.length} - ${JSON.stringify(imeis)}`);
+
+      // ✅ OBTENER orderPublicId (solo para pasar al batch)
+      const orderPublicId = data.orderPublicId || data.public_id || null;
+      this.logger.log(`📦 orderPublicId para batch: ${orderPublicId}`);
+
+      const inco = {
+        unit_price: data.preciounit?.toString() || data.unit_price || '0',
+        date_income: data.date_income || new Date(),
+        observations: data.observaciones || data.observations || '',
+        quantity: Number(data.cantidad || data.quantity || 1),
+        id_document_number: idnumber,
+        id_item: itemId,
+        id_coduuid: uuidsave,
+        id_status: typeincome,
+        unit_sales_price: data.precioventa?.toString() || data.unit_sales_price || '0',
+        user_create: data.user_create || data.createdByName || 'Sistema',
+        imeis: imeis,
+        id_supplier: supplierId,
+        inventory_snapshot: {
+          sku: item?.sku || data.sku || '',
+          upc: item?.upc || data.upc || '',
+          name_item: item?.name_nameitems || data.name_item || '',
+          name_model: item?.name_model || data.name_model || '',
+          name_color: item?.name_color || data.name_color || '',
+          name_quality: item?.name_quality || data.name_quality || 'ORIGINAL',
+          inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
+          inventory_name: data.inventory_name || 'INVENTORYFLOW'
+        },
+        batch_snapshot: {
+          batchNumber: null,
+          identifiers: []
+        }
+      };
+
+      const saveincomess = await this.incomeModel.create(inco);
+      this.logger.log(`✅ Income guardado: ${saveincomess._id} con ${imeis.length} IMEIs y supplier: ${supplierId}`);
+
+      let batchResult = null;
+      if (item) {
+        try {
+          // ✅ PASAR orderPublicId AL CREAR EL BATCH
+          const newBatch = await this.createBatchFromIncome(
+            { ...data, id_item: itemId, imeis: imeis, orderPublicId: orderPublicId }, 
+            saveincomess
+          );
+          await this.createStockFromBatch(newBatch, { ...data, id_item: itemId });
+          batchResult = {
+            batchId: newBatch._id,
+            batchNumber: newBatch.batchNumber
+          };
+          this.logger.log(`✅ Batch creado: ${newBatch._id} con ${newBatch.identifiers?.length || 0} identifiers y orderPublicId: ${newBatch.orderPublicId}`);
+        } catch (batchError: any) {
+          this.logger.warn(`⚠️ No se pudo crear batch/stock: ${batchError.message}`);
+        }
+      } else {
+        this.logger.warn(`⚠️ No se creó batch porque el item no existe en inventoryflows: ${itemId}`);
+      }
+
+      return {
+        incomeId: saveincomess._id,
+        batchId: batchResult?.batchId || null,
+        sku: item?.sku || data.sku,
+        upc: item?.upc || data.upc,
+        batchNumber: batchResult?.batchNumber || null,
+        unitPrice: data.precioventa || data.unit_sales_price || '0',
+        quantity: data.cantidad || data.quantity || 1,
+        imeis: imeis,
+        supplierId: supplierId,
+        orderPublicId: orderPublicId
+      };
+
+    } catch (error: any) {
+      this.logger.error(`❌ Error en saveIncomeFromOrder: ${error.message}`);
+      throw error;
+    }
   }
 
   async saveIncome(payload: any): Promise<any> {
@@ -696,6 +703,10 @@ export class IncomeBackendService {
       const batchNumber = await this.batchCounterHelper.getNextBatchNumber(itemId);
       this.logger.log(`📦 Batch number obtenido: ${batchNumber}`);
 
+      // ✅ OBTENER public_id DE LA ORDEN
+      const orderPublicId = data.orderPublicId || data.public_id || null;
+      this.logger.log(`📦 orderPublicId: ${orderPublicId}`);
+
       const nuevoBatch = new this.batchModel({
         item: itemId,
         sku: itemInfo.sku || data.sku,
@@ -707,18 +718,20 @@ export class IncomeBackendService {
         incomes_id: income._id,
         legacy_incomes_id: [],
         identifiers: identifiers, // ✅ AHORA CON IMEIS
-        notes: data.observaciones || data.notes || ''
+        notes: data.observaciones || data.notes || '',
+        orderPublicId: orderPublicId,
       });
 
       const savedBatch = await nuevoBatch.save();
-      this.logger.log(`✅ Batch creado con batchNumber: ${savedBatch.batchNumber} y ${savedBatch.identifiers.length} identifiers`);
+      this.logger.log(`✅ Batch creado con batchNumber: ${savedBatch.batchNumber}, orderPublicId: ${savedBatch.orderPublicId} y ${savedBatch.identifiers.length} identifiers`);
 
       // ✅ Actualizar el income con el batch y los identifiers
       await this.incomeModel.findByIdAndUpdate(income._id, {
         $set: {
           batch_id: savedBatch._id,
           'batch_snapshot.batchNumber': savedBatch.batchNumber,
-          'batch_snapshot.identifiers': savedBatch.identifiers.map((i: any) => i.code)
+          'batch_snapshot.identifiers': savedBatch.identifiers.map((i: any) => i.code),
+          'batch_snapshot.orderPublicId': savedBatch.orderPublicId,
         }
       });
 
@@ -1016,6 +1029,8 @@ export class IncomeBackendService {
     return this.productsService.createFromOrder(payload);
   }
 
+// income-backend.service.ts - syncProductNormal
+
   async syncProductNormal(product: any, orderData: any, component: any): Promise<any> {
     try {
       this.logger.log(`📤 Sincronizando producto normal: ${product?.name || 'N/A'}`);
@@ -1028,6 +1043,9 @@ export class IncomeBackendService {
         inventoryFlowUpc: component?.inventoryFlowUpc
       }));
 
+      // ✅ LOG DEL orderPublicId
+      this.logger.log(`📦 orderPublicId recibido en syncProductNormal: ${orderData?.orderPublicId || orderData?.public_id || 'NO DISPONIBLE'}`);
+
       let inventoryFlowId: Types.ObjectId;
       let inventorySku: string;
       let inventoryUpc: string;
@@ -1036,7 +1054,6 @@ export class IncomeBackendService {
       if (component?.inventoryFlowId) {
         this.logger.log(`🔍 Buscando InventoryFlow por ID: ${component.inventoryFlowId}`);
         
-        // Buscar el InventoryFlow por ID
         const existingFlow = await this.inventoryFlowModel.findById(component.inventoryFlowId).lean();
         
         if (existingFlow) {
@@ -1046,14 +1063,12 @@ export class IncomeBackendService {
           this.logger.log(`✅ Usando InventoryFlow del componente: ${inventorySku} (${inventoryFlowId})`);
         } else {
           this.logger.warn(`⚠️ InventoryFlow no encontrado: ${component.inventoryFlowId}, creando uno nuevo por nombre`);
-          // Si no existe, crear uno nuevo
           const result = await this.getOrCreateInventoryFlow(product, orderData);
           inventoryFlowId = result.inventoryFlowId;
           inventorySku = result.sku;
           inventoryUpc = result.upc;
         }
       } else {
-        // ✅ Crear o obtener InventoryFlow por nombre (comportamiento original)
         this.logger.log(`ℹ️ No hay inventoryFlowId en el componente, creando/obteniendo por nombre`);
         const result = await this.getOrCreateInventoryFlow(product, orderData);
         inventoryFlowId = result.inventoryFlowId;
@@ -1061,7 +1076,7 @@ export class IncomeBackendService {
         inventoryUpc = result.upc;
       }
 
-      // ✅ Actualizar SKU y UPC del producto SOLO SI ES DIFERENTE
+      // ✅ Actualizar SKU y UPC del producto
       if (product?.sku !== inventorySku) {
         this.logger.log(`🔄 Actualizando SKU del Product: ${product?.sku || 'sin SKU'} -> ${inventorySku}`);
         await this.productsService.updateSku(product._id, inventorySku);
@@ -1083,7 +1098,11 @@ export class IncomeBackendService {
         this.logger.warn(`⚠️ customerId inválido, usando ID por defecto: ${supplierId}`);
       }
 
-      // ✅ Construir payload con los datos correctos
+      // ✅ OBTENER orderPublicId
+      const orderPublicId = orderData?.orderPublicId || orderData?.public_id || null;
+      this.logger.log(`📦 orderPublicId en syncProductNormal: ${orderPublicId}`);
+
+      // ✅ Construir payload con los datos correctos INCLUYENDO orderPublicId
       const payload = {
         unit_price: component?.purchasePrice?.toString() || '0',
         unit_sales_price: component?.salePrice?.toString() || '0',
@@ -1109,6 +1128,8 @@ export class IncomeBackendService {
         customerId: orderData?.customerId || '',
         customerName: orderData?.customerName || '',
         customerContacts: orderData?.customerContacts || [],
+        // ✅ AGREGAR orderPublicId
+        orderPublicId: orderPublicId,
         numero_documento: `ORD-${orderData?.orderNumber || 'N/A'}`,
         id_proveedor: supplierId,
         porcentaje: orderData?.porcentaje || '65d7a93e81594c12686310aa',
@@ -1120,6 +1141,7 @@ export class IncomeBackendService {
 
       this.logger.log(`📦 Payload id_item: ${payload.id_item}`);
       this.logger.log(`📦 Payload sku: ${payload.sku}`);
+      this.logger.log(`📦 Payload orderPublicId: ${payload.orderPublicId}`);
 
       const result = await this.saveIncomeFromOrder(payload);
 
@@ -1131,7 +1153,8 @@ export class IncomeBackendService {
         upc: inventoryUpc,
         batchNumber: result.batchNumber,
         unitPrice: payload.unit_sales_price,
-        quantity: payload.quantity
+        quantity: payload.quantity,
+        orderPublicId: payload.orderPublicId
       };
 
     } catch (error: any) {
