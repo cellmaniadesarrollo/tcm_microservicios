@@ -1,4 +1,4 @@
-import { IsInt, IsNumber, IsNotEmpty, IsOptional, IsString, Min, Positive } from 'class-validator';
+import { IsInt, IsNumber, IsNotEmpty, IsOptional, IsString, Min, IsPositive } from 'class-validator';
 
 export class CreateWarehousePaymentGatewayDto {
     @IsNotEmpty({ message: 'El id del pedido es obligatorio.' })
@@ -8,7 +8,7 @@ export class CreateWarehousePaymentGatewayDto {
 
     @IsNotEmpty({ message: 'El monto es obligatorio.' })
     @IsNumber({}, { message: 'El monto debe ser un número válido.' })
-    @Positive({ message: 'El monto debe ser un valor positivo.' })
+    @IsPositive({ message: 'El monto debe ser un valor positivo.' })
     amount: number;
 
     @IsNotEmpty({ message: 'El tipo de pago es obligatorio.' })
