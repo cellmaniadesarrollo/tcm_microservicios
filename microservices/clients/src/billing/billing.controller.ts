@@ -15,6 +15,7 @@ export class BillingController {
   // Editar campos de un BillingData
   @MessagePattern({ cmd: 'update_billing' })
   update(@Payload() data: any) {
+
     return this.billingService.update(data);
   }
 
