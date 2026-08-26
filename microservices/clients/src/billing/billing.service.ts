@@ -75,7 +75,7 @@ export class BillingService {
     }
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
     async create(data: any) {
-        console.log(data)
+        //  console.log(data)
         const logger = new Logger('RetailBilling');
         try {
             if (!data?.user?.companyId)
@@ -90,7 +90,10 @@ export class BillingService {
                 throw new RpcException(new BadRequestException('mainEmail es requerido'));
             if (!data?.address)
                 throw new RpcException(new BadRequestException('address es requerido'));
-
+            const businessName =
+                data.businessName?.trim() ||
+                [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
+                undefined;
             return await this.upsertCustomerAndBillingData(
                 {
                     companyId: data.user.companyId,
@@ -100,7 +103,7 @@ export class BillingService {
                     genderId: data.genderId,
                     firstName: data.firstName,
                     lastName: data.lastName,
-                    businessName: data.businessName,
+                    businessName,
                     tradeName: data.tradeName,
                     mainEmail: data.mainEmail,
                     cellphone: data.cellphone,
