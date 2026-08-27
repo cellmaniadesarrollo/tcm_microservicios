@@ -215,34 +215,13 @@ export class CatalogsService implements OnModuleInit {
   /** Obtener datos iniciales del catálogo */
   async getInitialCatalogs() {
     try {
-      const countries = await this.countryRepo.find({
-        order: { name: 'ASC' },
-      });
+      const countries = await this.countryRepo.find({ order: { name: 'ASC' } });
+      const provinces = await this.provinceRepo.find({ relations: ['country'], order: { name: 'ASC' } });
+      const genders = await this.genderRepo.find({ order: { name: 'ASC' } });
+      const idTypes = await this.identificationTypeRepo.find({ order: { code: 'ASC' } }); // ← cambiar aquí
+      const contactTypes = await this.contactTypeRepo.find({ order: { name: 'ASC' } });
 
-      const provinces = await this.provinceRepo.find({
-        relations: ['country'],
-        order: { name: 'ASC' },
-      });
-
-      const genders = await this.genderRepo.find({
-        order: { name: 'ASC' },
-      });
-
-      const idTypes = await this.idTypeRepo.find({
-        order: { name: 'ASC' },
-      });
-
-      const contactTypes = await this.contactTypeRepo.find({
-        order: { name: 'ASC' },
-      });
-
-      return {
-        countries,
-        provinces,
-        genders,
-        idTypes,
-        contactTypes,
-      };
+      return { countries, provinces, genders, idTypes, contactTypes };
     } catch (error) {
       console.error(error);
       throw new RpcException('Error obteniendo datos iniciales del catálogo');
@@ -277,7 +256,7 @@ export class CatalogsService implements OnModuleInit {
       const personTypes = await this.personTypeRepo.find({
         order: { name: 'ASC' },
       });
-
+      // console.log(identificationtype)
       return {
         identificationtype,
         genders,

@@ -17,6 +17,24 @@ import { Gender } from '../catalogs/entities/gender.entity';
 import { backfillMissingCustomerPersonalData } from './helpers/customer-personal-data.helper';
 import { Contact } from '../customers/entities/contact.entity';
 
+interface BillingUpsertInput {
+    companyId: string;
+    idNumber: string;
+    idTypeId: number;
+    personTypeId: number;
+    genderId?: number;
+    firstName?: string;
+    lastName?: string;
+    businessName?: string;
+    tradeName?: string;
+    mainEmail: string;
+    cellphone?: string;
+    phone?: string;
+    birthdate?: string; // 'YYYY-MM-DD'
+    address: string;
+    city?: string;
+    isCompanyClient?: boolean;
+}
 @Injectable()
 export class BillingService {
     private readonly logger = new Logger(BillingService.name);
@@ -57,85 +75,51 @@ export class BillingService {
     }
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
     async create(data: any) {
+        //  console.log(data)
+        const logger = new Logger('RetailBilling');
         try {
             if (!data?.user?.companyId)
                 throw new RpcException(new BadRequestException('companyId es requerido'));
-
-            if (!data?.customerId)
-                throw new RpcException(new BadRequestException('customerId es requerido'));
-
-            const customer = await this.customerRepo.findOne({
-                where: { id: data.customerId, company: { id: data.user.companyId } },
-                relations: { gender: true },
-            });
-            if (!customer)
-                throw new RpcException(new BadRequestException('Cliente no encontrado en esta empresa'));
-
-            // 👇 Completa gender/birthDate en el customer SOLO si están vacíos (inline, sin helper)
-            let customerChanged = false;
-            if (!customer.gender && data.genderId) {
-                customer.gender = { id: data.genderId } as any;
-                customerChanged = true;
-            }
-            if (!customer.birthDate && data.birthdate) {
-                const parsed = new Date(data.birthdate);
-                if (!isNaN(parsed.getTime())) {
-                    customer.birthDate = parsed;
-                    customerChanged = true;
-                }
-            }
-            if (customerChanged) {
-                await this.customerRepo.save(customer);
-            }
-
-            const billing = this.billingRepo.create({
-                company: { id: data.user.companyId },
-                idType: { id: data.idTypeId },
-                idNumber: data.idNumber,
-                personType: { id: data.personTypeId },
-                mainEmail: data.mainEmail,
-                address: data.address,
-                tradeName: data.tradeName,
-                firstName: data.firstName,
-                lastName: data.lastName,
-                gender: data.genderId ? { id: data.genderId } : undefined,
-                birthdate: data.birthdate,
-                cellphone: data.cellphone,
-                phone: data.phone,
-                city: data.city,
-                isCompanyClient: data.isCompanyClient ?? false,
-            });
-
-            const billingSaved = await this.billingRepo.save(billing);
-
-            const pivot = this.pivotRepo.create({
-                customer: { id: data.customerId },
-                billingData: { id: billingSaved.id },
-                isDefault: data.isDefault ?? false,
-            });
-
-            await this.pivotRepo.save(pivot);
-
-            const customerBillingWithRelations = await this.billingRepo.findOne({
-                where: { id: billingSaved.id },
-                relations: {
-                    idType: true,
-                    gender: true,
-                    personType: true,
-                    customerLinks: { customer: true },
+            if (!data?.idNumber)
+                throw new RpcException(new BadRequestException('idNumber es requerido'));
+            if (!data?.idTypeId)
+                throw new RpcException(new BadRequestException('idTypeId es requerido'));
+            if (!data?.personTypeId)
+                throw new RpcException(new BadRequestException('personTypeId es requerido'));
+            if (!data?.mainEmail)
+                throw new RpcException(new BadRequestException('mainEmail es requerido'));
+            if (!data?.address)
+                throw new RpcException(new BadRequestException('address es requerido'));
+            const businessName =
+                data.businessName?.trim() ||
+                [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
+                undefined;
+            return await this.upsertCustomerAndBillingData(
+                {
+                    companyId: data.user.companyId,
+                    idNumber: data.idNumber,
+                    idTypeId: data.idTypeId,
+                    personTypeId: data.personTypeId,
+                    genderId: data.genderId,
+                    firstName: data.firstName,
+                    lastName: data.lastName,
+                    businessName,
+                    tradeName: data.tradeName,
+                    mainEmail: data.mainEmail,
+                    cellphone: data.cellphone,
+                    phone: data.phone,
+                    birthdate: data.birthdate,
+                    address: data.address,
+                    city: data.city,
+                    isCompanyClient: data.isCompanyClient ?? false,
                 },
-            });
-            try {
-                await this.broadcast.publishClientBillingCreated(customerBillingWithRelations);
-            } catch (eventError) {
-                console.error('Error publicando evento CLIENT_CREATED:', eventError);
-            }
-            return customerBillingWithRelations;
+                logger,
+            );
         } catch (error) {
-            console.log(error);
+            logger.error(error);
             if (error instanceof QueryFailedError && (error.driverError as any)?.code === '23505')
                 throw new RpcException(
-                    new ForbiddenException('Ya existe un dato de facturación con este documento en la empresas'),
+                    new ForbiddenException('Ya existe un dato de facturación con este documento en la empresa'),
                 );
             if (error instanceof RpcException) throw error;
             throw new RpcException(new InternalServerErrorException('Error al crear dato de facturación'));
@@ -143,8 +127,11 @@ export class BillingService {
     }
 
     // ─── Editar BillingData ──────────────────────────────────────────────────
+    // ─── Editar BillingData ──────────────────────────────────────────────────
     async update(data: any) {
+        const logger = new Logger('BillingUpdate');
         try {
+
             if (!data?.id)
                 throw new RpcException(new BadRequestException('id es requerido'));
 
@@ -158,7 +145,21 @@ export class BillingService {
             if (!billing)
                 throw new RpcException(new BadRequestException('Dato de facturación no encontrado'));
 
-            const allowed = ['idTypeId', 'idNumber', 'businessName', 'tradeName', 'mainEmail', 'phone', 'address', 'city', 'isActive'];
+            // 👇 Debe reflejar los campos del UpdateBillingDto.
+            // Si en el futuro el DTO agrega más campos (ej: genderId, birthdate),
+            // basta con sumarlos acá — no afecta a los customers vinculados (replicas),
+            // billing es la única entidad que se toca en este método.
+            const allowed = [
+                'idTypeId',
+                'idNumber',
+                'businessName',
+                'tradeName',
+                'mainEmail',
+                'phone',
+                'address',
+                'city',
+                'isActive',
+            ];
 
             for (const key of allowed) {
                 if (data.updates?.[key] !== undefined) {
@@ -170,9 +171,25 @@ export class BillingService {
                 }
             }
 
-            return await this.billingRepo.save(billing);
+            await this.billingRepo.save(billing);
+
+            // ── Retornar resultado actualizado con relations (igual que legacy) ──
+            const result = await this.billingRepo.findOne({
+                where: { id: billing.id },
+                relations: { idType: true, personType: true, customerLinks: { customer: true } },
+            });
+
+            // ── Emitir evento Kafka ───────────────────────────────────────
+            try {
+                await this.broadcast.publishClientBillingUpdated(result);
+            } catch (eventError) {
+                logger.error('Error publicando evento publishClientBillingUpdated:', eventError);
+            }
+
+            return result;
 
         } catch (error) {
+            logger.error(error);
             if (error instanceof RpcException) throw error;
             throw new RpcException(new InternalServerErrorException('Error al actualizar dato de facturación'));
         }
@@ -255,17 +272,23 @@ export class BillingService {
             if (!data?.idNumber || data.idNumber.trim().length < 3)
                 throw new RpcException(new BadRequestException('Ingrese al menos 3 caracteres'));
 
-            return await this.billingRepo.find({
+            const dtos = await this.billingRepo.find({
                 where: {
                     company: { id: data.user.companyId },
                     idNumber: Like(`%${data.idNumber.trim()}%`),
                     isActive: true,
                 },
-                relations: { idType: true },
+                relations: {
+                    idType: true,
+                    personType: true,
+                    gender: true,
+                    customerLinks: { customer: true },   // 👈 nuevo
+                },
                 order: { firstName: 'ASC' },
                 take: 10,
             });
 
+            return dtos
         } catch (error) {
             if (error instanceof RpcException) throw error;
             throw new RpcException(new InternalServerErrorException('Error al buscar datos de facturación'));
@@ -287,45 +310,27 @@ export class BillingService {
 
     async createFromLegacy(data: any) {
         const logger = new Logger('LegacyBilling');
-
         try {
-            // ── Validaciones mínimas ──────────────────────────────────────
             if (!data?.user?.companyId)
                 throw new RpcException(new BadRequestException('companyId ausente en token legacy'));
-
             if (!data?.idNumber)
                 throw new RpcException(new BadRequestException('idNumber es requerido'));
-
             if (!data?.idTypeId)
                 throw new RpcException(new BadRequestException('idTypeId es requerido'));
-
             if (!data?.personTypeId)
                 throw new RpcException(new BadRequestException('personTypeId es requerido'));
 
-            let somethingWasCreated = false;
-
-            // ── Buscar o crear BillingData ────────────────────────────────
-            let billingSaved: BillingData;
-
-            const existingBilling = await this.billingRepo
-                .createQueryBuilder('b')
-                .where('b.idNumber = :idNumber', { idNumber: data.idNumber })
-                .andWhere('b.companyId = :companyId', { companyId: data.user.companyId })
-                .getOne();
-
-            if (existingBilling) {
-                logger.log(`BillingData ya existe id: ${existingBilling.id}`);
-                billingSaved = existingBilling;
-            } else {
-                const billing = this.billingRepo.create({
-                    company: { id: data.user.companyId },
-                    idType: { id: data.idTypeId },
-                    personType: { id: data.personTypeId },
-                    gender: data.genderId ? { id: data.genderId } : undefined,
+            return await this.upsertCustomerAndBillingData(
+                {
+                    companyId: data.user.companyId,
                     idNumber: data.idNumber,
-                    tradeName: data.tradeName,
+                    idTypeId: data.idTypeId,
+                    personTypeId: data.personTypeId,
+                    genderId: data.genderId,
                     firstName: data.firstName,
                     lastName: data.lastName,
+                    businessName: data.businessName,
+                    tradeName: data.tradeName,
                     mainEmail: data.mainEmail,
                     cellphone: data.cellphone,
                     phone: data.phone,
@@ -333,173 +338,13 @@ export class BillingService {
                     address: data.address,
                     city: data.city,
                     isCompanyClient: data.isCompanyClient ?? false,
-                });
-
-                billingSaved = await this.billingRepo.save(billing);
-                somethingWasCreated = true;
-                logger.log(`BillingData creado id: ${billingSaved.id}`);
-            }
-
-            // ── Resolver ContactTypes una sola vez ──────────────────────────
-            const emailContactType = await this.contactTypeRepo.findOne({ where: { name: 'EMAIL' } });
-            const mobileContactType = await this.contactTypeRepo.findOne({ where: { name: 'MÓVIL' } });
-            const phoneContactType = await this.contactTypeRepo.findOne({ where: { name: 'TELÉFONO' } });
-
-            // ── Buscar o crear Customer mínimo ────────────────────────────
-            let customer = await this.customerRepo
-                .createQueryBuilder('c')
-                .leftJoinAndSelect('c.gender', 'gender')
-                .leftJoinAndSelect('c.contacts', 'contacts')
-                .leftJoinAndSelect('contacts.contactType', 'contactType')
-                .where('c.idNumber = :idNumber', { idNumber: data.idNumber })
-                .andWhere('c.companyId = :companyId', { companyId: data.user.companyId })
-                .getOne();
-
-            if (customer) {
-                logger.log(`Customer ya existe id: ${customer.id}`);
-
-                // 👇 Completa inline si el customer ya existía pero le faltan datos
-                let customerChanged = false;
-                if (!customer.gender && data.genderId) {
-                    customer.gender = { id: data.genderId } as any;
-                    customerChanged = true;
-                }
-                if (!customer.birthDate && data.birthdate) {
-                    const parsed = new Date(data.birthdate);
-                    if (!isNaN(parsed.getTime())) {
-                        customer.birthDate = parsed;
-                        customerChanged = true;
-                    }
-                }
-                if (customerChanged) {
-                    customer = await this.customerRepo.save(customer);
-                    logger.log(`Customer ${customer.id} actualizado con gender/birthDate faltantes`);
-                }
-
-                // 👇 Completa contacto MÓVIL si falta
-                if (data.cellphone && mobileContactType) {
-                    const hasMobile = customer.contacts?.some(
-                        (c) => c.contactType?.id === mobileContactType.id,
-                    );
-                    if (!hasMobile) {
-                        const newContact = this.contactRepo.create({
-                            contactType: { id: mobileContactType.id },
-                            value: data.cellphone,
-                            isPrimary: !customer.contacts?.length,
-                            customer: { id: customer.id },
-                        });
-                        await this.contactRepo.save(newContact);
-                        logger.log(`Contacto MÓVIL agregado al customer ${customer.id}`);
-                    }
-                }
-
-                // 👇 Completa contacto TELÉFONO si falta
-                if (data.phone && phoneContactType) {
-                    const hasPhone = customer.contacts?.some(
-                        (c) => c.contactType?.id === phoneContactType.id,
-                    );
-                    if (!hasPhone) {
-                        const newContact = this.contactRepo.create({
-                            contactType: { id: phoneContactType.id },
-                            value: data.phone,
-                            isPrimary: false,
-                            customer: { id: customer.id },
-                        });
-                        await this.contactRepo.save(newContact);
-                        logger.log(`Contacto TELÉFONO agregado al customer ${customer.id}`);
-                    }
-                }
-            } else {
-                const contacts: any[] = [];
-
-                if (data.mainEmail && emailContactType) {
-                    contacts.push({
-                        contactType: { id: emailContactType.id },
-                        value: data.mainEmail,
-                        isPrimary: true,
-                    });
-                }
-
-                if (data.cellphone && mobileContactType) {
-                    contacts.push({
-                        contactType: { id: mobileContactType.id },
-                        value: data.cellphone,
-                        isPrimary: !data.mainEmail, // primario si no hay email
-                    });
-                }
-
-                if (data.phone && phoneContactType) {
-                    contacts.push({
-                        contactType: { id: phoneContactType.id },
-                        value: data.phone,
-                        isPrimary: false,
-                    });
-                }
-
-                const newCustomer = this.customerRepo.create({
-                    company: { id: data.user.companyId },
-                    idType: { id: data.idTypeId },
-                    idNumber: data.idNumber,
-                    firstName: data.firstName ?? data.businessName?.split(' ')[0] ?? 'S/N',
-                    lastName: data.lastName ?? data.businessName?.split(' ').slice(1).join(' ') ?? 'S/N',
-                    gender: data.genderId ? { id: data.genderId } : undefined,
-                    birthDate: data.birthdate ? new Date(data.birthdate) : undefined,
-                    isActive: true,
-                    contacts,
-                });
-
-                customer = await this.customerRepo.save(newCustomer);
-                somethingWasCreated = true;
-                await this.publishMinimalCustomerCreated(customer.id);
-                logger.log(`Cliente mínimo creado id: ${customer.id}`);
-            }
-
-            // ── Vincular customer ↔ billingData ───────────────────────────
-            const alreadyLinked = await this.pivotRepo.findOne({
-                where: {
-                    customer: { id: customer.id },
-                    billingData: { id: billingSaved.id },
                 },
-            });
-
-            if (alreadyLinked) {
-                logger.log(`Vínculo ya existe customer ${customer.id} ↔ billing ${billingSaved.id}`);
-            } else {
-                await this.pivotRepo.save(
-                    this.pivotRepo.create({
-                        customer: { id: customer.id },
-                        billingData: { id: billingSaved.id },
-                        isDefault: false,
-                    }),
-                );
-                somethingWasCreated = true;
-                logger.log(`Vínculo creado customer ${customer.id} ↔ billing ${billingSaved.id}`);
-            }
-
-            // ── Retornar resultado completo ───────────────────────────────
-            const result = await this.billingRepo.findOne({
-                where: { id: billingSaved.id },
-                relations: { idType: true, personType: true, customerLinks: { customer: true } },
-            });
-
-            if (somethingWasCreated) {
-                try {
-                    await this.broadcast.publishClientBillingCreated(result);
-                } catch (eventError) {
-                    console.error('Error publicando evento CLIENT_CREATED:', eventError);
-                }
-            } else {
-                logger.log(`Todo ya existía, evento no publicado para idNumber: ${data.idNumber}`);
-            }
-
-            return result;
-
+                logger,
+            );
         } catch (error) {
             logger.error(error);
             if (error instanceof RpcException) throw error;
-            throw new RpcException(
-                new InternalServerErrorException('Error procesando billing desde legacy'),
-            );
+            throw new RpcException(new InternalServerErrorException('Error procesando billing desde legacy'));
         }
     }
     async updateFromLegacyRaw(raw: any) {
@@ -918,6 +763,173 @@ export class BillingService {
             if (error instanceof RpcException) throw error;
             throw new RpcException(new InternalServerErrorException('Error creando cliente con facturación'));
         }
+    }
+
+
+
+    private async upsertCustomerAndBillingData(input: BillingUpsertInput, logger: Logger) {
+        let somethingWasCreated = false;
+
+        // ── Buscar o crear BillingData ──────────────────────────
+        let billingSaved = await this.billingRepo
+            .createQueryBuilder('b')
+            .where('b.idNumber = :idNumber', { idNumber: input.idNumber })
+            .andWhere('b.companyId = :companyId', { companyId: input.companyId })
+            .getOne();
+
+        if (billingSaved) {
+            logger.log(`BillingData ya existe id: ${billingSaved.id}`);
+        } else {
+            const billing = this.billingRepo.create({
+                company: { id: input.companyId },
+                idType: { id: input.idTypeId },
+                personType: { id: input.personTypeId },
+                gender: input.genderId ? { id: input.genderId } : undefined,
+                idNumber: input.idNumber,
+                tradeName: input.tradeName,
+                firstName: input.firstName,      // 👈 sin businessName aquí, igual que el legacy original
+                lastName: input.lastName,
+                mainEmail: input.mainEmail,
+                cellphone: input.cellphone,
+                phone: input.phone,
+                birthdate: input.birthdate,
+                address: input.address,
+                city: input.city,
+                isCompanyClient: input.isCompanyClient ?? false,
+            });
+            billingSaved = await this.billingRepo.save(billing);
+            somethingWasCreated = true;
+            logger.log(`BillingData creado id: ${billingSaved.id}`);
+        }
+
+        // ── Resolver ContactTypes una sola vez ───────────────────
+        const emailContactType = await this.contactTypeRepo.findOne({ where: { name: 'EMAIL' } });
+        const mobileContactType = await this.contactTypeRepo.findOne({ where: { name: 'MÓVIL' } });
+        const phoneContactType = await this.contactTypeRepo.findOne({ where: { name: 'TELÉFONO' } });
+
+        // ── Buscar o crear Customer ──────────────────────────────
+        let customer = await this.customerRepo
+            .createQueryBuilder('c')
+            .leftJoinAndSelect('c.gender', 'gender')
+            .leftJoinAndSelect('c.contacts', 'contacts')
+            .leftJoinAndSelect('contacts.contactType', 'contactType')
+            .where('c.idNumber = :idNumber', { idNumber: input.idNumber })
+            .andWhere('c.companyId = :companyId', { companyId: input.companyId })
+            .getOne();
+
+        if (customer) {
+            logger.log(`Customer ya existe id: ${customer.id}`);
+
+            let customerChanged = false;
+            if (!customer.gender && input.genderId) {
+                customer.gender = { id: input.genderId } as any;
+                customerChanged = true;
+            }
+            if (!customer.birthDate && input.birthdate) {
+                const parsed = new Date(input.birthdate);
+                if (!isNaN(parsed.getTime())) {
+                    customer.birthDate = parsed;
+                    customerChanged = true;
+                }
+            }
+            if (customerChanged) {
+                customer = await this.customerRepo.save(customer);
+                logger.log(`Customer ${customer.id} actualizado con gender/birthDate faltantes`);
+            }
+
+            const missingContact = async (
+                value: string | undefined,
+                contactType: { id: number } | null,
+                isPrimary: boolean,
+                label: string,
+            ) => {
+                if (!value || !contactType) return;
+                const has = customer!.contacts?.some((c) => c.contactType?.id === contactType.id);
+                if (!has) {
+                    const newContact = this.contactRepo.create({
+                        contactType: { id: contactType.id },
+                        value,
+                        isPrimary: isPrimary && !customer!.contacts?.length,
+                        customer: { id: customer!.id },
+                    });
+                    await this.contactRepo.save(newContact);
+                    logger.log(`Contacto ${label} agregado al customer ${customer!.id}`);
+                }
+            };
+
+            await missingContact(input.mainEmail, emailContactType, true, 'EMAIL');
+            await missingContact(input.cellphone, mobileContactType, true, 'MÓVIL');
+            await missingContact(input.phone, phoneContactType, false, 'TELÉFONO');
+        } else {
+            const contacts: any[] = [];
+
+            if (input.mainEmail && emailContactType) {
+                contacts.push({ contactType: { id: emailContactType.id }, value: input.mainEmail, isPrimary: true });
+            }
+            if (input.cellphone && mobileContactType) {
+                contacts.push({
+                    contactType: { id: mobileContactType.id },
+                    value: input.cellphone,
+                    isPrimary: !input.mainEmail,
+                });
+            }
+            if (input.phone && phoneContactType) {
+                contacts.push({ contactType: { id: phoneContactType.id }, value: input.phone, isPrimary: false });
+            }
+
+            const newCustomer = this.customerRepo.create({
+                company: { id: input.companyId },
+                idType: { id: input.idTypeId },
+                idNumber: input.idNumber,
+                firstName: input.firstName ?? input.businessName?.split(' ')[0] ?? 'S/N',
+                lastName: input.lastName ?? input.businessName?.split(' ').slice(1).join(' ') ?? 'S/N',
+                gender: input.genderId ? { id: input.genderId } : undefined,
+                birthDate: input.birthdate ? new Date(input.birthdate) : undefined,
+                isActive: true,
+                contacts,
+            });
+
+            customer = await this.customerRepo.save(newCustomer);
+            somethingWasCreated = true;
+            await this.publishMinimalCustomerCreated(customer.id);
+            logger.log(`Cliente mínimo creado id: ${customer.id}`);
+        }
+
+        // ── Vincular customer ↔ billingData ─────────────────────
+        const alreadyLinked = await this.pivotRepo.findOne({
+            where: { customer: { id: customer.id }, billingData: { id: billingSaved.id } },
+        });
+
+        if (alreadyLinked) {
+            logger.log(`Vínculo ya existe customer ${customer.id} ↔ billing ${billingSaved.id}`);
+        } else {
+            await this.pivotRepo.save(
+                this.pivotRepo.create({
+                    customer: { id: customer.id },
+                    billingData: { id: billingSaved.id },
+                    isDefault: false,
+                }),
+            );
+            somethingWasCreated = true;
+            logger.log(`Vínculo creado customer ${customer.id} ↔ billing ${billingSaved.id}`);
+        }
+
+        const result = await this.billingRepo.findOne({
+            where: { id: billingSaved.id },
+            relations: { idType: true, personType: true, gender: true, customerLinks: { customer: true } },
+        });
+
+        if (somethingWasCreated) {
+            try {
+                await this.broadcast.publishClientBillingCreated(result);
+            } catch (eventError) {
+                console.error('Error publicando evento CLIENT_CREATED:', eventError);
+            }
+        } else {
+            logger.log(`Todo ya existía, evento no publicado para idNumber: ${input.idNumber}`);
+        }
+
+        return result;
     }
 }
 

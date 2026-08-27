@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Inject, ParseIntPipe } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -99,7 +99,7 @@ export class CustomersController {
 
   @Groups('CASHIERS')
   async listCustomers(@Body() dto: SearchCustomersDto, @User() user: any) {
-    console.log(user)
+    // console.log(user)
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'list_customers' },
@@ -180,14 +180,14 @@ export class CustomersController {
   /** Editar datos de un BillingData */
   @Put('billing/:id')
   async updateBilling(
-    @Param('id') id: number,
+    @Param('id') id: string,
     @Body() dto: UpdateBillingDto,
     @User() user: any,
   ) {
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'update_billing' },
-        { internalToken: process.env.INTERNAL_SECRET, id: +id, updates: dto, user },
+        { internalToken: process.env.INTERNAL_SECRET, id, updates: dto, user }, // Ya no necesitas el +id
       ),
     );
   }
