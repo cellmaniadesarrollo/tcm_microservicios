@@ -113,4 +113,22 @@ export class IncomeBackendController {
     this.logger.log(`📤 GET /inventory-flows/${id}`);
     return this.incomeBackendService.getInventoryFlowById(id);
   }
+
+  @Get('device-verification/batch/:batchId')
+  @ApiOperation({ summary: 'Obtener verificación de partes por batchId' })
+  @ApiParam({ name: 'batchId', description: 'ID del batch' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Verificación encontrada' })
+  async getDeviceVerificationByBatchId(@Param('batchId') batchId: string) {
+    this.logger.log(`📤 GET /device-verification/batch/${batchId}`);
+    return this.incomeBackendService.getDeviceVerificationByBatchId(batchId);
+  }
+
+  @Get('device-verification/order/:orderId')
+  @ApiOperation({ summary: 'Obtener verificaciones de partes por orderId' })
+  @ApiParam({ name: 'orderId', description: 'ID de la orden' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Verificaciones encontradas' })
+  async getDeviceVerificationByOrderId(@Param('orderId') orderId: string) {
+    this.logger.log(`📤 GET /device-verification/order/${orderId}`);
+    return this.incomeBackendService.getDeviceVerificationByOrderId(parseInt(orderId, 10));
+  }
 }

@@ -51,6 +51,14 @@ export class Batch extends Document {
 
   @Prop({ type: String, index: true })
   orderPublicId: string;
+
+  // ✅ ARRAY DE VERIFICACIONES (una por cada parte)
+  @Prop({ type: [Types.ObjectId], ref: 'deviceverifications', default: [] })
+  deviceVerificationIds: Types.ObjectId[];
+
+  // ✅ INDICADOR DE SI ES UN DISPOSITIVO COMPLETO
+  @Prop({ type: Boolean, default: false })
+  isCompleteDevice: boolean;
 }
 
 export const BatchSchema = SchemaFactory.createForClass(Batch);
