@@ -1,27 +1,39 @@
-import { IsEmail, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsEmail, IsNumber, IsOptional, IsString, IsBoolean } from 'class-validator';
 
 export class UpdateBillingDto {
+  @IsOptional()
+  @IsNumber()
+  idTypeId?: number;
+
+  @IsOptional()
+  @IsString()
+  idNumber?: string;
+
   @IsOptional()
   @IsString()
   businessName?: string;
 
   @IsOptional()
   @IsString()
-  identification?: string;
-
-  @IsOptional()
-  @IsNumber()
-  identificationTypeId?: number;
-
-  @IsOptional()
-  @IsString()
-  billingAddress?: string;
-
-  @IsOptional()
-  @IsString()
-  billingPhone?: string;
+  tradeName?: string;
 
   @IsOptional()
   @IsEmail()
-  billingEmail?: string;
+  mainEmail?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  city?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
 }

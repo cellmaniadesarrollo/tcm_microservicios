@@ -1,66 +1,65 @@
 import { IsEmail, IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean } from 'class-validator';
 
 export class CreateBillingDto {
-  @IsNumber()
-  @IsNotEmpty()
-  customerId: number;
+  // ❌ customerId ya no aplica: ahora se resuelve/crea por idNumber+companyId,
+  // igual que el legacy (upsertCustomerAndBillingData).
 
   @IsNumber()
   @IsNotEmpty()
-  idTypeId: number;                    // ← cambiado de identificationTypeId
+  idTypeId: number;
 
   @IsString()
   @IsNotEmpty()
-  idNumber: string;                    // ← cambiado de identification
+  idNumber: string;
 
   @IsNumber()
   @IsNotEmpty()
-  personTypeId: number;                // ← NUEVO (natural / juridica)
-
-  @IsString()
-  @IsNotEmpty()
-  businessName: string;
+  personTypeId: number;                // natural / jurídica
 
   @IsOptional()
   @IsString()
-  tradeName?: string;                  // ← NUEVO
+  businessName?: string;               // ← ahora opcional: solo fallback para first/lastName si es jurídica
 
   @IsOptional()
   @IsString()
-  firstName?: string;                  // ← NUEVO
+  tradeName?: string;
 
   @IsOptional()
   @IsString()
-  lastName?: string;                   // ← NUEVO
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  lastName?: string;
 
   @IsOptional()
   @IsNumber()
-  genderId?: number;                   // ← NUEVO (usa el catálogo de Gender)
+  genderId?: number;
 
   @IsOptional()
   @IsString()
-  birthdate?: string;                  // ← NUEVO (formato YYYY-MM-DD)
+  birthdate?: string;                  // 'YYYY-MM-DD'
 
   @IsString()
   @IsNotEmpty()
   @IsEmail()
-  mainEmail: string;                   // ← cambiado de billingEmail
+  mainEmail: string;
 
   @IsOptional()
   @IsString()
-  cellphone?: string;                  // ← NUEVO
+  cellphone?: string;
 
   @IsOptional()
   @IsString()
-  phone?: string;                      // ← NUEVO
+  phone?: string;
 
   @IsString()
   @IsNotEmpty()
-  address: string;                     // ← cambiado de billingAddress
+  address: string;
 
   @IsOptional()
   @IsString()
-  city?: string;                       // ← NUEVO
+  city?: string;
 
   @IsOptional()
   @IsBoolean()
