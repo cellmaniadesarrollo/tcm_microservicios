@@ -480,6 +480,74 @@ export class InventarioService {
     }
   }
 
+  
+  // ============================================
+  // ✅ NUEVOS MÉTODOS PARA VERIFICACIÓN DE PARTES
+  // ============================================
+
+  /**
+   * Obtener verificación de partes por batchId
+   * CONSULTA AL MICROSERVICIO DE INVENTARIO
+   */
+  async getDeviceVerificationByBatchId(batchId: string): Promise<any> {
+    this.logger.log(`📤 [Gateway] getDeviceVerificationByBatchId: ${batchId}`);
+    
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/device-verification/batch/${batchId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getDeviceVerificationByBatchId: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener verificación de partes',
+      };
+    }
+  }
+
+  /**
+   * Obtener verificaciones de partes por orderId
+   * CONSULTA AL MICROSERVICIO DE INVENTARIO
+   */
+  async getDeviceVerificationByOrderId(orderId: string): Promise<any> {
+    this.logger.log(`📤 [Gateway] getDeviceVerificationByOrderId: ${orderId}`);
+    
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/device-verification/order/${orderId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getDeviceVerificationByOrderId: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener verificaciones de partes',
+      };
+    }
+  }
+
+  /**
+   * Obtener la última verificación de partes por orderId
+   * CONSULTA AL MICROSERVICIO DE INVENTARIO
+   */
+  async getLatestDeviceVerificationByOrderId(orderId: string): Promise<any> {
+    this.logger.log(`📤 [Gateway] getLatestDeviceVerificationByOrderId: ${orderId}`);
+    
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/device-verification/order/${orderId}/latest`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getLatestDeviceVerificationByOrderId: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener la última verificación de partes',
+      };
+    }
+  }
+
   // ============================================
   // ✅ NUEVOS MÉTODOS PARA BODEGA
   // ============================================
