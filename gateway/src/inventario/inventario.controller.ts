@@ -244,6 +244,43 @@ export class InventarioController {
   }
 
   // ============================================
+  // ✅ NUEVOS ENDPOINTS PARA VERIFICACIÓN DE PARTES
+  // ============================================
+
+  /**
+   * GET /api/inventario/device-verification/batch/:batchId
+   * Obtener verificación de partes por batchId
+   */
+  @Get('device-verification/batch/:batchId')
+  @ApiOperation({ summary: 'Obtener verificación de partes por batchId' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async getDeviceVerificationByBatchId(@Param('batchId') batchId: string) {
+    return this.inventarioService.getDeviceVerificationByBatchId(batchId);
+  }
+
+  /**
+   * GET /api/inventario/device-verification/order/:orderId
+   * Obtener verificaciones de partes por orderId
+   */
+  @Get('device-verification/order/:orderId')
+  @ApiOperation({ summary: 'Obtener verificaciones de partes por orderId' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async getDeviceVerificationByOrderId(@Param('orderId') orderId: string) {
+    return this.inventarioService.getDeviceVerificationByOrderId(orderId);
+  }
+
+  /**
+   * GET /api/inventario/device-verification/order/:orderId/latest
+   * Obtener la última verificación de partes por orderId
+   */
+  @Get('device-verification/order/:orderId/latest')
+  @ApiOperation({ summary: 'Obtener la última verificación de partes por orderId' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async getLatestDeviceVerificationByOrderId(@Param('orderId') orderId: string) {
+    return this.inventarioService.getLatestDeviceVerificationByOrderId(orderId);
+  }
+
+  // ============================================
   // ✅ NUEVOS ENDPOINTS PARA BODEGA (Income Backend)
   // ============================================
 

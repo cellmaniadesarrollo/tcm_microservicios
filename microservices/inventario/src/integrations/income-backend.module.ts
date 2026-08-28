@@ -23,6 +23,7 @@ import { TypeInventoryFlow, TypeInventoryFlowSchema } from './models/type-invent
 import { Quality, QualitySchema } from './models/quality.model';
 import { NameInventory, NameInventorySchema } from './models/name-inventory.model';
 import { Supplier, SupplierSchema } from './models/supplier.model';
+import { DeviceVerification, DeviceVerificationSchema } from './models/device-verification.model';
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { Supplier, SupplierSchema } from './models/supplier.model';
         { name: Quality.name, schema: QualitySchema },
         { name: NameInventory.name, schema: NameInventorySchema },
         { name: Supplier.name, schema: SupplierSchema },
+        { name: DeviceVerification.name, schema: DeviceVerificationSchema },
       ],
       'atlas'
     ),
