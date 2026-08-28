@@ -1,63 +1,51 @@
 // src/notifications/notification-tracking.controller.ts
-import { 
-  Controller, 
-  Get, 
-  Post, 
-  Put, 
-  Delete,
-  Body, 
-  Param, 
-  HttpStatus,
-  HttpCode
-} from '@nestjs/common';
+import { Controller } from '@nestjs/common';
+import { MessagePattern, Payload } from '@nestjs/microservices';
 import { NotificationTrackingService } from './notification-tracking.service';
 import { CreateNotificationTrackingDto } from './dto/create-notification-tracking.dto';
 import { UpdateNotificationTrackingDto } from './dto/update-notification-tracking.dto';
 
-@Controller('notifications/tracking')
+@Controller()
 export class NotificationTrackingController {
   constructor(private readonly trackingService: NotificationTrackingService) {}
 
-  @Post()
-  async create(@Body() createDto: CreateNotificationTrackingDto) {
+  @MessagePattern({ cmd: 'create_notification_tracking' })
+  async create(@Payload() createDto: CreateNotificationTrackingDto) {
     return this.trackingService.create(createDto);
   }
 
-  @Get('notification/:notificationId')
-  async findByNotificationId(@Param('notificationId') notificationId: string) {
-    return this.trackingService.findByNotificationId(notificationId);
+  @MessagePattern({ cmd: 'get_notification_tracking_history' })
+  async findByNotificationId(@Payload() data: { notificationId: string }) {
+    return this.trackingService.findByNotificationId(data.notificationId);
   }
 
-  @Get('notification/:notificationId/latest')
-  async findLatest(@Param('notificationId') notificationId: string) {
-    return this.trackingService.findLatestByNotificationId(notificationId);
+  @MessagePattern({ cmd: 'get_latest_notification_tracking' })
+  async findLatest(@Payload() data: { notificationId: string }) {
+    return this.trackingService.findLatestByNotificationId(data.notificationId);
   }
 
-  @Put(':id')
-  async update(
-    @Param('id') id: string,
-    @Body() updateDto: UpdateNotificationTrackingDto
-  ) {
+  @MessagePattern({ cmd: 'update_notification_tracking' })
+  async update(@Payload() data: { id: string } & UpdateNotificationTrackingDto) {
+    const { id, ...updateDto } = data;
     return this.trackingService.update(id, updateDto);
   }
 
-  @Post('notification/:notificationId/call')
+  @MessagePattern({ cmd: 'mark_as_called' })
   async markAsCalled(
-    @Param('notificationId') notificationId: string,
-    @Body() body: { userId: string; userName: string; notes?: string }
+    @Payload() data: { notificationId: string; userId: string; userName: string; notes?: string }
   ) {
     return this.trackingService.markAsCalled(
-      notificationId,
-      body.userId,
-      body.userName,
-      body.notes
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.notes
     );
   }
 
-  @Post('notification/:notificationId/problem')
+  @MessagePattern({ cmd: 'report_problem' })
   async reportProblem(
-    @Param('notificationId') notificationId: string,
-    @Body() body: { 
+    @Payload() data: { 
+      notificationId: string; 
       userId: string; 
       userName: string; 
       problemDescription: string; 
@@ -65,43 +53,51 @@ export class NotificationTrackingController {
     }
   ) {
     return this.trackingService.reportProblem(
-      notificationId,
-      body.userId,
-      body.userName,
-      body.problemDescription,
-      body.notes
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.problemDescription,
+      data.notes
     );
   }
 
-  @Post('notification/:notificationId/archive')
+  // 🔴 ESTE ES EL QUE TE FALTABA
+  @MessagePattern({ cmd: 'mark_as_does_not_apply' })
+  async setDoesNotApply(
+    @Payload() data: { notificationId: string; userId: string }
+  ) {
+    return this.trackingService.setDoesNotApply(
+      data.notificationId,
+      data.userId
+    );
+  }
+
+  @MessagePattern({ cmd: 'toggle_archive' })
   async toggleArchive(
-    @Param('notificationId') notificationId: string,
-    @Body() body: { userId: string; userName: string; archive: boolean }
+    @Payload() data: { notificationId: string; userId: string; userName: string; archive: boolean }
   ) {
     return this.trackingService.toggleArchive(
-      notificationId,
-      body.userId,
-      body.userName,
-      body.archive
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.archive
     );
   }
 
-  @Post('notification/:notificationId/note')
+  @MessagePattern({ cmd: 'add_note_to_notification' })
   async addNote(
-    @Param('notificationId') notificationId: string,
-    @Body() body: { userId: string; userName: string; notes: string }
+    @Payload() data: { notificationId: string; userId: string; userName: string; notes: string }
   ) {
     return this.trackingService.addNote(
-      notificationId,
-      body.userId,
-      body.userName,
-      body.notes
+      data.notificationId,
+      data.userId,
+      data.userName,
+      data.notes
     );
   }
 
-  @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id') id: string) {
-    return this.trackingService.remove(id);
+  @MessagePattern({ cmd: 'delete_notification_tracking' })
+  async remove(@Payload() data: { id: string }) {
+    return this.trackingService.remove(data.id);
   }
 }
