@@ -5,7 +5,7 @@ import { HydratedDocument, Types } from 'mongoose';
 export type NotificationTrackingDocument = HydratedDocument<NotificationTracking>;
 
 export interface NotificationAction {
-  type: 'read' | 'viewed' | 'archived' | 'note_added' | 'problem_reported' | 'unarchived';
+  type: 'read' | 'viewed' | 'archived' | 'note_added' | 'problem_reported' | 'unarchived' | 'not_applicable_set';
   performedBy: string;
   performedByName: string;
   performedAt: Date;
@@ -70,6 +70,24 @@ export class NotificationTracking {
   @Prop({ type: String, default: null })
   problemReportedByName: string;
 
+  // ============================================
+  // CAMPOS NO APLICA (3 CAMPOS)
+  // ============================================
+
+  @Prop({ 
+    type: Boolean, 
+    default: false 
+  })
+  doesNotApply: boolean;
+
+  @Prop({ type: Date, default: null })
+  doesNotApplyAt: Date;
+
+  @Prop({ type: String, default: null })
+  doesNotApplyBy: string;
+
+  // ============================================
+
   @Prop({ type: Boolean, default: false })
   isArchived: boolean;
 
@@ -96,7 +114,7 @@ export class NotificationTracking {
 
   @Prop({ 
     type: String, 
-    enum: ['read', 'viewed', 'archived', 'note_added', 'problem_reported', 'unarchived'], 
+    enum: ['read', 'viewed', 'archived', 'note_added', 'problem_reported', 'unarchived', 'not_applicable_set'], 
     default: null 
   })
   lastAction: string;
@@ -118,6 +136,7 @@ NotificationTrackingSchema.index({ notificationId: 1, createdAt: -1 });
 NotificationTrackingSchema.index({ notificationId: 1, isArchived: 1 });
 NotificationTrackingSchema.index({ notificationId: 1, isCalled: 1 });
 NotificationTrackingSchema.index({ notificationId: 1, hasProblems: 1 });
-NotificationTrackingSchema.index({ isCalled: 1, hasProblems: 1 });
+NotificationTrackingSchema.index({ notificationId: 1, doesNotApply: 1 }); // Index por notificación y estado
+NotificationTrackingSchema.index({ isCalled: 1, hasProblems: 1, doesNotApply: 1 }); // Index compuesto para consultas globales
 NotificationTrackingSchema.index({ archivedAt: 1 });
 NotificationTrackingSchema.index({ 'actions.performedAt': -1 });

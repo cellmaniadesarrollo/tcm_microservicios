@@ -28,9 +28,9 @@ export class NotificationsController {
   async getCurrentStuckOrders(
     @Param('userId') userId: string,
     @Query('status') status?: string,
-    @Query('days') days?: string,  // ← Recibir como string
+    @Query('days') days?: string,
   ) {
-    const daysNum = days !== undefined ? parseInt(days, 10) : 3;  // ← Validar específicamente
+    const daysNum = days !== undefined ? parseInt(days, 10) : 3;
     return this.notificationsService.getCurrentStuckOrders(
       userId,
       status || 'INGRESADO',
@@ -67,7 +67,7 @@ export class NotificationsController {
     return this.notificationsService.trackAccess(id, body.userId, body.actionData);
   }
 
-    // ============================================
+  // ============================================
   // ✅ NUEVOS ENDPOINTS PARA OBSERVACIONES Y PROGRAMACIÓN
   // ============================================
 
@@ -112,39 +112,39 @@ export class NotificationsController {
     return this.notificationsService.getFutureNotifications(page, limit);
   }
 
-@Get('delivered')
-async getDeliveredNotifications(
-  @Query('page') page?: number,
-  @Query('limit') limit?: number,
-  @Query('includeArchived') includeArchived?: string,
-  @Query('onlyWithNotes') onlyWithNotes?: string,  // ✅ NUEVO PARÁMETRO
-) {
-  const includeArchivedBool = includeArchived === 'true';
-  const onlyWithNotesBool = onlyWithNotes === 'true';  // ✅ CONVERTIR A BOOLEAN
-  return this.notificationsService.getDeliveredNotifications(
-    page,
-    limit,
-    includeArchivedBool,
-    onlyWithNotesBool  // ✅ PASAR EL PARÁMETRO
-  );
-}
+  @Get('delivered')
+  async getDeliveredNotifications(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('includeArchived') includeArchived?: string,
+    @Query('onlyWithNotes') onlyWithNotes?: string,
+  ) {
+    const includeArchivedBool = includeArchived === 'true';
+    const onlyWithNotesBool = onlyWithNotes === 'true';
+    return this.notificationsService.getDeliveredNotifications(
+      page,
+      limit,
+      includeArchivedBool,
+      onlyWithNotesBool
+    );
+  }
 
-@Get('finished/three-months')
-async getFinishedOrdersOverThreeMonths(
-  @Query('page') page?: number,
-  @Query('limit') limit?: number,
-  @Query('includeArchived') includeArchived?: string,
-  @Query('onlyWithNotes') onlyWithNotes?: string,  // ✅ NUEVO PARÁMETRO
-) {
-  const includeArchivedBool = includeArchived === 'true';
-  const onlyWithNotesBool = onlyWithNotes === 'true';  // ✅ CONVERTIR A BOOLEAN
-  return this.notificationsService.getFinishedOrdersOverThreeMonths(
-    page,
-    limit,
-    includeArchivedBool,
-    onlyWithNotesBool  // ✅ PASAR EL PARÁMETRO
-  );
-}
+  @Get('finished/three-months')
+  async getFinishedOrdersOverThreeMonths(
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('includeArchived') includeArchived?: string,
+    @Query('onlyWithNotes') onlyWithNotes?: string,
+  ) {
+    const includeArchivedBool = includeArchived === 'true';
+    const onlyWithNotesBool = onlyWithNotes === 'true';
+    return this.notificationsService.getFinishedOrdersOverThreeMonths(
+      page,
+      limit,
+      includeArchivedBool,
+      onlyWithNotesBool
+    );
+  }
 
   @Patch(':id/notes')
   async updateNotificationNotes(
@@ -248,7 +248,7 @@ async getFinishedOrdersOverThreeMonths(
     return this.notificationsService.deleteOrderObservationsByOrder(orderId);
   }
 
-    /**
+  /**
    * POST /notifications/tracking
    * Crear tracking para una notificación
    */
@@ -266,6 +266,9 @@ async getFinishedOrdersOverThreeMonths(
       problemReportedByName?: string;
       archivedBy?: string;
       archivedByName?: string;
+      doesNotApply?: boolean;        // 👈 CAMPO AGREGADO
+      doesNotApplyAt?: Date;          // 👈 CAMPO AGREGADO
+      doesNotApplyBy?: string;        // 👈 CAMPO AGREGADO
     }
   ) {
     if (!body.notificationId) {
@@ -319,6 +322,9 @@ async getFinishedOrdersOverThreeMonths(
       isArchived?: boolean;
       unarchivedBy?: string;
       unarchivedByName?: string;
+      doesNotApply?: boolean;        // 👈 CAMPO AGREGADO
+      doesNotApplyAt?: Date;          // 👈 CAMPO AGREGADO
+      doesNotApplyBy?: string;        // 👈 CAMPO AGREGADO
     }
   ) {
     if (!id) {
@@ -380,6 +386,29 @@ async getFinishedOrdersOverThreeMonths(
       body.userName,
       body.problemDescription,
       body.notes
+    );
+  }
+
+  /**
+   * 👈 NUEVO ENDPOINT: POST /notifications/tracking/notification/:notificationId/does-not-apply
+   * Marcar como No Aplica
+   */
+  @Post('tracking/notification/:notificationId/does-not-apply')
+  async markAsDoesNotApply(
+    @Param('notificationId') notificationId: string,
+    @Body() body: {
+      userId: string;
+    }
+  ) {
+    if (!notificationId) {
+      throw new BadRequestException('notificationId es requerido');
+    }
+    if (!body.userId) {
+      throw new BadRequestException('userId es requerido');
+    }
+    return this.notificationsService.markAsDoesNotApply(
+      notificationId,
+      body.userId
     );
   }
 
