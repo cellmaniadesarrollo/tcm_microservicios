@@ -1,7 +1,8 @@
 // src/notifications/dto/update-notification-tracking.dto.ts
 import { PartialType } from '@nestjs/mapped-types';
 import { CreateNotificationTrackingDto } from './create-notification-tracking.dto';
-import { IsOptional, IsBoolean, IsString } from 'class-validator';
+import { IsOptional, IsBoolean, IsString, IsDate } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class UpdateNotificationTrackingDto extends PartialType(CreateNotificationTrackingDto) {
   @IsOptional()
@@ -31,4 +32,17 @@ export class UpdateNotificationTrackingDto extends PartialType(CreateNotificatio
   @IsOptional()
   @IsString()
   unarchivedByName?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  doesNotApply?: boolean;
+
+  @IsOptional()
+  @Type(() => Date)
+  @IsDate()
+  doesNotApplyAt?: Date;
+
+  @IsOptional()
+  @IsString()
+  doesNotApplyBy?: string;
 }
