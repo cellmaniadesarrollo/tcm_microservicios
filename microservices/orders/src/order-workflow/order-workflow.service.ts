@@ -50,6 +50,8 @@ import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement
 import { InvoicesService } from '../invoices/invoices.service';
 import { CreateWarehousePaymentDto } from './dto/create-warehouse-payment.dto';
 import { WarehousePayment, WarehousePaymentFlowType } from './entities/warehouse-payment.entity';
+import { OrderExtraService } from '../order-extras/entities/order-extra-service.entity';
+import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -92,9 +94,51 @@ export class OrderWorkflowService {
     @InjectRepository(SpareAssignment)
     private readonly spareAssignmentRepository: Repository<SpareAssignment>,
     private readonly orderValidationLockService: OrderValidationLockService,
-    private readonly invoicesService: InvoicesService
+    private readonly invoicesService: InvoicesService,
+    @InjectRepository(OrderExtraService)
+    private readonly orderExtraServiceRepo: Repository<OrderExtraService>,
+    @InjectRepository(OrderPendingProduct)
+    private readonly orderPendingProductRepo: Repository<OrderPendingProduct>,
   ) { }
+  private async getPublicExtraCharges(orderId: number): Promise<{ name: string; price: number }[]> {
+    const [spares, extraServices, pendingProducts] = await Promise.all([
+      this.spareAssignmentRepository.find({
+        where: { order_id: orderId, status: SpareAssignmentStatus.ACTIVE },
+      }),
+      this.orderExtraServiceRepo.find({
+        where: { order_id: orderId },
+        relations: ['serviceType'],
+      }),
+      this.orderPendingProductRepo.find({
+        where: { order_id: orderId },
+      }),
+    ]);
 
+    const charges: { name: string; price: number }[] = [];
+
+    spares.forEach((s) => {
+      charges.push({
+        name: s.product_name,
+        price: Number(s.unit_price) * s.quantity,
+      });
+    });
+
+    extraServices.forEach((s) => {
+      charges.push({
+        name: s.description || s.serviceType?.name || 'Servicio adicional',
+        price: Number(s.total_price),
+      });
+    });
+
+    pendingProducts.forEach((p) => {
+      charges.push({
+        name: p.name_items,
+        price: Number(p.sale_price) * p.quantity,
+      });
+    });
+
+    return charges;
+  }
   async createOrder(
     dto: CreateOrderDto,
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
@@ -1878,7 +1922,12 @@ export class OrderWorkflowService {
 
       // ─── MAPEO A DTO PÚBLICO ─────────────────────────────────────────────────
       const primaryContact = order.customer?.contacts?.find((c) => c.isPrimary);
+      const extraCharges = await this.getPublicExtraCharges(order.id);
 
+      const proceduresTotal = order.findings?.reduce((sum, f) =>
+        sum + (f.procedures?.reduce((s, p) => s + Number(p.procedure_cost || 0), 0) || 0), 0) ?? 0;
+
+      const extraChargesTotal = extraCharges.reduce((sum, c) => sum + c.price, 0);
       return {
         public_id: order.public_id,
         order_number: order.order_number,
@@ -1949,6 +1998,8 @@ export class OrderWorkflowService {
           note: n.note,
           createdAt: n.createdAt,
         })) ?? [],
+        extra_charges: extraCharges,
+        total_cost: proceduresTotal + extraChargesTotal,
       };
 
     } catch (error) {
