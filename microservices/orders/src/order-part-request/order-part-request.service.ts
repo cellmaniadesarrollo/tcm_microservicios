@@ -244,4 +244,192 @@ export class OrderPartRequestService {
         console.log(data)
         return result;
     }
+    async getPartRequestFullData(id: number, user: { companyId: string }) {
+        const pr = await this.partRequestRepo
+            .createQueryBuilder('pr')
+            .leftJoinAndSelect('pr.order', 'order')
+            .leftJoinAndSelect('order.customer', 'customer')
+            .leftJoinAndSelect('order.device', 'device')
+            .leftJoinAndSelect('device.model', 'model')
+            .leftJoinAndSelect('model.brand', 'brand')
+            .leftJoinAndSelect('device.imeis', 'imeis')
+            .leftJoinAndSelect('pr.technician', 'technician')
+            .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
+            .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
+            .leftJoinAndSelect('pr.pagos', 'pagos')
+            .leftJoinAndSelect('pr.historial', 'historial')
+            .where('pr.id = :id', { id })
+            .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+            .orderBy('historial.fecha', 'ASC')
+            .getOne();
+
+        if (!pr) {
+            throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
+        }
+
+        // Adjuntos: carga manual, mismo patrón que el resto del módulo
+        const attachments = await this.attachmentRepo.find({
+            where: { entity_type: AttachmentEntityType.PART_REQUEST, entity_id: pr.id, is_active: true },
+            order: { createdAt: 'ASC' },
+        });
+
+        const result = {
+            id: pr.id,
+            fecha_solicitud: pr.createdAt,
+            descripcion: pr.descripcion,
+            tipo: pr.tipo,
+            estado: pr.estado,
+            technician: mapUser(pr.technician),
+            responsableBusqueda: mapUser(pr.responsableBusqueda),
+            responsableRecepcion: mapUser(pr.responsableRecepcion),
+            order: pr.order
+                ? {
+                    id: pr.order.id,
+                    order_number: pr.order.order_number,
+                    public_id: pr.order.public_id ?? null,
+                    customer: pr.order.customer
+                        ? {
+                            id: pr.order.customer.id,
+                            firstName: pr.order.customer.firstName,
+                            lastName: pr.order.customer.lastName,
+                            idNumber: pr.order.customer.idNumber,
+                        }
+                        : null,
+                    device: pr.order.device
+                        ? {
+                            device_id: pr.order.device.device_id,
+                            serial_number: pr.order.device.serial_number ?? null,
+                            color: pr.order.device.color ?? null,
+                            storage: pr.order.device.storage ?? null,
+                            model: pr.order.device.model
+                                ? {
+                                    models_name: pr.order.device.model.models_name,
+                                    brand: pr.order.device.model.brand
+                                        ? { brands_name: pr.order.device.model.brand.brands_name }
+                                        : null,
+                                }
+                                : null,
+                            imeis: (pr.order.device.imeis ?? []).map((i) => i.imei_number),
+                        }
+                        : null,
+                }
+                : null,
+            pagos: pr.pagos ?? [],
+            historial: pr.historial ?? [],
+            attachments,
+        };
+
+        await enrichPartRequestAttachmentsWithSignedUrls([result], this.awsS3Service);
+
+        return result;
+    }
+    async tomarPartRequest(id: number, user: { userId: string; companyId: string }) {
+        return this.partRequestRepo.manager.transaction(async (manager) => {
+            // 1. Buscar el pedido validando que pertenezca a la empresa del usuario
+            const partRequest = await manager
+                .createQueryBuilder(PartRequest, 'pr')
+                .leftJoin('pr.order', 'order')
+                .addSelect(['order.id', 'order.company_id'])
+                .where('pr.id = :id', { id })
+                .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+                .getOne();
+
+            if (!partRequest) {
+                throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
+            }
+
+            // 2. Validar transición de estado
+            if (partRequest.estado !== PartRequestStatus.SOLICITADO) {
+                throw new RpcException(
+                    new BadRequestException(
+                        `No se puede tomar: la solicitud ya está en estado "${partRequest.estado}"`,
+                    ),
+                );
+            }
+
+            const estadoAnterior = partRequest.estado;
+
+            // 3. Actualizar el pedido
+            partRequest.estado = PartRequestStatus.EN_BUSQUEDA;
+            partRequest.responsable_busqueda_id = user.userId;
+            await manager.save(partRequest);
+
+            // 4. Registrar en historial
+            const history = manager.create(PartRequestStatusHistory, {
+                part_request_id: partRequest.id,
+                estado_anterior: estadoAnterior,
+                estado_nuevo: PartRequestStatus.EN_BUSQUEDA,
+                actor_id: user.userId,
+            });
+            await manager.save(history);
+
+            // 5. Notificación + broadcast (comentado, igual que en createPartRequest)
+            // await this.notificationsService.emitNotification(...)
+            // await this.broadcastService.publishOrderUpdated(...)
+
+            // 6. Releer con relaciones eager pobladas para la respuesta
+            const updated = await manager.findOne(PartRequest, { where: { id: partRequest.id } });
+
+            return {
+                ...updated,
+                fecha_solicitud: updated!.createdAt,
+                technician: mapUser(updated!.technician),
+                responsableBusqueda: mapUser(updated!.responsableBusqueda),
+                responsableRecepcion: mapUser(updated!.responsableRecepcion),
+            };
+        });
+    }
+    async listMyAcceptedPartRequests(
+        dto: ListPartRequestsDto,
+        user: { userId: string; companyId: string },
+    ) {
+        const page = dto.page && dto.page > 0 ? dto.page : 1;
+        const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
+        const skip = (page - 1) * limit;
+
+        const qb = this.partRequestRepo
+            .createQueryBuilder('pr')
+            .leftJoinAndSelect('pr.order', 'order')
+            .leftJoinAndSelect('pr.technician', 'technician')
+            .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
+            .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
+            .where('order.company_id = :companyId', { companyId: user.companyId })
+            .andWhere('pr.responsable_busqueda_id = :userId', { userId: user.userId });
+
+        if (dto.search?.trim()) {
+            qb.andWhere('pr.descripcion ILIKE :search', { search: `%${dto.search.trim()}%` });
+        }
+
+        if (dto.estado) {
+            qb.andWhere('pr.estado = :estado', { estado: dto.estado });
+        }
+
+        const [partRequests, total] = await qb
+            .orderBy('pr.updatedAt', 'DESC')
+            .skip(skip)
+            .take(limit)
+            .getManyAndCount();
+
+        const data = partRequests.map((pr) => ({
+            ...pr,
+            fecha_solicitud: pr.createdAt,
+            order_number: pr.order?.order_number ?? null,
+            technician: mapUser(pr.technician),
+            responsableBusqueda: mapUser(pr.responsableBusqueda),
+            responsableRecepcion: mapUser(pr.responsableRecepcion),
+        }));
+
+        return {
+            data,
+            meta: {
+                page,
+                limit,
+                total,
+                totalPages: Math.ceil(total / limit),
+            },
+            filtros: {
+                estados: Object.values(PartRequestStatus),
+            },
+        };
+    }
 }

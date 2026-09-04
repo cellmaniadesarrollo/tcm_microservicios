@@ -1,6 +1,6 @@
 // gateway/src/orders/part-requests.controller.ts
 
-import { Controller, Get, Param, ParseIntPipe, Post, Query, Req } from '@nestjs/common';
+import { Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import { Auth } from '../../common/auth/decorators/auth.decorator';
@@ -75,6 +75,49 @@ export class PartRequestsController {
         };
 
         return this.partRequestsGatewayService.listPartRequests(dto, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
+    }
+    @Get(':id')
+    async getPartRequestFullData(
+        @Param('id', ParseIntPipe) id: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.getPartRequestFullData(id, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
+    }
+    @Patch(':id/tomar')
+    async tomarPartRequest(
+        @Param('id', ParseIntPipe) id: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.tomarPartRequest(id, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
+    }
+    @Get('mis-aceptadas')
+    async listMyAcceptedPartRequests(
+        @Query('page') page: string,
+        @Query('limit') limit: string,
+        @Query('search') search: string,
+        @Query('estado') estado: string,
+        @User() user: any,
+    ) {
+        const dto: ListPartRequestsGatewayDto = {
+            page: page ? Number(page) : undefined,
+            limit: limit ? Number(limit) : undefined,
+            search: search || undefined,
+            estado: estado || undefined,
+        };
+
+        return this.partRequestsGatewayService.listMyAcceptedPartRequests(dto, {
             userId: user.sub,
             companyId: user.companyId,
             branchId: user.branchId,

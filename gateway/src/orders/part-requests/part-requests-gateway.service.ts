@@ -19,4 +19,13 @@ export class PartRequestsGatewayService {
     async listPartRequests(dto: ListPartRequestsGatewayDto, user: any) {
         return this.orderServiceClient.send('list_part_requests', { dto, user });
     }
+    async getPartRequestFullData(id: number, user: any) {
+        return this.orderServiceClient.send('get_part_request_full_data', { dto: { id }, user });
+    }
+    async tomarPartRequest(id: number, user: any) {
+        return this.orderServiceClient.send('tomar_part_request', { dto: { id }, user });
+    }
+    async listMyAcceptedPartRequests(dto: ListPartRequestsGatewayDto, user: any) {
+        return this.orderServiceClient.send('list_my_accepted_part_requests', { dto, user });
+    }
 }
