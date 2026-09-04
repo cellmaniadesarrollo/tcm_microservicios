@@ -18,7 +18,6 @@ export class NotificationTrackingService {
 
   /**
    * Crear un nuevo tracking para una notificación
-   * ✅ MODIFICADO: Ya no agrega acciones automáticas
    */
   async create(createDto: CreateNotificationTrackingDto): Promise<NotificationTrackingDocument> {
     const notification = await this.notificationModel.findById(createDto.notificationId);
@@ -26,10 +25,8 @@ export class NotificationTrackingService {
       throw new NotFoundException(`Notification with id ${createDto.notificationId} not found`);
     }
 
-    // ✅ Tipar explícitamente el array actions
     const actions: any[] = [];
     
-    // Solo agregar acción si hay notas reales (no automáticas)
     if (createDto.notes && createDto.notes !== 'Tracking inicial creado automáticamente') {
       actions.push({
         type: 'note_added',
@@ -42,24 +39,28 @@ export class NotificationTrackingService {
 
     const tracking = new this.trackingModel({
       ...createDto,
-      actions: actions // ✅ Array vacío si no hay notas reales
+      actions: actions
     });
 
     return await tracking.save();
   }
 
   /**
-   * Obtener todos los tracking de una notificación
+   * Obtener todos los tracking de una notificación.
+   * Excluye automáticamente los registros marcados con doesNotApply: true
    */
   async findByNotificationId(notificationId: string): Promise<NotificationTrackingDocument[]> {
-    return await this.trackingModel.find({ notificationId })
+    return await this.trackingModel.find({ 
+      notificationId,
+      doesNotApply: { $ne: true }
+    })
       .sort({ createdAt: -1 })
       .exec();
   }
 
   /**
-   * Obtener el tracking más reciente de una notificación
-   * ✅ MODIFICADO: Ya no crea tracking con nota automática
+   * Obtener el tracking más reciente de una notificación.
+   * Excluye los registros marcados con doesNotApply: true
    */
   async findLatestByNotificationId(notificationId: string): Promise<NotificationTrackingDocument> {
     const notification = await this.notificationModel.findById(notificationId);
@@ -67,23 +68,21 @@ export class NotificationTrackingService {
       throw new NotFoundException(`Notification with id ${notificationId} not found`);
     }
 
-    // ✅ Buscar tracking existente
-    const existingTracking = await this.trackingModel.findOne({ notificationId })
+    const existingTracking = await this.trackingModel.findOne({ 
+      notificationId,
+      doesNotApply: { $ne: true }
+    })
       .sort({ createdAt: -1 })
       .exec();
     
-    // ✅ Si existe, retornarlo
     if (existingTracking) {
       return existingTracking as any as NotificationTrackingDocument;
     }
     
-    // ✅ Si no existe, crear uno nuevo SIN nota automática
     const newTracking = await this.create({ 
       notificationId
-      // ✅ No pasar notes para evitar el mensaje automático
     });
     
-    // ✅ Retornar el nuevo tracking
     return newTracking as any as NotificationTrackingDocument;
   }
 
@@ -99,12 +98,10 @@ export class NotificationTrackingService {
       throw new NotFoundException(`Tracking not found with id ${id}`);
     }
 
-    // Validar que isCalled no se pueda desmarcar
     if (updateDto.isCalled !== undefined && updateDto.isCalled === false && tracking.isCalled === true) {
       throw new BadRequestException('No se puede desmarcar "isCalled" una vez que ha sido marcado como true');
     }
 
-    // Registrar acciones en el historial
     const actions: any[] = [];
     
     if (updateDto.isCalled !== undefined && updateDto.isCalled !== tracking.isCalled) {
@@ -135,6 +132,19 @@ export class NotificationTrackingService {
       });
     }
 
+    if (updateDto.doesNotApply !== undefined && updateDto.doesNotApply !== tracking.doesNotApply) {
+      actions.push({
+        type: 'not_applicable_set',
+        performedBy: updateDto.doesNotApplyBy || 'system',
+        performedByName: 'Sistema',
+        performedAt: new Date(),
+        metadata: { 
+          previousValue: tracking.doesNotApply, 
+          newValue: updateDto.doesNotApply 
+        }
+      });
+    }
+
     if (updateDto.isArchived !== undefined && updateDto.isArchived !== tracking.isArchived) {
       actions.push({
         type: updateDto.isArchived ? 'archived' : 'unarchived',
@@ -148,7 +158,6 @@ export class NotificationTrackingService {
       });
     }
 
-    // ✅ MODIFICADO: Solo agregar acción de nota si la nota es diferente y no es la automática
     if (updateDto.notes && updateDto.notes !== tracking.notes && updateDto.notes !== 'Tracking inicial creado automáticamente') {
       actions.push({
         type: 'note_added',
@@ -162,7 +171,7 @@ export class NotificationTrackingService {
       });
     }
 
-    // Actualizar campos
+    // Actualización de campos escalares
     if (updateDto.isCalled !== undefined) {
       tracking.isCalled = updateDto.isCalled;
       if (updateDto.isCalled) {
@@ -184,6 +193,14 @@ export class NotificationTrackingService {
       }
     }
 
+    if (updateDto.doesNotApply !== undefined) {
+      tracking.doesNotApply = updateDto.doesNotApply;
+      if (updateDto.doesNotApply) {
+        tracking.doesNotApplyAt = updateDto.doesNotApplyAt || new Date();
+        tracking.doesNotApplyBy = updateDto.doesNotApplyBy || 'system';
+      }
+    }
+
     if (updateDto.isArchived !== undefined) {
       tracking.isArchived = updateDto.isArchived;
       if (updateDto.isArchived) {
@@ -201,7 +218,6 @@ export class NotificationTrackingService {
       tracking.notes = updateDto.notes;
     }
 
-    // Agregar acciones al historial
     if (actions.length > 0) {
       tracking.actions = [...tracking.actions, ...actions];
       tracking.lastAction = actions[actions.length - 1].type;
@@ -209,6 +225,24 @@ export class NotificationTrackingService {
 
     const savedTracking = await tracking.save();
     return savedTracking as any as NotificationTrackingDocument;
+  }
+
+  /**
+   * Marcar como No Aplica por ID de notificación
+   */
+  async setDoesNotApply(
+    notificationId: string,
+    userId: string
+  ): Promise<NotificationTrackingDocument> {
+    const tracking = await this.findLatestByNotificationId(notificationId);
+
+    const updated = await this.update(tracking._id as string, {
+      doesNotApply: true,
+      doesNotApplyBy: userId,
+      doesNotApplyAt: new Date()
+    });
+
+    return updated as any as NotificationTrackingDocument;
   }
 
   /**

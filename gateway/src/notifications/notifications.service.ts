@@ -81,7 +81,7 @@ export class NotificationsService {
     );
   }
 
-    // ============================================
+  // ============================================
   // ✅ NUEVOS MÉTODOS
   // ============================================
 
@@ -139,13 +139,13 @@ export class NotificationsService {
     page: number = 1,
     limit: number = 20,
     includeArchived: boolean = false,
-    onlyWithNotes: boolean = false  // ✅ NUEVO PARÁMETRO
+    onlyWithNotes: boolean = false
   ) {
     console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_delivered_notifications' },
-        { page, limit, includeArchived, onlyWithNotes }  // ✅ ENVIAR EL PARÁMETRO
+        { page, limit, includeArchived, onlyWithNotes }
       )
     );
   }
@@ -154,13 +154,13 @@ export class NotificationsService {
     page: number = 1,
     limit: number = 20,
     includeArchived: boolean = false,
-    onlyWithNotes: boolean = false  // ✅ NUEVO PARÁMETRO
+    onlyWithNotes: boolean = false
   ) {
     console.log(`📤 [Gateway] getFinishedOrdersOverThreeMonths - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_finished_orders_over_three_months' },
-        { page, limit, includeArchived, onlyWithNotes }  // ✅ ENVIAR EL PARÁMETRO
+        { page, limit, includeArchived, onlyWithNotes }
       )
     );
   }
@@ -287,6 +287,9 @@ export class NotificationsService {
     problemReportedByName?: string;
     archivedBy?: string;
     archivedByName?: string;
+    doesNotApply?: boolean;        // 👈 CAMPO AGREGADO
+    doesNotApplyAt?: Date;          // 👈 CAMPO AGREGADO
+    doesNotApplyBy?: string;        // 👈 CAMPO AGREGADO
   }) {
     console.log(`📤 [Gateway] createNotificationTracking - notificationId: ${data.notificationId}`);
     return await lastValueFrom(
@@ -342,6 +345,9 @@ export class NotificationsService {
       isArchived?: boolean;
       unarchivedBy?: string;
       unarchivedByName?: string;
+      doesNotApply?: boolean;        // 👈 CAMPO AGREGADO
+      doesNotApplyAt?: Date;          // 👈 CAMPO AGREGADO
+      doesNotApplyBy?: string;        // 👈 CAMPO AGREGADO
     }
   ) {
     console.log(`📤 [Gateway] updateNotificationTracking - trackingId: ${trackingId}`);
@@ -386,6 +392,22 @@ export class NotificationsService {
       this.notificationsClient.send(
         { cmd: 'report_problem' },
         { notificationId, userId, userName, problemDescription, notes }
+      )
+    );
+  }
+
+  /**
+   * 👈 NUEVO MÉTODO: Marcar como No Aplica
+   */
+  async markAsDoesNotApply(
+    notificationId: string,
+    userId: string
+  ) {
+    console.log(`🚫 [Gateway] markAsDoesNotApply - notificationId: ${notificationId}`);
+    return await lastValueFrom(
+      this.notificationsClient.send(
+        { cmd: 'mark_as_does_not_apply' },
+        { notificationId, userId }
       )
     );
   }

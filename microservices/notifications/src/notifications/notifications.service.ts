@@ -3,13 +3,26 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Notification, NotificationDocument, ReadHistoryEntry, StatusHistoryEntry } from './entities/notification.entity';
+import { NotificationTracking, NotificationTrackingDocument } from './entities/notification-tracking.entity';
 
 @Injectable()
 export class NotificationsService {
   constructor(
     @InjectModel(Notification.name) 
     private notificationModel: Model<NotificationDocument>,
+    @InjectModel(NotificationTracking.name)
+    private trackingModel: Model<NotificationTrackingDocument>,
   ) {}
+
+  // 🔹 HELPER PRIVADO: Obtiene los IDs de las notificaciones que no aplican
+  private async getExcludedNotificationIds(): Promise<string[]> {
+    const doesNotApplyTrackings = await this.trackingModel
+      .find({ doesNotApply: true }, { notificationId: 1 })
+      .lean()
+      .exec();
+
+    return doesNotApplyTrackings.map(t => t.notificationId);
+  }
 
   async create(createDto: any) {
     const notification = new this.notificationModel({
@@ -19,14 +32,12 @@ export class NotificationsService {
       readHistory: [],
       viewsCount: 0,
       createdAt: new Date(),
-      // ✅ Soporte para los nuevos campos
       observations: createDto.observations || null,
       scheduledFor: createDto.scheduledFor || null,
     });
     return await notification.save();
   }
 
-  // 🔹 CREAR o ACTUALIZAR notificación (UNA SOLA POR ORDEN)
   async createOrUpdateFromOrderEvent(orderEvent: any) {
     const device = orderEvent.device || {};
     const orderData = orderEvent.order || {};
@@ -40,7 +51,6 @@ export class NotificationsService {
     const newStatus = orderData.status || orderEvent.newValue?.status || 'INGRESADO';
     const action = orderEvent.action || 'created';
 
-    // ✅ FIX: userId es la fuente primaria (es quien crea/modifica la orden)
     const createdById = orderEvent.userId
       || orderEvent.created_by_id
       || orderEvent.createdById
@@ -52,7 +62,6 @@ export class NotificationsService {
       || orderData.createdBy
       || 'Sistema';
 
-    // Verificar si ya existe una notificación para esta orden
     let notification = await this.notificationModel.findOne({ 
       entityType: 'order', 
       entityId: entityId 
@@ -62,7 +71,6 @@ export class NotificationsService {
       `${t.first_name || ''} ${t.last_name || ''}`.trim()
     ).filter((n: string) => n).join(', ');
     
-    // Construir mensaje del dispositivo
     let deviceMessage = '';
     if (device && (device.brand || device.model)) {
       deviceMessage = `\n📱 **Dispositivo:** ${device.brand || ''} ${device.model || ''}`.trim();
@@ -81,7 +89,6 @@ export class NotificationsService {
       `📅 **Fecha creación:** ${new Date(orderEvent.timestamp).toLocaleString()}`;
     
     if (!notification) {
-      // ✅ CREAR nueva notificación con soporte para scheduledFor y observations
       const scheduledFor = orderEvent.scheduledFor || null;
       const observations = orderEvent.observations || null;
 
@@ -125,12 +132,10 @@ export class NotificationsService {
         readHistory: [],
         viewsCount: 0,
         createdAt: new Date(),
-        // ✅ Nuevos campos
         observations: observations,
         scheduledFor: scheduledFor,
       });
       
-      // Agregar estado inicial al historial
       notification.statusHistory.push({
         status: newStatus,
         changedBy: userId,
@@ -142,7 +147,6 @@ export class NotificationsService {
       return await notification.save();
     }
     
-    // ACTUALIZAR notificación existente (cambio de estado)
     const oldStatus = notification.currentStatus;
     
     if (oldStatus !== newStatus || action === 'updated') {
@@ -160,7 +164,6 @@ export class NotificationsService {
       notification.newValues = { status: newStatus };
       notification.actionDescription = orderEvent.description || `Estado cambiado a ${newStatus}`;
 
-      // Rellenar createdById si estaba vacío (parche para docs anteriores)
       if (!notification.createdById && createdById) {
         notification.createdById = createdById;
         notification.createdByName = createdByName;
@@ -179,7 +182,6 @@ export class NotificationsService {
     return notification;
   }
 
-  // ✅ NUEVO MÉTODO: Actualizar observaciones de una notificación
   async updateObservations(id: string, observations: string) {
     const notification = await this.notificationModel.findOneAndUpdate(
       { _id: id },
@@ -197,7 +199,6 @@ export class NotificationsService {
     return notification;
   }
 
-  // ✅ NUEVO MÉTODO: Reagendar una notificación
   async rescheduleNotification(id: string, scheduledFor: Date, observations?: string) {
     const updateData: any = {
       scheduledFor: scheduledFor,
@@ -221,7 +222,6 @@ export class NotificationsService {
     return notification;
   }
 
-  // ✅ NUEVO MÉTODO: Obtener notificaciones pendientes por fecha programada
   async getScheduledNotifications(currentDate: Date = new Date()) {
     return await this.notificationModel.find({
       scheduledFor: { $lte: currentDate },
@@ -229,7 +229,6 @@ export class NotificationsService {
     }).sort({ scheduledFor: 1 });
   }
 
-  // ✅ NUEVO MÉTODO: Obtener notificaciones futuras (programadas)
   async getFutureNotifications(page: number = 1, limit: number = 20) {
     const skip = (page - 1) * limit;
     const currentDate = new Date();
@@ -257,7 +256,6 @@ export class NotificationsService {
     };
   }
 
-  // ✅ NUEVO MÉTODO: Cancelar programación (enviar inmediatamente)
   async cancelScheduling(id: string) {
     const notification = await this.notificationModel.findOneAndUpdate(
       { _id: id },
@@ -275,7 +273,7 @@ export class NotificationsService {
     return notification;
   }
 
-  // 🔹 OBTENER notificaciones de un usuario (solo las que deben mostrarse)
+  // 🔹 OBTENER notificaciones de un usuario
   async getUserNotifications(
     userId: string, 
     page: number = 1, 
@@ -284,12 +282,11 @@ export class NotificationsService {
   ) {
     const skip = (page - 1) * limit;
     const currentDate = new Date();
-    
-    // ✅ Solo mostrar notificaciones que:
-    // 1. Son del usuario
-    // 2. No tienen fecha programada O la fecha programada ya pasó
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
+
     const query: any = { 
       userId,
+      _id: { $nin: excludedNotificationIds },
       $or: [
         { scheduledFor: null },
         { scheduledFor: { $lte: currentDate } }
@@ -318,7 +315,6 @@ export class NotificationsService {
     };
   }
 
-  // ✅ OBTENER notificaciones filtradas por el creador de la orden
   async getNotificationsByCreator(
     createdById: string,
     page: number = 1,
@@ -328,9 +324,11 @@ export class NotificationsService {
   ) {
     const skip = (page - 1) * limit;
     const currentDate = new Date();
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
 
     const query: any = { 
       createdById,
+      _id: { $nin: excludedNotificationIds },
       $or: [
         { scheduledFor: null },
         { scheduledFor: { $lte: currentDate } }
@@ -348,7 +346,7 @@ export class NotificationsService {
         .limit(limit)
         .exec(),
       this.notificationModel.countDocuments(query),
-      this.notificationModel.countDocuments({ createdById, read: false }),
+      this.notificationModel.countDocuments({ createdById, _id: { $nin: excludedNotificationIds }, read: false }),
     ]);
 
     return {
@@ -361,12 +359,13 @@ export class NotificationsService {
     };
   }
 
-  // ✅ OBTENER contador de no leídas por creador
   async getUnreadCountByCreator(createdById: string) {
     const currentDate = new Date();
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
     return this.notificationModel.countDocuments({ 
       createdById, 
       read: false,
+      _id: { $nin: excludedNotificationIds },
       $or: [
         { scheduledFor: null },
         { scheduledFor: { $lte: currentDate } }
@@ -374,7 +373,6 @@ export class NotificationsService {
     });
   }
 
-  // 🔹 OBTENER órdenes estancadas (usando currentStatus)
   async getCurrentStuckOrders(
     userId: string,
     targetStatus: string = 'INGRESADO',
@@ -382,9 +380,11 @@ export class NotificationsService {
   ) {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - minDays);
-    
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
+
     const orders = await this.notificationModel.find({
       userId: userId,
+      _id: { $nin: excludedNotificationIds },
       entityType: 'order',
       currentStatus: targetStatus,
       createdAt: { $lt: cutoffDate }
@@ -402,8 +402,8 @@ export class NotificationsService {
       statusHistory: order.statusHistory,
       createdById: order.createdById,
       createdByName: order.createdByName,
-      observations: order.observations, // ✅ Incluir observaciones
-      scheduledFor: order.scheduledFor, // ✅ Incluir fecha programada
+      observations: order.observations,
+      scheduledFor: order.scheduledFor,
     }));
     
     console.log(`📊 [getCurrentStuckOrders] Usuario: ${userId}, Estado: ${targetStatus}, Días: ${minDays}`);
@@ -417,12 +417,13 @@ export class NotificationsService {
     };
   }
 
-  // 🔹 OBTENER contador de notificaciones NO LEÍDAS
   async getUnreadCount(userId: string) {
     const currentDate = new Date();
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
     return await this.notificationModel.countDocuments({ 
       userId, 
       read: false,
+      _id: { $nin: excludedNotificationIds },
       $or: [
         { scheduledFor: null },
         { scheduledFor: { $lte: currentDate } }
@@ -430,7 +431,6 @@ export class NotificationsService {
     });
   }
 
-  // 🔹 MARCAR como leída (con historial)
   async markAsRead(id: string, userId: string, userName?: string, source: string = 'api') {
     const notification = await this.notificationModel.findOne({ _id: id });
 
@@ -465,7 +465,6 @@ export class NotificationsService {
     return updated;
   }
 
-  // 🔹 REGISTRAR visualización
   async trackView(id: string, userId: string, userName?: string, source: string = 'web', accessData?: any) {
     const notification = await this.notificationModel.findOne({ _id: id });
 
@@ -498,7 +497,6 @@ export class NotificationsService {
     return updated;
   }
 
-  // 🔹 OBTENER historial completo de una notificación
   async getNotificationHistory(id: string) {
     const notification = await this.notificationModel.findOne({ _id: id });
     if (!notification) {
@@ -520,8 +518,8 @@ export class NotificationsService {
       createdAt: notification.createdAt,
       createdById: notification.createdById,
       createdByName: notification.createdByName,
-      observations: notification.observations, // ✅ Incluir observaciones
-      scheduledFor: notification.scheduledFor, // ✅ Incluir fecha programada
+      observations: notification.observations,
+      scheduledFor: notification.scheduledFor,
     };
   }
 
@@ -552,8 +550,8 @@ export class NotificationsService {
       metadata: record.metadata,
       createdById: record.createdById,
       createdByName: record.createdByName,
-      observations: record.observations, // ✅ Incluir observaciones
-      scheduledFor: record.scheduledFor, // ✅ Incluir fecha programada
+      observations: record.observations,
+      scheduledFor: record.scheduledFor,
     }));
   }
 
@@ -639,207 +637,177 @@ export class NotificationsService {
     return this.create(notification);
   }
 
-async getDeliveredNotifications(
-  page: number = 1,
-  limit: number = 20,
-  includeArchived: boolean = false,
-  onlyWithNotes: boolean = false
-) {
-  const skip = (page - 1) * limit;
-  
-  // Calcular fecha hace 1 mes
-  const oneMonthAgo = new Date();
-  oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-  
-  // ✅ Construir match base
-  const matchStage: any = {
-    currentStatus: 'ENTREGADA',
-    $or: [
-      { entityType: 'order' },
-      { entityType: 'ORDER' }
-    ]
-  };
-  
-  // ✅ Excluir archivadas a menos que se pida incluirlas
-  if (!includeArchived) {
-    matchStage.isArchived = { $ne: true };
-  }
-  
-  // ✅ Filtrar por notas si se solicita
-  if (onlyWithNotes) {
-    matchStage.notes = { $exists: true, $nin: [null, ''] };
-  }
-  
-  const pipeline: any[] = [
-    { $match: matchStage },
-    {
-      $addFields: {
-        deliveryDate: {
-          $arrayElemAt: [
-            {
-              $map: {
-                input: {
-                  $filter: {
-                    input: '$statusHistory',
-                    as: 'history',
-                    cond: { $eq: ['$$history.status', 'ENTREGADA'] }
-                  }
-                },
-                as: 'delivery',
-                in: '$$delivery.changedAt'
-              }
-            },
-            0
-          ]
+  // 🔹 CORREGIDO: Inclusión de la exclusión en la agregación
+  async getDeliveredNotifications(
+    page: number = 1,
+    limit: number = 20,
+    includeArchived: boolean = false,
+    onlyWithNotes: boolean = false
+  ) {
+    const skip = (page - 1) * limit;
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
+    
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
+    
+    const matchStage: any = {
+      _id: { $nin: excludedNotificationIds }, // 👈 Exclusión agregada
+      currentStatus: 'ENTREGADA',
+      $or: [
+        { entityType: 'order' },
+        { entityType: 'ORDER' }
+      ]
+    };
+    
+    if (!includeArchived) {
+      matchStage.isArchived = { $ne: true };
+    }
+    
+    if (onlyWithNotes) {
+      matchStage.notes = { $exists: true, $nin: [null, ''] };
+    }
+    
+    const pipeline: any[] = [
+      { $match: matchStage },
+      {
+        $addFields: {
+          deliveryDate: {
+            $arrayElemAt: [
+              {
+                $map: {
+                  input: {
+                    $filter: {
+                      input: '$statusHistory',
+                      as: 'history',
+                      cond: { $eq: ['$$history.status', 'ENTREGADA'] }
+                    }
+                  },
+                  as: 'delivery',
+                  in: '$$delivery.changedAt'
+                }
+              },
+              0
+            ]
+          }
+        }
+      },
+      {
+        $match: {
+          deliveryDate: { $exists: true, $ne: null, $lte: oneMonthAgo }
+        }
+      },
+      { $sort: { deliveryDate: -1 } },
+      {
+        $group: {
+          _id: '$entityId',
+          notification: { $first: '$$ROOT' }
+        }
+      },
+      { $replaceRoot: { newRoot: '$notification' } },
+      { $sort: { deliveryDate: -1 } },
+      {
+        $facet: {
+          metadata: [{ $count: 'total' }],
+          notifications: [{ $skip: skip }, { $limit: limit }]
         }
       }
-    },
-    {
-      $match: {
-        deliveryDate: { $exists: true, $ne: null }
-      }
-    },
-    {
-      $match: {
-        deliveryDate: { $lte: oneMonthAgo }
-      }
-    },
-    {
-      $sort: { deliveryDate: -1 }
-    },
-    {
-      $group: {
-        _id: '$entityId',
-        notification: { $first: '$$ROOT' }
-      }
-    },
-    {
-      $replaceRoot: { newRoot: '$notification' }
-    },
-    {
-      $sort: { deliveryDate: -1 }
-    },
-    {
-      $facet: {
-        metadata: [
-          { $count: 'total' }
-        ],
-        notifications: [
-          { $skip: skip },
-          { $limit: limit }
-        ]
-      }
-    }
-  ];
-  
-  const result = await this.notificationModel.aggregate(pipeline);
-  
-  const total = result[0]?.metadata[0]?.total || 0;
-  const notifications = result[0]?.notifications || [];
-  
-  console.log(`📊 Entregadas hace más de 1 mes: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
-  console.log(`📅 Fecha límite: ${oneMonthAgo.toISOString()}`);
-  
-  return {
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-    notifications,
-  };
-}
+    ];
+    
+    const result = await this.notificationModel.aggregate(pipeline);
+    const total = result[0]?.metadata[0]?.total || 0;
+    const notifications = result[0]?.notifications || [];
+    
+    console.log(`📊 Entregadas hace más de 1 mes: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
+    
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications,
+    };
+  }
 
-async getFinishedOrdersOverThreeMonths(
-  page: number = 1,
-  limit: number = 20,
-  includeArchived: boolean = false,
-  onlyWithNotes: boolean = false
-) {
-  const skip = (page - 1) * limit;
-  
-  // Calcular fecha hace 3 meses
-  const threeMonthsAgo = new Date();
-  threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
-  
-  // ✅ Construir query base
-  const query: any = {
-    currentStatus: 'TRABAJO FINALIZADO',
-    $or: [
-      { entityType: 'order' },
-      { entityType: 'ORDER' }
-    ]
-  };
-  
-  // ✅ Excluir archivadas a menos que se pida incluirlas
-  if (!includeArchived) {
-    query.isArchived = { $ne: true };
-  }
-  
-  // ✅ Filtrar por notas si se solicita
-  if (onlyWithNotes) {
-    query.notes = { $exists: true, $nin: [null, ''] };
-  }
-  
-  // Obtener todas las notificaciones con TRABAJO FINALIZADO
-  const allFinished = await this.notificationModel
-    .find(query)
-    .lean()
-    .exec();
-  
-  // Filtrar por fecha de finalización real (desde statusHistory) y agrupar por orden
-  const uniqueByOrder = new Map();
-  
-  allFinished.forEach(notification => {
-    // Buscar la entrada de TRABAJO FINALIZADO en statusHistory
-    const finishedEntry = notification.statusHistory?.find(
-      (entry: any) => entry.status === 'TRABAJO FINALIZADO'
-    );
+  // 🔹 CORREGIDO: Exclusión añadida en la consulta de finished orders
+  async getFinishedOrdersOverThreeMonths(
+    page: number = 1,
+    limit: number = 20,
+    includeArchived: boolean = false,
+    onlyWithNotes: boolean = false
+  ) {
+    const skip = (page - 1) * limit;
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
     
-    if (!finishedEntry) return;
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
     
-    const finishedDate = new Date(finishedEntry.changedAt);
+    const query: any = {
+      _id: { $nin: excludedNotificationIds }, // 👈 Exclusión agregada
+      currentStatus: 'TRABAJO FINALIZADO',
+      $or: [
+        { entityType: 'order' },
+        { entityType: 'ORDER' }
+      ]
+    };
     
-    // Solo incluir si tiene más de 3 meses
-    if (finishedDate > threeMonthsAgo) return;
-    
-    const orderId = notification.entityId;
-    const existing = uniqueByOrder.get(orderId);
-    
-    // Mantener solo una notificación por orden
-    if (!existing) {
-      uniqueByOrder.set(orderId, {
-        ...notification,
-        finishedDate: finishedDate
-      });
+    if (!includeArchived) {
+      query.isArchived = { $ne: true };
     }
-  });
-  
-  // Convertir a array y ordenar por fecha de finalización (más antiguas primero)
-  const allNotifications = Array.from(uniqueByOrder.values())
-    .sort((a, b) => a.finishedDate.getTime() - b.finishedDate.getTime());
-  
-  // Aplicar paginación
-  const total = allNotifications.length;
-  const paginatedNotifications = allNotifications.slice(skip, skip + limit);
-  
-  console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
-  console.log(`📅 Fecha límite: ${threeMonthsAgo.toISOString()}`);
-  
-  return {
-    total,
-    page,
-    limit,
-    totalPages: Math.ceil(total / limit),
-    notifications: paginatedNotifications,
-  };
-}
+    
+    if (onlyWithNotes) {
+      query.notes = { $exists: true, $nin: [null, ''] };
+    }
+    
+    const allFinished = await this.notificationModel
+      .find(query)
+      .lean()
+      .exec();
+    
+    const uniqueByOrder = new Map();
+    
+    allFinished.forEach(notification => {
+      const finishedEntry = notification.statusHistory?.find(
+        (entry: any) => entry.status === 'TRABAJO FINALIZADO'
+      );
+      
+      if (!finishedEntry) return;
+      
+      const finishedDate = new Date(finishedEntry.changedAt);
+      if (finishedDate > threeMonthsAgo) return;
+      
+      const orderId = notification.entityId;
+      const existing = uniqueByOrder.get(orderId);
+      
+      if (!existing) {
+        uniqueByOrder.set(orderId, {
+          ...notification,
+          finishedDate: finishedDate
+        });
+      }
+    });
+    
+    const allNotifications = Array.from(uniqueByOrder.values())
+      .sort((a, b) => a.finishedDate.getTime() - b.finishedDate.getTime());
+    
+    const total = allNotifications.length;
+    const paginatedNotifications = allNotifications.slice(skip, skip + limit);
+    
+    console.log(`📊 Órdenes en TRABAJO FINALIZADO con más de 3 meses: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
+    
+    return {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      notifications: paginatedNotifications,
+    };
+  }
 
   async updateNotificationNotes(
     notificationId: string,
     userId: string,
     notes: string
   ): Promise<{ modifiedCount: number; orderId: string }> {
-    // 1. Obtener la notificación original
     const notification = await this.notificationModel.findOne({ _id: notificationId });
     
     if (!notification) {
@@ -848,7 +816,6 @@ async getFinishedOrdersOverThreeMonths(
     
     const orderId = notification.entityId;
     
-    // 2. Actualizar notas en TODAS las notificaciones con el mismo entityId
     const result = await this.notificationModel.updateMany(
       { entityId: orderId },
       { 
@@ -870,16 +837,14 @@ async getFinishedOrdersOverThreeMonths(
     userId: string,
     archived: boolean
   ): Promise<{ modifiedCount: number; orderId: string }> {
-    // 1. Obtener la notificación original para conocer su entityId
     const notification = await this.notificationModel.findOne({ _id: notificationId });
     
     if (!notification) {
       throw new Error('Notificación no encontrada');
     }
     
-    const orderId = notification.entityId;  // ← Este es el ID de la orden (ej: "46")
+    const orderId = notification.entityId;
     
-    // 2. Archivar TODAS las notificaciones con el mismo entityId
     const result = await this.notificationModel.updateMany(
       { 
         entityId: orderId,
@@ -901,16 +866,18 @@ async getFinishedOrdersOverThreeMonths(
     };
   }
 
+  // 🔹 CORREGIDO: Exclusión añadida en órdenes entregadas revisadas
   async getReviewedDeliveredOrders(
     userId: string,
     page: number = 1,
     limit: number = 20
   ) {
     const skip = (page - 1) * limit;
+    const excludedNotificationIds = await this.getExcludedNotificationIds();
     
-    // Base del query
     const baseQuery = {
       userId: userId,
+      _id: { $nin: excludedNotificationIds }, // 👈 Exclusión agregada
       currentStatus: 'ENTREGADA',
       $or: [
         { entityType: 'order' },
@@ -918,25 +885,21 @@ async getFinishedOrdersOverThreeMonths(
       ]
     };
     
-    // ✅ Query para notificaciones con notas (corregido)
     const queryWithNotes = {
       ...baseQuery,
-      notes: { $exists: true, $nin: [null, ''] }  // $nin en lugar de dos $ne
+      notes: { $exists: true, $nin: [null, ''] }
     };
     
-    // Query para notificaciones archivadas
     const queryArchived = {
       ...baseQuery,
       isArchived: true
     };
     
-    // Ejecutar ambas consultas
     const [notificationsWithNotes, notificationsArchived] = await Promise.all([
       this.notificationModel.find(queryWithNotes).lean().exec(),
       this.notificationModel.find(queryArchived).lean().exec()
     ]);
     
-    // Combinar y eliminar duplicados por entityId
     const allNotifications = [...notificationsWithNotes, ...notificationsArchived];
     const uniqueByOrder = new Map();
     

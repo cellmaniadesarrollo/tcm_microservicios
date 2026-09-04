@@ -21,7 +21,9 @@ import { Color, ColorSchema } from './models/color.model';
 import { Brand, BrandSchema } from './models/brand.model';
 import { TypeInventoryFlow, TypeInventoryFlowSchema } from './models/type-inventory-flow.model';
 import { Quality, QualitySchema } from './models/quality.model';
-import { NameInventory, NameInventorySchema } from './models/name-inventory.model'; // ✅ IMPORTAR
+import { NameInventory, NameInventorySchema } from './models/name-inventory.model';
+import { Supplier, SupplierSchema } from './models/supplier.model';
+import { DeviceVerification, DeviceVerificationSchema } from './models/device-verification.model';
 
 @Module({
   imports: [
@@ -39,7 +41,9 @@ import { NameInventory, NameInventorySchema } from './models/name-inventory.mode
         { name: Brand.name, schema: BrandSchema },
         { name: TypeInventoryFlow.name, schema: TypeInventoryFlowSchema },
         { name: Quality.name, schema: QualitySchema },
-        { name: NameInventory.name, schema: NameInventorySchema }, // ✅ AGREGAR
+        { name: NameInventory.name, schema: NameInventorySchema },
+        { name: Supplier.name, schema: SupplierSchema },
+        { name: DeviceVerification.name, schema: DeviceVerificationSchema },
       ],
       'atlas'
     ),
