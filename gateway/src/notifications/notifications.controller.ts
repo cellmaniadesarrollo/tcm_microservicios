@@ -480,4 +480,58 @@ export class NotificationsController {
     }
     return this.notificationsService.deleteNotificationTracking(id);
   }
+
+  /**
+   * POST /notifications/calls/increment
+   * Incrementar contador de llamadas de una orden
+   */
+  @Post('calls/increment')
+  async incrementCall(
+    @Body('orderId') orderId: string,
+    @Body('orderNumber') orderNumber: number,
+    @Body('companyId') companyId: string,
+    @Body('userId') userId: string,
+  ) {
+    if (!orderId) {
+      throw new BadRequestException('orderId es requerido');
+    }
+    if (!orderNumber) {
+      throw new BadRequestException('orderNumber es requerido');
+    }
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido');
+    }
+    if (!userId) {
+      throw new BadRequestException('userId es requerido');
+    }
+
+    return this.notificationsService.incrementCall(
+      orderId,
+      orderNumber,
+      companyId,
+      userId
+    );
+  }
+
+  /**
+   * GET /notifications/calls/counter/:orderId
+   * Obtener contador de llamadas de una orden
+   */
+  @Get('calls/counter/:orderId')
+  async getCallCounter(
+    @Param('orderId') orderId: string,
+    @Query('companyId') companyId: string,
+  ) {
+    if (!orderId) {
+      throw new BadRequestException('orderId es requerido');
+    }
+    if (!companyId) {
+      throw new BadRequestException('companyId es requerido');
+    }
+
+    return this.notificationsService.getCallCounter(
+      orderId,
+      companyId
+    );
+  }
 }

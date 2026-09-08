@@ -3,12 +3,14 @@ import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, EventPattern, Ctx, RmqContext } from '@nestjs/microservices';
 import { NotificationsService } from './notifications.service';
 import { NotificationTrackingService } from './notification-tracking.service'; // ✅ IMPORTAR
+import { CallCounterService } from './call-counter.service';
 
 @Controller('Notification-Save')
 export class NotificationsController {
   constructor(
     private readonly notificationsService: NotificationsService,
-    private readonly trackingService: NotificationTrackingService, // ✅ INYECTAR
+    private readonly trackingService: NotificationTrackingService,
+    private readonly callCounterService: CallCounterService,
   ) {}
 
   // 📌 Para UI: Obtener notificaciones de un usuario
@@ -19,13 +21,20 @@ export class NotificationsController {
     limit?: number; 
     onlyUnread?: boolean 
   }) {
-    console.log(`📥 [Notifications] get_user_notifications - userId: ${data.userId}, onlyUnread: ${data.onlyUnread}`);
+    // 👈 APLICAR VALORES POR DEFECTO AQUÍ
+    const page = data.page || 1;
+    const limit = data.limit || 20;  // 👈 Cambiar de 100 a 20
+    const onlyUnread = data.onlyUnread || false;
+    
+    console.log(`📥 [Notifications] get_user_notifications - userId: ${data.userId}, page: ${page}, limit: ${limit}, onlyUnread: ${onlyUnread}`);
+    
     const result = await this.notificationsService.getUserNotifications(
       data.userId, 
-      data.page, 
-      data.limit, 
-      data.onlyUnread || false
+      page,
+      limit,
+      onlyUnread
     );
+    
     console.log(`✅ [Notifications] Respuesta: ${result.notifications?.length || 0} notificaciones, ${result.unreadCount} no leídas`);
     return result;
   }
@@ -46,14 +55,21 @@ export class NotificationsController {
     onlyUnread?: boolean;
     companyId?: string;
   }) {
-    console.log(`📥 [Notifications] get_notifications_by_creator - createdById: ${data.createdById}, onlyUnread: ${data.onlyUnread}`);
+    // 👈 APLICAR VALORES POR DEFECTO
+    const page = data.page || 1;
+    const limit = data.limit || 20;
+    const onlyUnread = data.onlyUnread || false;
+    
+    console.log(`📥 [Notifications] get_notifications_by_creator - createdById: ${data.createdById}, page: ${page}, limit: ${limit}, onlyUnread: ${onlyUnread}`);
+    
     const result = await this.notificationsService.getNotificationsByCreator(
       data.createdById,
-      data.page,
-      data.limit,
-      data.onlyUnread || false,
+      page,
+      limit,
+      onlyUnread,
       data.companyId,
     );
+    
     console.log(`✅ [Notifications] Respuesta: ${result.notifications?.length || 0} notificaciones, ${result.unreadCount} no leídas`);
     return result;
   }
@@ -392,5 +408,43 @@ export class NotificationsController {
   async deleteNotificationTracking(@Payload() data: { id: string }) {
     console.log(`🗑️ [Notifications] delete_notification_tracking - id: ${data.id}`);
     return await this.trackingService.remove(data.id);
+  }
+
+  // ============================================
+  // 📞 ENDPOINTS PARA CONTADOR DE LLAMADAS
+  // ============================================
+
+  /**
+   * 📞 Incrementar contador de llamadas
+   */
+  @MessagePattern({ cmd: 'increment_call' })
+  async incrementCall(@Payload() data: {
+    orderId: string;
+    orderNumber: number;
+    companyId: string;
+    userId: string;
+  }) {
+    console.log(`📞 [Notifications] increment_call - orderId: ${data.orderId}, userId: ${data.userId}`);
+    return await this.callCounterService.incrementCall(
+      data.orderId,
+      data.orderNumber,
+      data.companyId,
+      data.userId
+    );
+  }
+
+  /**
+   * 📊 Obtener contador de llamadas
+   */
+  @MessagePattern({ cmd: 'get_call_counter' })
+  async getCallCounter(@Payload() data: {
+    orderId: string;
+    companyId: string;
+  }) {
+    console.log(`📊 [Notifications] get_call_counter - orderId: ${data.orderId}`);
+    return await this.callCounterService.getCallCounter(
+      data.orderId,
+      data.companyId
+    );
   }
 }
