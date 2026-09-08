@@ -39,147 +39,179 @@ export class NotificationsService {
   }
 
   async createOrUpdateFromOrderEvent(orderEvent: any) {
-    const device = orderEvent.device || {};
-    const orderData = orderEvent.order || {};
-    const orderNumber = orderData.orderNumber || orderEvent.order_number || orderEvent.order_id;
-    const customerName = orderData.customerName || orderEvent.customer_name || 'Cliente';
-    const branch = orderData.branch || orderEvent.branch || 'Sucursal Principal';
-    const detalleIngreso = orderEvent.detalleIngreso || orderData.detalleIngreso || 'Sin detalles';
-    const technicians = orderEvent.technicians || [];
-    const entityId = orderEvent.order_id?.toString();
-    const userId = orderEvent.userId || orderEvent.changed_by;
-    const newStatus = orderData.status || orderEvent.newValue?.status || 'INGRESADO';
-    const action = orderEvent.action || 'created';
+      const device = orderEvent.device || {};
+      const orderData = orderEvent.order || {};
+      const orderNumber = orderData.orderNumber || orderEvent.order_number || orderEvent.order_id;
+      const customerName = orderData.customerName || orderEvent.customer_name || 'Cliente';
+      const branch = orderData.branch || orderEvent.branch || 'Sucursal Principal';
+      const detalleIngreso = orderEvent.detalleIngreso || orderData.detalleIngreso || 'Sin detalles';
+      const technicians = orderEvent.technicians || [];
+      const entityId = orderEvent.order_id?.toString();
+      const userId = orderEvent.userId || orderEvent.changed_by;
+      const newStatus = orderData.status || orderEvent.newValue?.status || 'INGRESADO';
+      const action = orderEvent.action || 'created';
 
-    const createdById = orderEvent.userId
-      || orderEvent.created_by_id
-      || orderEvent.createdById
-      || orderData.createdById
-      || null;
+      console.log(`📥 [createOrUpdateFromOrderEvent] Procesando orden #${orderNumber}`, {
+          entityId,
+          newStatus,
+          action,
+          userId
+      });
 
-    const createdByName = orderEvent.userName
-      || orderEvent.created_by
-      || orderData.createdBy
-      || 'Sistema';
+      const createdById = orderEvent.userId
+          || orderEvent.created_by_id
+          || orderEvent.createdById
+          || orderData.createdById
+          || null;
 
-    let notification = await this.notificationModel.findOne({ 
-      entityType: 'order', 
-      entityId: entityId 
-    });
-    
-    const technicianNames = technicians.map((t: any) => 
-      `${t.first_name || ''} ${t.last_name || ''}`.trim()
-    ).filter((n: string) => n).join(', ');
-    
-    let deviceMessage = '';
-    if (device && (device.brand || device.model)) {
-      deviceMessage = `\n📱 **Dispositivo:** ${device.brand || ''} ${device.model || ''}`.trim();
-      if (device.serial_number) deviceMessage += `\n🔢 **Serie:** ${device.serial_number}`;
-      if (device.imei) deviceMessage += `\n📱 **IMEI:** ${device.imei}`;
-    }
-    
-    const title = `📋 Orden #${orderNumber} - ${customerName}`;
-    const baseMessage = `**Orden de servicio**\n` +
-      `📋 **Número:** #${orderNumber}\n` +
-      `👤 **Cliente:** ${customerName}\n` +
-      `📝 **Problema:** ${detalleIngreso}\n` +
-      `${deviceMessage}` +
-      `\n👨‍🔧 **Técnico(s):** ${technicianNames || 'No asignado'}\n` +
-      `🏢 **Sucursal:** ${branch}\n` +
-      `📅 **Fecha creación:** ${new Date(orderEvent.timestamp).toLocaleString()}`;
-    
-    if (!notification) {
-      const scheduledFor = orderEvent.scheduledFor || null;
-      const observations = orderEvent.observations || null;
+      const createdByName = orderEvent.userName
+          || orderEvent.created_by
+          || orderData.createdBy
+          || 'Sistema';
 
-      notification = new this.notificationModel({
-        _id: new Types.UUID().toString(),
-        userId: userId,
-        companyId: orderEvent.company_id,
-        createdById: createdById,
-        createdByName: createdByName,
-        title,
-        message: baseMessage,
-        type: action === 'created' ? 'success' : 'info',
-        entityType: 'order',
-        entityId: entityId,
-        action: action,
-        currentStatus: newStatus,
-        statusHistory: [],
-        orderData: {
-          orderNumber,
-          customerName,
-          branch,
-          device,
-          detalleIngreso,
-          technicians,
-          createdBy: createdByName,
-          createdById: createdById,
-          createdAt: orderEvent.timestamp
-        },
-        metadata: {
-          order: orderEvent.order,
-          technicians: orderEvent.technicians,
-          device: device,
-          ipAddress: orderEvent.ipAddress,
-          userAgent: orderEvent.userAgent,
-          source: 'order_service',
-        },
-        oldValues: null,
-        newValues: { status: newStatus },
-        actionDescription: 'Orden creada',
-        read: false,
-        readHistory: [],
-        viewsCount: 0,
-        createdAt: new Date(),
-        observations: observations,
-        scheduledFor: scheduledFor,
+      let notification = await this.notificationModel.findOne({ 
+          entityType: 'order', 
+          entityId: entityId 
       });
       
-      notification.statusHistory.push({
-        status: newStatus,
-        changedBy: userId,
-        changedByName: orderEvent.userName || orderEvent.created_by || 'Sistema',
-        changedAt: new Date(orderEvent.timestamp) || new Date(),
-        description: 'Orden creada'
-      });
+      const technicianNames = technicians.map((t: any) => 
+          `${t.first_name || ''} ${t.last_name || ''}`.trim()
+      ).filter((n: string) => n).join(', ');
       
-      return await notification.save();
-    }
-    
-    const oldStatus = notification.currentStatus;
-    
-    if (oldStatus !== newStatus || action === 'updated') {
-      const statusEntry: StatusHistoryEntry = {
-        status: newStatus,
-        changedBy: userId,
-        changedByName: orderEvent.userName || orderEvent.changed_by || 'Sistema',
-        changedAt: new Date(orderEvent.timestamp) || new Date(),
-        description: orderEvent.description || `Estado cambiado de ${oldStatus} a ${newStatus}`
-      };
-      
-      notification.statusHistory.push(statusEntry);
-      notification.currentStatus = newStatus;
-      notification.action = action;
-      notification.newValues = { status: newStatus };
-      notification.actionDescription = orderEvent.description || `Estado cambiado a ${newStatus}`;
-
-      if (!notification.createdById && createdById) {
-        notification.createdById = createdById;
-        notification.createdByName = createdByName;
+      let deviceMessage = '';
+      if (device && (device.brand || device.model)) {
+          deviceMessage = `\n📱 **Dispositivo:** ${device.brand || ''} ${device.model || ''}`.trim();
+          if (device.serial_number) deviceMessage += `\n🔢 **Serie:** ${device.serial_number}`;
+          if (device.imei) deviceMessage += `\n📱 **IMEI:** ${device.imei}`;
       }
       
-      const statusHistoryText = notification.statusHistory
-        .map(h => `  • ${new Date(h.changedAt).toLocaleString()} → ${h.status} (por ${h.changedByName})`)
-        .join('\n');
+      const title = `📋 Orden #${orderNumber} - ${customerName}`;
+      const baseMessage = `**Orden de servicio**\n` +
+          `📋 **Número:** #${orderNumber}\n` +
+          `👤 **Cliente:** ${customerName}\n` +
+          `📝 **Problema:** ${detalleIngreso}\n` +
+          `${deviceMessage}` +
+          `\n👨‍🔧 **Técnico(s):** ${technicianNames || 'No asignado'}\n` +
+          `🏢 **Sucursal:** ${branch}\n` +
+          `📅 **Fecha creación:** ${new Date(orderEvent.timestamp).toLocaleString()}`;
       
-      notification.message = `${baseMessage}\n\n📊 **Historial de estados:**\n${statusHistoryText}`;
-      notification.updatedAt = new Date();
+      if (!notification) {
+          const scheduledFor = orderEvent.scheduledFor || null;
+          const observations = orderEvent.observations || null;
+
+          notification = new this.notificationModel({
+              _id: new Types.UUID().toString(),
+              userId: userId,
+              companyId: orderEvent.company_id,
+              createdById: createdById,
+              createdByName: createdByName,
+              title,
+              message: baseMessage,
+              type: action === 'created' ? 'success' : 'info',
+              entityType: 'order',
+              entityId: entityId,
+              action: action,
+              currentStatus: newStatus,
+              statusHistory: [],
+              orderData: {
+                  orderNumber,
+                  customerName,
+                  branch,
+                  device,
+                  detalleIngreso,
+                  technicians,
+                  createdBy: createdByName,
+                  createdById: createdById,
+                  createdAt: orderEvent.timestamp
+              },
+              metadata: {
+                  order: orderEvent.order,
+                  technicians: orderEvent.technicians,
+                  device: device,
+                  ipAddress: orderEvent.ipAddress,
+                  userAgent: orderEvent.userAgent,
+                  source: 'order_service',
+              },
+              oldValues: null,
+              newValues: { status: newStatus },
+              actionDescription: 'Orden creada',
+              read: false,
+              readHistory: [],
+              viewsCount: 0,
+              createdAt: new Date(),
+              observations: observations,
+              scheduledFor: scheduledFor,
+          });
+          
+          notification.statusHistory.push({
+              status: newStatus,
+              changedBy: userId,
+              changedByName: orderEvent.userName || orderEvent.created_by || 'Sistema',
+              changedAt: new Date(orderEvent.timestamp) || new Date(),
+              description: 'Orden creada'
+          });
+          
+          console.log(`✅ [createOrUpdateFromOrderEvent] Notificación creada para orden #${orderNumber} con estado ${newStatus}`);
+          return await notification.save();
+      }
       
-      await notification.save();
-    }
-    
-    return notification;
+      const oldStatus = notification.currentStatus;
+      
+      // 👈 AGREGAR: Verificar si el nuevo estado es ENTREGADA
+      const isDelivered = newStatus === 'ENTREGADA';
+      
+      if (oldStatus !== newStatus || action === 'updated') {
+          console.log(`📊 [createOrUpdateFromOrderEvent] Cambio de estado: ${oldStatus} → ${newStatus}`);
+          
+          // 👈 AGREGAR: Si es ENTREGADA, asegurar que se guarde correctamente
+          if (isDelivered) {
+              console.log(`📦 [createOrUpdateFromOrderEvent] ¡Orden #${orderNumber} ENTREGADA!`);
+          }
+          
+          const statusEntry: StatusHistoryEntry = {
+              status: newStatus,
+              changedBy: userId,
+              changedByName: orderEvent.userName || orderEvent.changed_by || 'Sistema',
+              changedAt: new Date(orderEvent.timestamp) || new Date(),
+              description: orderEvent.description || `Estado cambiado de ${oldStatus} a ${newStatus}`
+          };
+          
+          notification.statusHistory.push(statusEntry);
+          notification.currentStatus = newStatus;
+          notification.action = action;
+          notification.newValues = { status: newStatus };
+          notification.actionDescription = orderEvent.description || `Estado cambiado a ${newStatus}`;
+
+          if (!notification.createdById && createdById) {
+              notification.createdById = createdById;
+              notification.createdByName = createdByName;
+          }
+          
+          // 👈 MODIFICAR: Mensaje especial para ENTREGADA
+          let statusHistoryText = notification.statusHistory
+              .map(h => `  • ${new Date(h.changedAt).toLocaleString()} → ${h.status} (por ${h.changedByName})`)
+              .join('\n');
+          
+          // 👈 AGREGAR: Si es ENTREGADA, agregar información de entrega
+          if (isDelivered) {
+              notification.message = `${baseMessage}\n\n📦 **ESTADO: ENTREGADA**\n📅 **Fecha entrega:** ${new Date().toLocaleString()}\n\n📊 **Historial de estados:**\n${statusHistoryText}`;
+              notification.type = 'success';
+              
+              // 👈 AGREGAR: También actualizar el título
+              notification.title = `📦 Orden #${orderNumber} - ENTREGADA`;
+          } else {
+              notification.message = `${baseMessage}\n\n📊 **Historial de estados:**\n${statusHistoryText}`;
+          }
+          
+          notification.updatedAt = new Date();
+          
+          await notification.save();
+          console.log(`✅ [createOrUpdateFromOrderEvent] Notificación actualizada para orden #${orderNumber}: ${oldStatus} → ${newStatus}`);
+      } else {
+          console.log(`⏭️ [createOrUpdateFromOrderEvent] Sin cambios para orden #${orderNumber}, estado actual: ${oldStatus}`);
+      }
+      
+      return notification;
   }
 
   async updateObservations(id: string, observations: string) {
