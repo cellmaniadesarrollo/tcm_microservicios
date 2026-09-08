@@ -460,4 +460,49 @@ export class NotificationsService {
       )
     );
   }
+
+  /**
+   * 📞 Incrementar contador de llamadas
+   */
+  async incrementCall(
+    orderId: string,
+    orderNumber: number,
+    companyId: string,
+    userId: string
+  ) {
+    console.log(`📤 [Gateway] incrementCall - orderId: ${orderId}, userId: ${userId}`);
+    try {
+      const result = await lastValueFrom(
+        this.notificationsClient.send(
+          { cmd: 'increment_call' },
+          { orderId, orderNumber, companyId, userId }
+        )
+      );
+      console.log(`✅ [Gateway] Llamada incrementada: ${result.count}/10`);
+      return result;
+    } catch (error) {
+      console.error(`❌ [Gateway] Error al incrementar llamada:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 📊 Obtener contador de llamadas de una orden
+   */
+  async getCallCounter(orderId: string, companyId: string) {
+    console.log(`📤 [Gateway] getCallCounter - orderId: ${orderId}`);
+    try {
+      const result = await lastValueFrom(
+        this.notificationsClient.send(
+          { cmd: 'get_call_counter' },
+          { orderId, companyId }
+        )
+      );
+      console.log(`✅ [Gateway] Contador: ${result.count}/10`);
+      return result;
+    } catch (error) {
+      console.error(`❌ [Gateway] Error al obtener contador:`, error);
+      throw error;
+    }
+  }
 }
