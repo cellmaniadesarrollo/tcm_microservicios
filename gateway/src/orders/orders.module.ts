@@ -3,6 +3,9 @@ import { OrdersController } from './orders.controller';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AuthModule } from '../common/auth/auth.module';
 import { OrdersGatewayService } from './orders.service';
+import { PartRequestsController } from './part-requests/part-requests.controller';
+import { PartRequestsGatewayService } from './part-requests/part-requests-gateway.service';
+import { OrderServiceClient } from '../common/microservices/order-service-client';
 
 @Module({
   imports: [
@@ -19,7 +22,7 @@ import { OrdersGatewayService } from './orders.service';
     ]),
     AuthModule
   ],
-  controllers: [OrdersController],
-  providers: [OrdersGatewayService]
+  controllers: [OrdersController, PartRequestsController],
+  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient]
 })
 export class OrdersModule { }
