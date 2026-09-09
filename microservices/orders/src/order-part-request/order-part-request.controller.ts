@@ -134,4 +134,138 @@ export class OrderPartRequestController {
       });
     }
   }
+  @MessagePattern({ cmd: 'encontrado_nacional_part_request' })
+  async encontradoNacional(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      return await this.partRequestsService.encontradoNacional(
+        data.dto,
+        data.files ?? [],
+        data.user,
+      );
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (encontradoNacional):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'list_part_requests_para_pago' })
+  async listParaPago(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+      return await this.partRequestsService.listParaPago(data.dto, data.user);
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (listParaPago):', error);
+      if (error.stack) console.error(error.stack);
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'create_part_request_payment' })
+  async createPartRequestPayment(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      return await this.partRequestsService.createPartRequestPayment(
+        data.dto,
+        data.files ?? [],
+        data.user,
+      );
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (createPartRequestPayment):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'registrar_envio_part_request' })
+  async registrarEnvio(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      return await this.partRequestsService.registrarEnvio(
+        data.dto,
+        data.files ?? [],
+        data.user,
+      );
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (registrarEnvio):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+
+  @MessagePattern({ cmd: 'registrar_llegada_part_request' })
+  async registrarLlegada(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) throw new RpcException('Payload incompleto: falta dto o user');
+      return await this.partRequestsService.registrarLlegada(data.dto, data.files ?? [], data.user);
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (registrarLlegada):', error);
+      if (error.stack) console.error(error.stack);
+      throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
+    }
+  }
+
+  @MessagePattern({ cmd: 'aprobar_llegada_part_request' })
+  async aprobarLlegada(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) throw new RpcException('Payload incompleto: falta dto o user');
+      return await this.partRequestsService.aprobarLlegada(data.dto, data.files ?? [], data.user);
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (aprobarLlegada):', error);
+      if (error.stack) console.error(error.stack);
+      throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
+    }
+  }
+  // ms-orders — controller
+  @MessagePattern({ cmd: 'no_aprobar_llegada_part_request' })
+  async noAprobarLlegada(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta dto o user');
+      }
+
+      return await this.partRequestsService.noAprobarLlegada(data.dto, data.files ?? [], data.user);
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (noAprobarLlegada):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
 }

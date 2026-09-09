@@ -10,6 +10,7 @@ import {
     CreateDateColumn,
     UpdateDateColumn,
     Index,
+    OneToOne,
 } from 'typeorm';
 import { Order } from '../../order-workflow/entities/order.entity';
 import { Attachment } from '../../order-findings/entities/attachment.entity';
@@ -17,6 +18,9 @@ import { UserEmployeeCache } from '../../users-employees-events/entities/user_em
 import { PartRequestPayment } from './part-request-payment.entity';
 import { PartRequestStatusHistory } from './part-request-status-history.entity';
 import { PartRequestStatus, PartRequestType } from './enums/part-request-status.enum';
+import { PartRequestSourcing } from './part-request-sourcing.entity';
+import { PartRequestShipping } from './part-request-shipping.entity';
+import { PartRequestArrival } from './part-request-arrival.entity';
 
 @Entity('part_requests')
 export class PartRequest {
@@ -73,6 +77,16 @@ export class PartRequest {
 
     @OneToMany(() => PartRequestStatusHistory, (hist) => hist.partRequest, { cascade: true })
     historial!: PartRequestStatusHistory[];
+
+    @OneToOne(() => PartRequestSourcing, (s) => s.partRequest)
+    sourcing?: PartRequestSourcing;
+
+    @OneToOne(() => PartRequestShipping, (s) => s.partRequest)
+    shipping?: PartRequestShipping;
+
+    @OneToOne(() => PartRequestArrival, (a) => a.partRequest)
+    arrival?: PartRequestArrival;
+
 
     attachments?: Attachment[];
 

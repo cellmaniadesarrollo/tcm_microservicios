@@ -8,6 +8,9 @@ import { Attachment } from '../order-findings/entities/attachment.entity';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { Order } from '../order-workflow/entities/order.entity';
+import { PartRequestSourcing } from './entities/part-request-sourcing.entity';
+import { PartRequestShipping } from './entities/part-request-shipping.entity';
+import { PartRequestArrival } from './entities/part-request-arrival.entity';
 
 @Module({
   imports: [
@@ -16,7 +19,10 @@ import { Order } from '../order-workflow/entities/order.entity';
       PartRequestPayment,
       PartRequestStatusHistory,
       Attachment, // ya debería estar exportado desde order-findings, revisa si conviene importarlo de ahí en vez de repetirlo
-      Order
+      Order,
+      PartRequestSourcing,
+      PartRequestShipping,
+      PartRequestArrival
     ]),
     AwsS3Module
   ],
