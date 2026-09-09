@@ -264,6 +264,10 @@ export class OrdersController {
 
   @Post('payments')
   async registerPayment(@Req() request: FastifyRequest, @User() user: any) {
+    const requestId = Math.random().toString(36).slice(2, 8); // para correlacionar en logs
+    console.log(`[DEBUG][${requestId}] ══ POST /payments START @ ${new Date().toISOString()}`);
+    console.log(`[DEBUG][${requestId}] user:`, JSON.stringify(user));
+
     const { files, formData } = await parseMultipartRequest(request);
     const processedFiles = await processAndValidateFiles(files);
 
@@ -276,11 +280,29 @@ export class OrdersController {
       observation: formData.observation,
     };
 
-    return this.ordersGatewayService.registerPayment(
-      dto,
-      serializeFilesForMicroservice(processedFiles),
-      toUserPayload(user),
-    );
+    console.log(`[DEBUG][${requestId}] DTO construido:`, JSON.stringify(dto));
+    console.log(`[DEBUG][${requestId}] orderId raw='${formData.orderId}' → parsed=${dto.orderId} (isNaN=${isNaN(dto.orderId)})`);
+
+    const tSend = Date.now();
+    try {
+      const result = await this.ordersGatewayService.registerPayment(
+        dto,
+        serializeFilesForMicroservice(processedFiles),
+        toUserPayload(user),
+      );
+      console.log(`[DEBUG][${requestId}] ✅ registerPayment OK en ${Date.now() - tSend}ms`);
+      console.log(`[DEBUG][${requestId}] ══ POST /payments END`);
+      return result;
+    } catch (err) {
+      console.log(`[DEBUG][${requestId}] ❌ registerPayment FALLÓ en ${Date.now() - tSend}ms`);
+
+      // Extracción segura del mensaje de error
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      console.log(`[DEBUG][${requestId}] Error:`, errorMessage);
+
+      console.log(`[DEBUG][${requestId}] ══ POST /payments END (con error)`);
+      throw err;
+    }
   }
 
   @Post('close')
