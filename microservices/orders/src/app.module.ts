@@ -24,6 +24,7 @@ import { ReportingHubModule } from './reporting-hub/reporting-hub.module';
 import { OrderValidationLockModule } from './order-validation-lock/order-validation-lock.module';
 import { OrderExtrasModule } from './order-extras/order-extras.module';
 import { InvoicesModule } from './invoices/invoices.module';
+import { OrderPartRequestModule } from './order-part-request/order-part-request.module';
 
 @Module({
   imports: [
@@ -48,6 +49,8 @@ import { InvoicesModule } from './invoices/invoices.module';
     KafkaModule,
 
     OrderValidationLockModule,
+
+    OrderPartRequestModule,
 
 
   ],
