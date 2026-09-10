@@ -35,36 +35,28 @@ export async function parseMultipartRequest(
     const files: ParsedFile[] = [];
     const formData: Record<string, string> = {};
 
-    try {
-        for await (const part of request.parts()) {
-            if (part.type === 'file' || (part as any).file) {
-                const filePart = part as any;
-                console.log(`[DEBUG] FILE part → fieldname=${filePart.fieldname}, filename=${filePart.filename}, mimetype=${filePart.mimetype}`);
+    for await (const part of request.parts()) {
+        if (isMultipartFile(part)) {
+            console.log(`[DEBUG] FILE part → fieldname=${part.fieldname}, filename=${part.filename}, mimetype=${part.mimetype}`);
 
-                const tFileStart = Date.now();
-                const buffers: Buffer[] = [];
-                for await (const chunk of filePart.file) {
-                    buffers.push(chunk as Buffer);
-                }
-                const buffer = Buffer.concat(buffers);
-                console.log(`[DEBUG] FILE part leído en ${Date.now() - tFileStart}ms, size=${buffer.length} bytes`);
-
-                if (buffer.length > 0) {
-                    files.push({
-                        buffer,
-                        originalname: filePart.filename || 'unnamed_file',
-                        mimetype: filePart.mimetype || 'application/octet-stream',
-                        size: buffer.length,
-                    });
-                }
-            } else {
-                const fieldPart = part as any;
-                console.log(`[DEBUG] FIELD part → ${fieldPart.fieldname} = ${JSON.stringify(fieldPart.value)}`);
-                formData[fieldPart.fieldname] = String(fieldPart.value ?? '');
+            const tFileStart = Date.now();
+            const buffers: Buffer[] = [];
+            for await (const chunk of part.file) {
+                buffers.push(chunk as Buffer);
             }
+            const buffer = Buffer.concat(buffers);
+            console.log(`[DEBUG] FILE part leído en ${Date.now() - tFileStart}ms, size=${buffer.length} bytes`);
+
+            files.push({
+                buffer,
+                originalname: part.filename,
+                mimetype: part.mimetype,
+                size: buffer.length,
+            });
+        } else {
+            console.log(`[DEBUG] FIELD part → ${part.fieldname} = ${JSON.stringify(part.value)}`);
+            formData[part.fieldname] = part.value as string;
         }
-    } catch (error) {
-        console.error(`[DEBUG] Error iterando request.parts():`, error);
     }
 
     console.log(`[DEBUG] ── parseMultipartRequest END. Total: ${Date.now() - t0}ms`);
