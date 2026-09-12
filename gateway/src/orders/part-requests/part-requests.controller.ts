@@ -364,4 +364,13 @@ export class PartRequestsController {
             { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         );
     }
+    //@Groups('LOGISTICA_REPUESTOS')
+    @Get('counts')
+    async getPartRequestCounts(@User() user: any) {
+        return this.partRequestsGatewayService.getPartRequestCounts({
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
+    }
 }

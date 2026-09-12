@@ -1581,4 +1581,24 @@ export class OrderPartRequestService {
             },
         };
     }
+    async getPartRequestCounts(user: { companyId: string }) {
+        const [sinAceptar, esperaPago] = await Promise.all([
+            this.partRequestRepo
+                .createQueryBuilder('pr')
+                .leftJoin('pr.order', 'order')
+                .where('order.company_id = :companyId', { companyId: user.companyId })
+                .andWhere('pr.estado = :estado', { estado: 'SOLICITADO' })
+                .andWhere('pr.responsable_busqueda_id IS NULL')
+                .getCount(),
+
+            this.partRequestRepo
+                .createQueryBuilder('pr')
+                .leftJoin('pr.order', 'order')
+                .where('order.company_id = :companyId', { companyId: user.companyId })
+                .andWhere('pr.estado = :estado', { estado: 'ESPERA_DE_PAGO' })
+                .getCount(),
+        ]);
+
+        return { sinAceptar, esperaPago };
+    }
 }

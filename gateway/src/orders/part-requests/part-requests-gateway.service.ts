@@ -73,4 +73,8 @@ export class PartRequestsGatewayService {
     async getDatosPago(id: number, user: { companyId: string }) {
         return this.orderServiceClient.send('get_part_request_datos_pago', { dto: { id }, user });
     }
+
+    async getPartRequestCounts(user: any) {
+        return this.orderServiceClient.send('get_part_request_counts', { user });
+    }
 } 

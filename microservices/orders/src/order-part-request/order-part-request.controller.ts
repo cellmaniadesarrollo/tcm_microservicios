@@ -329,4 +329,24 @@ export class OrderPartRequestController {
       });
     }
   }
+  @MessagePattern({ cmd: 'get_part_request_counts' })
+  async getPartRequestCounts(@Payload() data: any) {
+    try {
+      if (!data.user) {
+        console.error('❌ Error: Payload incompleto', data);
+        throw new RpcException('Payload incompleto: falta user');
+      }
+
+      return await this.partRequestsService.getPartRequestCounts(data.user);
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (getPartRequestCounts):', error);
+      if (error.stack) console.error(error.stack);
+
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
 }
