@@ -56,6 +56,18 @@ export class OrderPartRequestService {
                 );
             }
 
+            if (!dto.marca?.trim()) {
+                throw new RpcException(new BadRequestException('La marca es requerida'));
+            }
+
+            if (!dto.modelo?.trim()) {
+                throw new RpcException(new BadRequestException('El modelo es requerido'));
+            }
+
+            if (!dto.tipo?.trim()) {
+                throw new RpcException(new BadRequestException('El tipo de repuesto es requerido'));
+            }
+
             if (dto.posiblesLugares && dto.posiblesLugares.length > 5) {
                 throw new RpcException(
                     new BadRequestException('Máximo 5 posibles lugares sugeridos'),
@@ -67,6 +79,12 @@ export class OrderPartRequestService {
                 order_id: order.id,
                 technician_id: user.userId,
                 descripcion: dto.descripcion,
+                marca: dto.marca,
+                modelo: dto.modelo,
+                modelo_tecnico: dto.modeloTecnico,
+                tipo: dto.tipo,
+                color: dto.color,
+                calidad: dto.calidad,
                 estado: PartRequestStatus.SOLICITADO,
             });
             const savedPartRequest = await manager.save(partRequest);
@@ -204,7 +222,10 @@ export class OrderPartRequestService {
         return result;
     }
 
-    async listPartRequests(dto: ListPartRequestsDto, user: { companyId: string }) {
+    async listPartRequests(
+        dto: ListPartRequestsDto,
+        user: { userId: string; companyId: string },
+    ) {
         const page = dto.page && dto.page > 0 ? dto.page : 1;
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const skip = (page - 1) * limit;
@@ -217,6 +238,10 @@ export class OrderPartRequestService {
             .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
             .where('order.company_id = :companyId', { companyId: user.companyId });
 
+        if (dto.soloMias) {
+            qb.andWhere('pr.responsable_busqueda_id = :userId', { userId: user.userId });
+        }
+
         if (dto.search?.trim()) {
             qb.andWhere('pr.descripcion ILIKE :search', { search: `%${dto.search.trim()}%` });
         }
@@ -225,8 +250,11 @@ export class OrderPartRequestService {
             qb.andWhere('pr.estado = :estado', { estado: dto.estado });
         }
 
+        // Antes: 'mias' ordenaba por updatedAt, la general por createdAt.
+        // Mantengo ese matiz condicionado al flag; si prefieres uniformar, deja solo una línea.
+        qb.orderBy(dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt', 'DESC');
+
         const [partRequests, total] = await qb
-            .orderBy('pr.createdAt', 'DESC')
             .skip(skip)
             .take(limit)
             .getManyAndCount();
@@ -240,7 +268,7 @@ export class OrderPartRequestService {
             responsableRecepcion: mapUser(pr.responsableRecepcion),
         }));
 
-        const result = {
+        return {
             data,
             meta: {
                 page,
@@ -252,8 +280,6 @@ export class OrderPartRequestService {
                 estados: Object.values(PartRequestStatus),
             },
         };
-        // console.log(data)
-        return result;
     }
     async getPartRequestFullData(id: number, user: { companyId: string; userGroups?: string[] }) {
         const pr = await this.partRequestRepo
@@ -571,7 +597,8 @@ export class OrderPartRequestService {
                 throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
             }
 
-            if (partRequest.estado !== PartRequestStatus.EN_BUSQUEDA) {
+            // Ya no se pasa por EN_BUSQUEDA: quien encuentra, se autoasigna aquí mismo.
+            if (partRequest.estado !== PartRequestStatus.SOLICITADO) {
                 throw new RpcException(
                     new BadRequestException(
                         `No se puede registrar "encontrado nacional": la solicitud está en estado "${partRequest.estado}"`,
@@ -587,14 +614,27 @@ export class OrderPartRequestService {
                 throw new RpcException(new BadRequestException('El precio debe ser mayor a 0'));
             }
 
-            const estadoAnterior = partRequest.estado;
+            if (dto.precioVenta !== undefined && dto.precioVenta !== null && dto.precioVenta <= 0) {
+                throw new RpcException(new BadRequestException('El precio de venta debe ser mayor a 0'));
+            }
 
-            // 1. Actualizar el pedido
+            const estadoAnterior = partRequest.estado; // SOLICITADO
+
+            // 1. Actualizar el pedido: estado + autoasignación + tipo + precio_venta (si vino)
             partRequest.estado = PartRequestStatus.ESPERA_DE_PAGO;
             partRequest.tipo = PartRequestType.NACIONAL;
+            partRequest.responsable_busqueda_id = user.userId;
+            if (dto.precioVenta !== undefined && dto.precioVenta !== null) {
+                partRequest.precio_venta = dto.precioVenta;
+            }
             await manager.save(partRequest);
 
-            // 2. Guardar/actualizar sourcing (upsert, por si se corrige antes de pasar a pago)
+            // 2. Guardar/actualizar sourcing (sin cambios)
+            if (!dto.banco?.trim() || !dto.numeroCuenta?.trim() || !dto.tipoCuenta?.trim() || !dto.titularCuenta?.trim()) {
+                throw new RpcException(
+                    new BadRequestException('Los datos bancarios (banco, número de cuenta, tipo de cuenta y titular) son obligatorios'),
+                );
+            }
             let sourcing = await manager.findOne(PartRequestSourcing, {
                 where: { part_request_id: partRequest.id },
             });
@@ -606,6 +646,10 @@ export class OrderPartRequestService {
                 sourcing.contacto_proveedor = dto.contactoProveedor;
                 sourcing.link_compra = dto.linkCompra;
                 sourcing.notas = dto.notas;
+                sourcing.banco = dto.banco;
+                sourcing.numero_cuenta = dto.numeroCuenta;
+                sourcing.tipo_cuenta = dto.tipoCuenta;
+                sourcing.titular_cuenta = dto.titularCuenta;
                 sourcing.registrado_por_id = user.userId;
             } else {
                 sourcing = manager.create(PartRequestSourcing, {
@@ -616,22 +660,21 @@ export class OrderPartRequestService {
                     contacto_proveedor: dto.contactoProveedor,
                     link_compra: dto.linkCompra,
                     notas: dto.notas,
+                    banco: dto.banco,
+                    numero_cuenta: dto.numeroCuenta,
+                    tipo_cuenta: dto.tipoCuenta,
+                    titular_cuenta: dto.titularCuenta,
                     registrado_por_id: user.userId,
                 });
             }
             await manager.save(sourcing);
 
-            // 3. Adjuntos: evidencia del hallazgo (fotos, capturas)
+            // 3. Adjuntos (sin cambios)
             const attachments: Attachment[] = [];
             for (const file of files) {
                 const buffer = Buffer.from(file.buffer, 'base64');
                 const prefix = `order/${partRequest.order_id}/part-requests/${partRequest.id}/encontrado-nacional/`;
-                const url = await this.awsS3Service.uploadBuffer(
-                    buffer,
-                    file.originalname,
-                    file.mimetype,
-                    prefix,
-                );
+                const url = await this.awsS3Service.uploadBuffer(buffer, file.originalname, file.mimetype, prefix);
 
                 const attachment = manager.create(Attachment, {
                     entity_type: AttachmentEntityType.PART_REQUEST,
@@ -646,7 +689,7 @@ export class OrderPartRequestService {
                 attachments.push(await manager.save(attachment));
             }
 
-            // 4. Historial
+            // 4. Historial: SOLICITADO -> ESPERA_DE_PAGO directo
             const history = manager.create(PartRequestStatusHistory, {
                 part_request_id: partRequest.id,
                 estado_anterior: estadoAnterior,
@@ -656,9 +699,7 @@ export class OrderPartRequestService {
             });
             await manager.save(history);
 
-            // 5. Notificación + broadcast (pendiente, igual que el resto del módulo)
-            // await this.notificationsService.emitNotification(...)
-            // await this.broadcastService.publishOrderUpdated(...)
+            // 5. Notificación + broadcast (pendiente)
 
             const updated = await manager.findOne(PartRequest, { where: { id: partRequest.id } });
             if (!updated) {
@@ -959,24 +1000,22 @@ export class OrderPartRequestService {
             }
 
             if (!dto.transportista?.trim() || !dto.numeroGuia?.trim()) {
-                throw new RpcException(
-                    new BadRequestException('Transportista y número de guía son requeridos'),
-                );
+                throw new RpcException(new BadRequestException('Transportista y número de guía son requeridos'));
             }
 
             if (!files.length) {
                 throw new RpcException(
-                    new BadRequestException('Debes adjuntar la foto de la guía/documento de transporte'),
+                    new BadRequestException('Debes adjuntar al menos una imagen (guía y/o evidencia de llegada)'),
                 );
             }
 
-            const estadoAnterior = partRequest.estado;
+            const estadoAnterior = partRequest.estado; // EN_PROCESO_DE_PEDIDO
 
-            // 1. Actualizar estado del pedido
-            partRequest.estado = PartRequestStatus.EN_TRANSITO;
+            // 1. Salta directo a "pendiente de validación", ya no pasa por EN_TRANSITO
+            partRequest.estado = PartRequestStatus.LLEGADO_PENDIENTE_VALIDACION;
             await manager.save(partRequest);
 
-            // 2. Crear registro de shipping (upsert por si se corrige después)
+            // 2. Shipping
             let shipping = await manager.findOne(PartRequestShipping, {
                 where: { part_request_id: partRequest.id },
             });
@@ -994,30 +1033,44 @@ export class OrderPartRequestService {
                     part_request_id: partRequest.id,
                     transportista: dto.transportista,
                     numero_guia: dto.numeroGuia,
-                    fecha_estimada_llegada: dto.fechaEstimadaLlegada
-                        ? new Date(dto.fechaEstimadaLlegada)
-                        : undefined,
+                    fecha_estimada_llegada: dto.fechaEstimadaLlegada ? new Date(dto.fechaEstimadaLlegada) : undefined,
                     notas: dto.notas,
                     registrado_por_id: user.userId,
                 });
             }
             const savedShipping = await manager.save(shipping);
 
-            // 3. Foto(s) de la guía
+            // 3. Arrival: se crea aquí mismo (ya no hay paso separado de "registrar llegada")
+            let arrival = await manager.findOne(PartRequestArrival, {
+                where: { part_request_id: partRequest.id },
+            });
+
+            const arrivalData = {
+                observations: dto.notas,
+                registrado_por_id: user.userId,
+                resultado_validacion: 'PENDIENTE' as const,
+            };
+
+            if (arrival) {
+                Object.assign(arrival, arrivalData);
+            } else {
+                arrival = manager.create(PartRequestArrival, {
+                    part_request_id: partRequest.id,
+                    ...arrivalData,
+                });
+            }
+            const savedArrival = await manager.save(arrival);
+
+            // 4. Adjuntos: guía + evidencia de llegada en un solo lote
             const attachments: Attachment[] = [];
             for (const file of files) {
                 const buffer = Buffer.from(file.buffer, 'base64');
-                const prefix = `order/${partRequest.order_id}/part-requests/${partRequest.id}/shipping/`;
-                const url = await this.awsS3Service.uploadBuffer(
-                    buffer,
-                    file.originalname,
-                    file.mimetype,
-                    prefix,
-                );
+                const prefix = `order/${partRequest.order_id}/part-requests/${partRequest.id}/envio-llegada/`;
+                const url = await this.awsS3Service.uploadBuffer(buffer, file.originalname, file.mimetype, prefix);
 
                 const attachment = manager.create(Attachment, {
-                    entity_type: AttachmentEntityType.PART_REQUEST_SHIPPING,
-                    entity_id: savedShipping.id,
+                    entity_type: AttachmentEntityType.PART_REQUEST_ARRIVAL,
+                    entity_id: savedArrival.id,
                     file_name: file.originalname,
                     file_url: url,
                     file_type: file.mimetype,
@@ -1028,29 +1081,26 @@ export class OrderPartRequestService {
                 attachments.push(await manager.save(attachment));
             }
 
-            // 4. Historial
+            // 5. Historial: EN_PROCESO_DE_PEDIDO -> LLEGADO_PENDIENTE_VALIDACION directo
             const history = manager.create(PartRequestStatusHistory, {
                 part_request_id: partRequest.id,
                 estado_anterior: estadoAnterior,
-                estado_nuevo: PartRequestStatus.EN_TRANSITO,
+                estado_nuevo: PartRequestStatus.LLEGADO_PENDIENTE_VALIDACION,
                 actor_id: user.userId,
                 notas: dto.notas,
             });
             await manager.save(history);
 
-            // 5. Notificación + broadcast (pendiente, igual que el resto del módulo)
-            // await this.notificationsService.emitNotification(...)
-            // await this.broadcastService.publishOrderUpdated(...)
+            const arrivalWithAttachments = { ...savedArrival, attachments };
+            await enrichPartRequestAttachmentsWithSignedUrls([arrivalWithAttachments], this.awsS3Service);
 
-            const result = {
-                ...shipping,
-                attachments,
-                estado_pedido: PartRequestStatus.EN_TRANSITO,
+            // 6. Notificación + broadcast (pendiente)
+
+            return {
+                shipping: savedShipping,
+                arrival: arrivalWithAttachments,
+                estado_pedido: partRequest.estado,
             };
-
-            await enrichPartRequestAttachmentsWithSignedUrls([result], this.awsS3Service);
-
-            return result;
         });
     }
 
@@ -1198,17 +1248,32 @@ export class OrderPartRequestService {
                 );
             }
 
-            const precioVentaFinal = dto.precioVenta ?? partRequest.arrival.precio_venta;
-            if (!precioVentaFinal || precioVentaFinal <= 0) {
+            // Único checkpoint duro: si nunca se llenó en ninguna etapa anterior, no se puede aprobar.
+            if (!partRequest.precio_venta || partRequest.precio_venta <= 0) {
                 throw new RpcException(
                     new BadRequestException('Debes indicar el precio de venta antes de aprobar la asignación'),
                 );
             }
 
+            if (partRequest.sourcing?.precio && partRequest.precio_venta < partRequest.sourcing.precio) {
+                throw new RpcException(
+                    new BadRequestException('El precio de venta no puede ser menor al costo de compra'),
+                );
+            }
+            if (!dto.cantidadOrden || dto.cantidadOrden <= 0) {
+                throw new RpcException(new BadRequestException('La cantidad para la orden debe ser mayor a 0'));
+            }
+
+            if (dto.cantidadOrden > partRequest.arrival.cantidad) {
+                throw new RpcException(
+                    new BadRequestException(
+                        `La cantidad para la orden (${dto.cantidadOrden}) no puede ser mayor a la cantidad llegada (${partRequest.arrival.cantidad})`,
+                    ),
+                );
+            }
             const estadoAnterior = partRequest.estado;
 
             // 1. Marcar la validación como aprobada
-            partRequest.arrival.precio_venta = precioVentaFinal;
             partRequest.arrival.resultado_validacion = 'APROBADO';
             partRequest.arrival.validado_por_id = user.userId;
             partRequest.arrival.fecha_validacion = new Date();
@@ -1234,25 +1299,22 @@ export class OrderPartRequestService {
                 attachments.push(await manager.save(attachment));
             }
 
-            // 3. Crear la asignación a la orden — texto plano en extra_data, sin normalizar
+            // 3. Crear la asignación a la orden — solo con la cantidad indicada para ESTA orden
             const pendingProduct = manager.create(OrderPendingProduct, {
                 order_id: partRequest.order_id,
                 company_id: user.companyId,
                 name_items: partRequest.descripcion,
                 observations: partRequest.arrival.observations,
-                sale_price: precioVentaFinal,
+                sale_price: partRequest.precio_venta,
                 purchase_price: partRequest.sourcing?.precio ?? null,
-                quantity: partRequest.arrival.cantidad,
+                quantity: dto.cantidadOrden, // ← antes: partRequest.arrival.cantidad
                 is_in_inventory: false,
                 created_by_id: user.userId,
                 extra_data: {
-                    marca: partRequest.arrival.marca ?? null,
-                    modelo: partRequest.arrival.modelo ?? null,
-                    tipo: partRequest.arrival.tipo ?? null,
-                    color: partRequest.arrival.color ?? null,
-                    calidad: partRequest.arrival.calidad ?? null,
                     origen: 'PART_REQUEST',
                     part_request_id: partRequest.id,
+                    cantidad_llegada: partRequest.arrival.cantidad,
+                    cantidad_asignada_orden: dto.cantidadOrden,
                 },
             });
             const savedPendingProduct = await manager.save(pendingProduct);
@@ -1268,27 +1330,18 @@ export class OrderPartRequestService {
                 estado_anterior: estadoAnterior,
                 estado_nuevo: PartRequestStatus.LLEGADO_ASIGNADO,
                 actor_id: user.userId,
-                notas: 'Aprobado y asignado a la orden',
+                notas: `Aprobado y asignado a la orden (${dto.cantidadOrden} de ${partRequest.arrival.cantidad} unidades)`,
             });
             await manager.save(history);
 
-            // 6. Notificación + broadcast (pendiente)
-            // await this.notificationsService.emitNotification(...)
-            // await this.broadcastService.publishOrderUpdated(...)
+            const arrivalWithAttachments = { ...partRequest.arrival, attachments };
+            await enrichPartRequestAttachmentsWithSignedUrls([arrivalWithAttachments], this.awsS3Service);
 
-            const result = {
-                arrival: partRequest.arrival,
+            return {
+                arrival: arrivalWithAttachments,
                 pendingProduct: savedPendingProduct,
-                attachments,
                 estado_pedido: partRequest.estado,
             };
-
-            await enrichPartRequestAttachmentsWithSignedUrls(
-                [{ id: partRequest.arrival.id, attachments }],
-                this.awsS3Service,
-            );
-
-            return result;
         });
     }
     async noAprobarLlegada(
@@ -1389,5 +1442,143 @@ export class OrderPartRequestService {
 
             return result;
         });
+    }
+
+
+    async getDatosPrevios(id: number, user: { companyId: string }) {
+        const partRequest = await this.partRequestRepo
+            .createQueryBuilder('pr')
+            .leftJoin('pr.order', 'order')
+            .addSelect(['order.id', 'order.company_id'])
+            .leftJoinAndSelect('pr.sourcing', 'sourcing')
+            .where('pr.id = :id', { id })
+            .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+            .getOne();
+
+        if (!partRequest) {
+            throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
+        }
+
+        const camposFaltantes: string[] = [];
+        if (!partRequest.modelo_tecnico?.trim()) camposFaltantes.push('modeloTecnico');
+        if (!partRequest.color?.trim()) camposFaltantes.push('color');
+        if (!partRequest.calidad?.trim()) camposFaltantes.push('calidad');
+        if (!partRequest.precio_venta) camposFaltantes.push('precioVenta');
+
+        return {
+            id: partRequest.id,
+            estado: partRequest.estado,
+            marca: partRequest.marca,
+            modelo: partRequest.modelo,
+            modeloTecnico: partRequest.modelo_tecnico,
+            tipo: partRequest.tipo,
+            color: partRequest.color,
+            calidad: partRequest.calidad,
+            precioVenta: partRequest.precio_venta,
+            sourcing: partRequest.sourcing
+                ? {
+                    proveedor: partRequest.sourcing.proveedor,
+                    precio: partRequest.sourcing.precio,
+                    cantidad: partRequest.sourcing.cantidad,
+                    banco: partRequest.sourcing.banco,
+                    numeroCuenta: partRequest.sourcing.numero_cuenta,
+                    tipoCuenta: partRequest.sourcing.tipo_cuenta,
+                    titularCuenta: partRequest.sourcing.titular_cuenta,
+                }
+                : null,
+            camposFaltantes,
+        };
+    }
+    async completarDatos(
+        dto: { id: number; modeloTecnico?: string; color?: string; calidad?: string; precioVenta?: number },
+        user: { userId: string; companyId: string },
+    ) {
+        const partRequest = await this.partRequestRepo
+            .createQueryBuilder('pr')
+            .leftJoin('pr.order', 'order')
+            .addSelect(['order.id', 'order.company_id'])
+            .where('pr.id = :id', { id: dto.id })
+            .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+            .getOne();
+
+        if (!partRequest) {
+            throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
+        }
+
+        if (partRequest.estado === PartRequestStatus.CANCELADO) {
+            throw new RpcException(new BadRequestException('No se pueden editar datos de una solicitud cancelada'));
+        }
+
+        if (dto.modeloTecnico !== undefined) partRequest.modelo_tecnico = dto.modeloTecnico;
+        if (dto.color !== undefined) partRequest.color = dto.color;
+        if (dto.calidad !== undefined) partRequest.calidad = dto.calidad;
+        if (dto.precioVenta !== undefined) partRequest.precio_venta = dto.precioVenta;
+
+        await this.partRequestRepo.save(partRequest);
+
+        const camposFaltantes: string[] = [];
+        if (!partRequest.modelo_tecnico?.trim()) camposFaltantes.push('modeloTecnico');
+        if (!partRequest.color?.trim()) camposFaltantes.push('color');
+        if (!partRequest.calidad?.trim()) camposFaltantes.push('calidad');
+        if (!partRequest.precio_venta) camposFaltantes.push('precioVenta');
+
+        return {
+            id: partRequest.id,
+            modeloTecnico: partRequest.modelo_tecnico,
+            color: partRequest.color,
+            calidad: partRequest.calidad,
+            precioVenta: partRequest.precio_venta,
+            camposFaltantes,
+        };
+    }
+    async getDatosPago(id: number, user: { companyId: string }) {
+        const partRequest = await this.partRequestRepo
+            .createQueryBuilder('pr')
+            .leftJoin('pr.order', 'order')
+            .addSelect(['order.id', 'order.company_id'])
+            .leftJoinAndSelect('pr.sourcing', 'sourcing')
+            .where('pr.id = :id', { id })
+            .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+            .getOne();
+
+        if (!partRequest) {
+            throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
+        }
+
+        if (partRequest.estado !== PartRequestStatus.ESPERA_DE_PAGO) {
+            throw new RpcException(
+                new BadRequestException(
+                    `Esta solicitud no está en espera de pago (estado actual: "${partRequest.estado}")`,
+                ),
+            );
+        }
+
+        if (!partRequest.sourcing) {
+            throw new RpcException(new NotFoundException('No se encontró información de compra (sourcing) para esta solicitud'));
+        }
+
+        const montoTotal = Number(partRequest.sourcing.precio ?? 0) * Number(partRequest.sourcing.cantidad ?? 1);
+
+        return {
+            id: partRequest.id,
+            estado: partRequest.estado,
+            tipo: partRequest.tipo,
+            marca: partRequest.marca,
+            modelo: partRequest.modelo,
+            descripcion: partRequest.descripcion,
+            proveedor: partRequest.sourcing.proveedor,
+            precioUnitario: partRequest.sourcing.precio,
+            cantidad: partRequest.sourcing.cantidad,
+            montoTotal,
+            contactoProveedor: partRequest.sourcing.contacto_proveedor,
+            linkCompra: partRequest.sourcing.link_compra,
+            notas: partRequest.sourcing.notas,
+            datosBancarios: {
+                banco: partRequest.sourcing.banco,
+                numeroCuenta: partRequest.sourcing.numero_cuenta,
+                tipoCuenta: partRequest.sourcing.tipo_cuenta,
+                titularCuenta: partRequest.sourcing.titular_cuenta,
+            },
+        };
     }
 }

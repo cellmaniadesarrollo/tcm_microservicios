@@ -23,6 +23,7 @@ import { RegistrarEnvioGatewayDto } from './dto/registrar-envio-gateway.dto';
 import { AprobarLlegadaGatewayDto } from './dto/aprobar-llegada.dto';
 import { RegistrarLlegadaGatewayDto } from './dto/registrar-llegada.dto';
 import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto';
+import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
 
 @Controller('part-requests')
 @Auth()
@@ -46,6 +47,12 @@ export class PartRequestsController {
         const dto: CreatePartRequestGatewayDto = {
             orderId: Number(formData.orderId),
             descripcion: formData.descripcion,
+            marca: formData.marca,
+            modelo: formData.modelo,
+            modeloTecnico: formData.modeloTecnico || undefined,
+            tipo: formData.tipo,
+            color: formData.color || undefined,
+            calidad: formData.calidad || undefined,
             posiblesLugares,
         };
 
@@ -122,28 +129,28 @@ export class PartRequestsController {
     }
 
     // ─── LOGISTICA_REPUESTOS ────────────────────────────────────────
-    @Groups('LOGISTICA_REPUESTOS')
-    @Get('mis-aceptadas')
-    async listMyAcceptedPartRequests(
-        @Query('page') page: string,
-        @Query('limit') limit: string,
-        @Query('search') search: string,
-        @Query('estado') estado: string,
-        @User() user: any,
-    ) {
-        const dto: ListPartRequestsGatewayDto = {
-            page: page ? Number(page) : undefined,
-            limit: limit ? Number(limit) : undefined,
-            search: search || undefined,
-            estado: estado || undefined,
-        };
+    // @Groups('LOGISTICA_REPUESTOS')
+    // @Get('mis-aceptadas')
+    // async listMyAcceptedPartRequests(
+    //     @Query('page') page: string,
+    //     @Query('limit') limit: string,
+    //     @Query('search') search: string,
+    //     @Query('estado') estado: string,
+    //     @User() user: any,
+    // ) {
+    //     const dto: ListPartRequestsGatewayDto = {
+    //         page: page ? Number(page) : undefined,
+    //         limit: limit ? Number(limit) : undefined,
+    //         search: search || undefined,
+    //         estado: estado || undefined,
+    //     };
 
-        return this.partRequestsGatewayService.listMyAcceptedPartRequests(dto, {
-            userId: user.sub,
-            companyId: user.companyId,
-            branchId: user.branchId,
-        });
-    }
+    //     return this.partRequestsGatewayService.listMyAcceptedPartRequests(dto, {
+    //         userId: user.sub,
+    //         companyId: user.companyId,
+    //         branchId: user.branchId,
+    //     });
+    // }
 
     // ─── LOGISTICA_REPUESTOS ────────────────────────────────────────
     @Groups('LOGISTICA_REPUESTOS')
@@ -164,6 +171,11 @@ export class PartRequestsController {
             contactoProveedor: formData.contactoProveedor || undefined,
             linkCompra: formData.linkCompra || undefined,
             notas: formData.notas || undefined,
+            precioVenta: formData.precioVenta ? Number(formData.precioVenta) : undefined,
+            banco: formData.banco,
+            numeroCuenta: formData.numeroCuenta,
+            tipoCuenta: formData.tipoCuenta,
+            titularCuenta: formData.titularCuenta,
         };
 
         return this.partRequestsGatewayService.encontradoNacional(
@@ -172,7 +184,29 @@ export class PartRequestsController {
             { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         );
     }
+    // @Groups('LOGISTICA_REPUESTOS')
+    @Patch(':id/completar-datos')
+    async completarDatos(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: CompletarDatosPartRequestGatewayDto,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.completarDatos(
+            { ...dto, id }, // Aquí id (13) sobreescribe/inyecta el id en el objeto
+            { userId: user.sub, companyId: user.companyId },
+        );
+    }
+    // @Groups('LOGISTICA_REPUESTOS')
+    @Get(':id/datos-previos')
+    async datosPrevios(
+        @Param('id', ParseIntPipe) id: number,
+        @User() user: any,
+    ) {
 
+        return this.partRequestsGatewayService.getDatosPrevios(id, {
+            companyId: user.companyId,
+        });
+    }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
     @Groups('ORDER_AUDIT')
     @Get('para-pago')
@@ -196,7 +230,16 @@ export class PartRequestsController {
             branchId: user.branchId,
         });
     }
-
+    @Groups('ORDER_AUDIT')
+    @Get(':id/datos-pago')
+    async datosPago(
+        @Param('id', ParseIntPipe) id: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.getDatosPago(id, {
+            companyId: user.companyId,
+        });
+    }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
     @Groups('ORDER_AUDIT')
     @Post(':id/pagos')
@@ -290,7 +333,7 @@ export class PartRequestsController {
 
         const dto: AprobarLlegadaGatewayDto = {
             id,
-            precioVenta: formData.precioVenta ? Number(formData.precioVenta) : undefined,
+            cantidadOrden: Number(formData.cantidadOrden),
         };
 
         return this.partRequestsGatewayService.aprobarLlegada(

@@ -229,14 +229,15 @@ export class DevicesService {
       )
       .getMany();
   }
-  async findOneById(deviceId: number, user: any): Promise<DeviceResponseDto | null> {
+  async findOneById(deviceId: number, user: any): Promise<any | null> {
     const companyId = user.companyId;
     const device = await this.deviceRepo.findOne({
       where: {
         device_id: deviceId,
         company_id: companyId,
       },
-      relations: ['imeis', 'accounts'],
+      // 1. Agregamos las relaciones faltantes aquí
+      relations: ['model', 'model.brand', 'type', 'imeis', 'accounts'],
     });
 
     if (!device) return null;
@@ -244,10 +245,18 @@ export class DevicesService {
     return {
       device_id: device.device_id,
       serial_number: device.serial_number,
+      color: device.color, // Color ya venía
+      storage: device.storage,
+
+      // 2. Nombres agregados
+      device_type_name: device.type?.name,
+      model_name: device.model?.models_name,
+      brand_name: device.model?.brand?.brands_name,
+
+      // IDs originales
       models_id: device.models_id,
       device_type_id: device.device_type_id,
-      color: device.color,
-      storage: device.storage,
+
       imeis: device.imeis.map(i => ({
         imei_id: i.imei_id,
         imei_number: i.imei_number,

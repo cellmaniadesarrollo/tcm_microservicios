@@ -1,7 +1,6 @@
-import { IsOptional, IsInt, Min, IsString, IsEnum } from 'class-validator';
+import { IsOptional, IsInt, Min, IsString, IsBoolean } from 'class-validator';
 import { Type } from 'class-transformer';
 
-// Opcional: Define los estados permitidos si los conoces
 export enum EstadoParte {
     PENDIENTE = 'PENDIENTE',
     APROBADO = 'APROBADO',
@@ -27,6 +26,11 @@ export class ListPartRequestsGatewayDto {
 
     @IsOptional()
     @IsString({ message: 'El estado debe ser una cadena de texto' })
-    // @IsEnum(EstadoParte, { message: 'El estado no es válido' }) // Descomenta si usas un Enum
     estado?: string;
+
+    // Nuevo filtro: si viene en true, solo trae las que el usuario aceptó/busca
+    @IsOptional()
+    @Type(() => Boolean)
+    @IsBoolean({ message: 'soloMias debe ser un valor booleano' })
+    soloMias?: boolean = false;
 }

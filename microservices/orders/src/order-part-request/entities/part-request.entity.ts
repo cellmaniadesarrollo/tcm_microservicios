@@ -6,21 +6,21 @@ import {
     Column,
     ManyToOne,
     JoinColumn,
+    OneToOne,
     OneToMany,
     CreateDateColumn,
     UpdateDateColumn,
     Index,
-    OneToOne,
 } from 'typeorm';
 import { Order } from '../../order-workflow/entities/order.entity';
 import { Attachment } from '../../order-findings/entities/attachment.entity';
 import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
 import { PartRequestPayment } from './part-request-payment.entity';
 import { PartRequestStatusHistory } from './part-request-status-history.entity';
-import { PartRequestStatus, PartRequestType } from './enums/part-request-status.enum';
 import { PartRequestSourcing } from './part-request-sourcing.entity';
 import { PartRequestShipping } from './part-request-shipping.entity';
 import { PartRequestArrival } from './part-request-arrival.entity';
+import { PartRequestStatus, PartRequestType } from './enums/part-request-status.enum';
 
 @Entity('part_requests')
 export class PartRequest {
@@ -38,7 +38,6 @@ export class PartRequest {
     @Column({ type: 'uuid', unique: true, nullable: true })
     public_id?: string;
 
-    // ─── Quién solicitó ────────────────────────────────────────────
     @Column({ type: 'uuid' })
     technician_id!: string;
 
@@ -49,14 +48,36 @@ export class PartRequest {
     @Column({ type: 'varchar', length: 500 })
     descripcion!: string;
 
+    // ─── Datos técnicos (capturados al crear la solicitud) ───────────
+    @Column({ default: 'N/A' })
+    marca!: string;
+
+    @Column({ default: 'N/A' })
+    modelo!: string;
+
+    @Column({ nullable: true })
+    modelo_tecnico?: string;
+
+    @Column({ default: 'N/A' })
+    tipo!: string; // ⚠️ ojo: distinto del PartRequestType (NACIONAL/INTERNACIONAL) — ver nota abajo
+
+    @Column({ nullable: true })
+    color?: string;
+
+    @Column({ nullable: true })
+    calidad?: string;
+
+    // ─── Precio de venta (editable en registrar-envío y aprobar-llegada) ──
+    @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+    precio_venta?: number;
+
     @Column({ type: 'enum', enum: PartRequestType, nullable: true })
-    tipo?: PartRequestType;
+    tipoRepuesto?: PartRequestType; // renombrado para no chocar con la columna "tipo" de arriba
 
     @Index()
     @Column({ type: 'enum', enum: PartRequestStatus, default: PartRequestStatus.SOLICITADO })
     estado!: PartRequestStatus;
 
-    // ─── Quién está a cargo de la búsqueda ──────────────────────────
     @Column({ type: 'uuid', nullable: true })
     responsable_busqueda_id?: string;
 
@@ -64,19 +85,12 @@ export class PartRequest {
     @JoinColumn({ name: 'responsable_busqueda_id' })
     responsableBusqueda?: UserEmployeeCache;
 
-    // ─── Quién está a cargo de recibir el pedido ────────────────────
     @Column({ type: 'uuid', nullable: true })
     responsable_recepcion_id?: string;
 
     @ManyToOne(() => UserEmployeeCache, { eager: true, nullable: true })
     @JoinColumn({ name: 'responsable_recepcion_id' })
     responsableRecepcion?: UserEmployeeCache;
-
-    @OneToMany(() => PartRequestPayment, (pago) => pago.partRequest, { cascade: true })
-    pagos!: PartRequestPayment[];
-
-    @OneToMany(() => PartRequestStatusHistory, (hist) => hist.partRequest, { cascade: true })
-    historial!: PartRequestStatusHistory[];
 
     @OneToOne(() => PartRequestSourcing, (s) => s.partRequest)
     sourcing?: PartRequestSourcing;
@@ -87,6 +101,11 @@ export class PartRequest {
     @OneToOne(() => PartRequestArrival, (a) => a.partRequest)
     arrival?: PartRequestArrival;
 
+    @OneToMany(() => PartRequestPayment, (pago) => pago.partRequest, { cascade: true })
+    pagos!: PartRequestPayment[];
+
+    @OneToMany(() => PartRequestStatusHistory, (hist) => hist.partRequest, { cascade: true })
+    historial!: PartRequestStatusHistory[];
 
     attachments?: Attachment[];
 

@@ -3,5 +3,11 @@
 export interface CreatePartRequestDto {
     orderId: number;
     descripcion: string;
+    marca: string;
+    modelo: string;
+    modeloTecnico?: string;
+    tipo: string;
+    color?: string;
+    calidad?: string;
     posiblesLugares?: string[];
 }

@@ -157,7 +157,7 @@ export class OrdersController {
   }
   @Post('device/update-imei')
   async updateDeviceImei(@Body() body: UpdateDeviceImeiGatewayDto, @User() user: any) {
-    console.log(body)
+    //  console.log(body)
     return this.ordersGatewayService.updateDeviceImei(
       body.deviceId,
       body.orderId,

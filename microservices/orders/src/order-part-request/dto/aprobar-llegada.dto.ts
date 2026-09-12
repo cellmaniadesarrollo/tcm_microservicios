@@ -2,5 +2,5 @@
 
 export interface AprobarLlegadaDto {
     id: number;
-    precioVenta?: number; // fallback si no se puso en registrar-llegada
+    cantidadOrden: number;
 }
