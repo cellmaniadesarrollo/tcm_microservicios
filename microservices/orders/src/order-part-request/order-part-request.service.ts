@@ -339,6 +339,7 @@ export class OrderPartRequestService {
 
         const pagos = (pr.pagos ?? []).map((p) => ({
             ...p,
+            monto: Number(p.monto), // 👈 normalizado
             attachments: attachmentsByPayment.get(p.id) ?? [],
         }));
 
@@ -387,14 +388,19 @@ export class OrderPartRequestService {
         }
 
         // Cálculo de estado de pago (mismo criterio que listParaPago)
+        let montoProducto: number | null = null;
+        let montoTransporte: number | null = null;
         let totalPagado: number | null = null;
         let saldoPendiente: number | null = null;
         let estadoPago: 'PENDIENTE' | 'PARCIAL' | 'PAGADO' | null = null;
 
         if (pr.sourcing?.precio) {
-            const precio = Number(pr.sourcing.precio);
+            montoProducto = Number(pr.sourcing.precio) * Number(pr.sourcing.cantidad ?? 1);
+            montoTransporte = Number(pr.sourcing.precio_transporte ?? 0);
+            const precioTotal = montoProducto + montoTransporte;
+
             totalPagado = pagos.reduce((sum, p) => sum + Number(p.monto), 0);
-            saldoPendiente = Number((precio - totalPagado).toFixed(2));
+            saldoPendiente = Number((precioTotal - totalPagado).toFixed(2));
             estadoPago = saldoPendiente <= 0 ? 'PAGADO' : totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
         }
 
@@ -413,7 +419,14 @@ export class OrderPartRequestService {
             technician: mapUser(pr.technician),
             responsableBusqueda: mapUser(pr.responsableBusqueda),
             responsableRecepcion: mapUser(pr.responsableRecepcion),
-            sourcing: pr.sourcing ?? null,
+            sourcing: pr.sourcing
+                ? {
+                    ...pr.sourcing,
+                    precio: pr.sourcing.precio !== null && pr.sourcing.precio !== undefined ? Number(pr.sourcing.precio) : null,
+                    precio_transporte: Number(pr.sourcing.precio_transporte ?? 0),
+                    cantidad: Number(pr.sourcing.cantidad),
+                }
+                : null,
             shipping,
             arrival,
             order: pr.order
@@ -456,6 +469,8 @@ export class OrderPartRequestService {
         if (puedeVerPagos) {
             result.pagos = pagos;
             result.total_pagado = totalPagado;
+            result.monto_producto = montoProducto;
+            result.monto_transporte = montoTransporte;
             result.saldo_pendiente = saldoPendiente;
             result.estado_pago = estadoPago;
         }
@@ -474,6 +489,7 @@ export class OrderPartRequestService {
 
         return result;
     }
+
     async tomarPartRequest(id: number, user: { userId: string; companyId: string }) {
         return this.partRequestRepo.manager.transaction(async (manager) => {
             // 1. Buscar el pedido validando que pertenezca a la empresa del usuario
