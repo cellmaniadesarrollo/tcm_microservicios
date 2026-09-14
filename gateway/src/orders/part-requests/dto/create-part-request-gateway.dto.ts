@@ -1,5 +1,6 @@
 // gateway/src/orders/dto/create-part-request-gateway.dto.ts
-import { IsArray, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, IsUrl } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsInt, IsNotEmpty, IsOptional, IsPositive, IsString, IsUrl, Min } from 'class-validator';
 
 export class CreatePartRequestGatewayDto {
     @Type(() => Number)
