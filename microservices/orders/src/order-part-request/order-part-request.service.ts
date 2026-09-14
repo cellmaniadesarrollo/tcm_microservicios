@@ -24,7 +24,11 @@ import { PartRequestArrival } from './entities/part-request-arrival.entity';
 import { RegistrarLlegadaDto } from './dto/registrar-llegada.dto';
 import { AprobarLlegadaDto } from './dto/aprobar-llegada.dto';
 import { NoAprobarLlegadaDto } from './dto/no-aprobar-llegada.dto';
-
+export const GRUPOS_CON_ACCESO_ESPERA_PAGO = [
+    'ADMINS',
+    'ORDER_AUDIT',
+    'COMPANY_ADMIN',
+];
 @Injectable()
 export class OrderPartRequestService {
     constructor(
@@ -1581,7 +1585,12 @@ export class OrderPartRequestService {
             },
         };
     }
-    async getPartRequestCounts(user: { companyId: string }) {
+
+    async getPartRequestCounts(user: { companyId: string; groups?: string[] }) {
+        const puedeVerEsperaPago = (user.groups || []).some(g =>
+            GRUPOS_CON_ACCESO_ESPERA_PAGO.includes(g)
+        );
+
         const [sinAceptar, esperaPago] = await Promise.all([
             this.partRequestRepo
                 .createQueryBuilder('pr')
@@ -1591,12 +1600,14 @@ export class OrderPartRequestService {
                 .andWhere('pr.responsable_busqueda_id IS NULL')
                 .getCount(),
 
-            this.partRequestRepo
-                .createQueryBuilder('pr')
-                .leftJoin('pr.order', 'order')
-                .where('order.company_id = :companyId', { companyId: user.companyId })
-                .andWhere('pr.estado = :estado', { estado: 'ESPERA_DE_PAGO' })
-                .getCount(),
+            puedeVerEsperaPago
+                ? this.partRequestRepo
+                    .createQueryBuilder('pr')
+                    .leftJoin('pr.order', 'order')
+                    .where('order.company_id = :companyId', { companyId: user.companyId })
+                    .andWhere('pr.estado = :estado', { estado: 'ESPERA_DE_PAGO' })
+                    .getCount()
+                : Promise.resolve(null), // 👈 no se calcula si no tiene permiso
         ]);
 
         return { sinAceptar, esperaPago };

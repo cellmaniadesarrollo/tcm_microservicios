@@ -371,6 +371,7 @@ export class PartRequestsController {
             userId: user.sub,
             companyId: user.companyId,
             branchId: user.branchId,
+            groups: user.groups
         });
     }
 }
