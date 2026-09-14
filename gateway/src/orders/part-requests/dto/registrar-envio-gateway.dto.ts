@@ -31,4 +31,5 @@ export class RegistrarEnvioGatewayDto {
     @IsOptional()
     @IsString({ message: 'Las notas deben ser texto' })
     notas?: string;
+
 }

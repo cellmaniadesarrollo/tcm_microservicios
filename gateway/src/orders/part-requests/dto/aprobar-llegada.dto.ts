@@ -14,10 +14,9 @@ export class AprobarLlegadaGatewayDto {
     @Min(1, { message: 'El ID debe ser mayor a 0' })
     @IsNotEmpty({ message: 'El ID es obligatorio' })
     id: number;
-
-    @IsOptional()
     @Type(() => Number)
-    @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El precio de venta debe ser un número válido' })
-    @Min(0, { message: 'El precio de venta no puede ser negativo' })
-    precioVenta?: number;
+    @IsInt({ message: 'La cantidad para la orden debe ser un número entero' })
+    @Min(1, { message: 'Debe asignarse al menos 1 unidad a la orden' })
+    @IsNotEmpty({ message: 'La cantidad para la orden es obligatoria' })
+    cantidadOrden: number;
 }

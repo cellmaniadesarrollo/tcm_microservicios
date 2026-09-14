@@ -41,6 +41,19 @@ export class PartRequestSourcing {
     @Column({ type: 'text', nullable: true })
     notas?: string;
 
+    // ─── Datos bancarios (para que quien pague sepa a dónde) ───────────
+    @Column({ nullable: true })
+    banco?: string;
+
+    @Column({ nullable: true })
+    numero_cuenta?: string;
+
+    @Column({ nullable: true })
+    tipo_cuenta?: string;
+
+    @Column({ nullable: true })
+    titular_cuenta?: string;
+
     @Column({ type: 'uuid' })
     registrado_por_id!: string;
 

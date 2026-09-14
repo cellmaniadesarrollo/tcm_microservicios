@@ -30,20 +30,7 @@ export class PartRequestArrival {
     precio_venta?: number;
 
     // ─── Texto plano, sin FK a catálogo ──────────────────────────
-    @Column({ nullable: true })
-    marca?: string;
 
-    @Column({ nullable: true })
-    modelo?: string;
-
-    @Column({ nullable: true })
-    tipo?: string;
-
-    @Column({ nullable: true })
-    color?: string;
-
-    @Column({ nullable: true })
-    calidad?: string;
 
     @Column({ type: 'text', nullable: true })
     observations?: string;
