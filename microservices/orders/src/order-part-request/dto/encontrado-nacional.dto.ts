@@ -8,4 +8,9 @@ export interface EncontradoNacionalDto {
     contactoProveedor?: string;
     linkCompra?: string;
     notas?: string;
+    precioVenta?: number;
+    banco?: string;
+    numeroCuenta?: string;
+    tipoCuenta?: string;
+    titularCuenta?: string;
 }

@@ -5,4 +5,6 @@ export interface ListPartRequestsDto {
     limit?: number;
     search?: string;
     estado?: string;
+    soloMias?: boolean;
+
 }

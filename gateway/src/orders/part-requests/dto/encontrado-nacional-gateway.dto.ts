@@ -44,4 +44,28 @@ export class EncontradoNacionalGatewayDto {
     @IsOptional()
     @IsString({ message: 'Las notas deben ser texto' })
     notas?: string;
+
+    // ─── Precio de venta (opcional aquí, obligatorio recién al aprobar) ──
+    @IsOptional()
+    @Type(() => Number)
+    @IsNumber({}, { message: 'El precio de venta debe ser un número válido' })
+    @Min(0.01, { message: 'El precio de venta debe ser mayor a 0' })
+    precioVenta?: number;
+
+    // ─── Datos bancarios (obligatorios: aquí se pasa a espera de pago) ──
+    @IsString({ message: 'El banco debe ser texto' })
+    @IsNotEmpty({ message: 'El banco es obligatorio' })
+    banco: string;
+
+    @IsString({ message: 'El número de cuenta debe ser texto' })
+    @IsNotEmpty({ message: 'El número de cuenta es obligatorio' })
+    numeroCuenta: string;
+
+    @IsString({ message: 'El tipo de cuenta debe ser texto' })
+    @IsNotEmpty({ message: 'El tipo de cuenta es obligatorio' })
+    tipoCuenta: string;
+
+    @IsString({ message: 'El titular de la cuenta debe ser texto' })
+    @IsNotEmpty({ message: 'El titular de la cuenta es obligatorio' })
+    titularCuenta: string;
 }
