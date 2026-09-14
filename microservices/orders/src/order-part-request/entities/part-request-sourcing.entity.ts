@@ -40,7 +40,8 @@ export class PartRequestSourcing {
 
     @Column({ type: 'text', nullable: true })
     notas?: string;
-
+    @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, default: 0 })
+    precio_transporte?: number;
     // ─── Datos bancarios (para que quien pague sepa a dónde) ───────────
     @Column({ nullable: true })
     banco?: string;

@@ -646,6 +646,7 @@ export class OrderPartRequestService {
             if (sourcing) {
                 sourcing.proveedor = dto.proveedor;
                 sourcing.precio = dto.precio;
+                sourcing.precio_transporte = dto.precioTransporte ?? sourcing.precio_transporte ?? 0;
                 sourcing.cantidad = dto.cantidad ?? sourcing.cantidad ?? 1;
                 sourcing.contacto_proveedor = dto.contactoProveedor;
                 sourcing.link_compra = dto.linkCompra;
@@ -660,6 +661,7 @@ export class OrderPartRequestService {
                     part_request_id: partRequest.id,
                     proveedor: dto.proveedor,
                     precio: dto.precio,
+                    precio_transporte: dto.precioTransporte ?? 0,
                     cantidad: dto.cantidad ?? 1,
                     contacto_proveedor: dto.contactoProveedor,
                     link_compra: dto.linkCompra,
@@ -752,15 +754,18 @@ export class OrderPartRequestService {
 
         const partRequests = await qb.orderBy('pr.updatedAt', 'DESC').getMany();
 
-        // Cálculo de pago por pedido
+        // Cálculo de pago por pedido (producto + transporte)
         const enriched = partRequests.map((pr) => {
-            const precio = Number(pr.sourcing?.precio);
+            const montoProducto = Number(pr.sourcing?.precio ?? 0) * Number(pr.sourcing?.cantidad ?? 1);
+            const montoTransporte = Number(pr.sourcing?.precio_transporte ?? 0);
+            const precio = montoProducto + montoTransporte; // total a pagar
+
             const totalPagado = (pr.pagos ?? []).reduce((sum, p) => sum + Number(p.monto), 0);
             const saldoPendiente = Number((precio - totalPagado).toFixed(2));
             const estadoPago =
                 saldoPendiente <= 0 ? 'PAGADO' : totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
 
-            return { pr, precio, totalPagado, saldoPendiente, estadoPago };
+            return { pr, montoProducto, montoTransporte, precio, totalPagado, saldoPendiente, estadoPago };
         });
 
         // Filtro por condición de pago (combobox)
@@ -795,33 +800,38 @@ export class OrderPartRequestService {
             attachmentsByPayment.set(att.entity_id, list);
         }
 
-        const data = pageItems.map(({ pr, precio, totalPagado, saldoPendiente, estadoPago }) => ({
-            id: pr.id,
-            order_id: pr.order_id,
-            order_number: (pr as any).order?.order_number ?? null,
-            fecha_solicitud: pr.createdAt,
-            descripcion: pr.descripcion,
-            tipo: pr.tipo,
-            estado: pr.estado,
-            technician: mapUser(pr.technician),
-            responsableBusqueda: mapUser(pr.responsableBusqueda),
-            sourcing: {
-                id: pr.sourcing?.id,
-                proveedor: pr.sourcing?.proveedor,
-                precio: pr.sourcing?.precio,
-                cantidad: pr.sourcing?.cantidad,
-                link_compra: pr.sourcing?.link_compra,
-            },
-            pagos: (pr.pagos ?? [])
-                .sort((a, b) => a.fecha_pago.getTime() - b.fecha_pago.getTime())
-                .map((p) => ({
-                    ...p,
-                    attachments: attachmentsByPayment.get(p.id) ?? [],
-                })),
-            total_pagado: totalPagado,
-            saldo_pendiente: saldoPendiente,
-            estado_pago: estadoPago,
-        }));
+        const data = pageItems.map(
+            ({ pr, montoProducto, montoTransporte, totalPagado, saldoPendiente, estadoPago }) => ({
+                id: pr.id,
+                order_id: pr.order_id,
+                order_number: (pr as any).order?.order_number ?? null,
+                fecha_solicitud: pr.createdAt,
+                descripcion: pr.descripcion,
+                tipo: pr.tipo,
+                estado: pr.estado,
+                technician: mapUser(pr.technician),
+                responsableBusqueda: mapUser(pr.responsableBusqueda),
+                sourcing: {
+                    id: pr.sourcing?.id,
+                    proveedor: pr.sourcing?.proveedor,
+                    precio: pr.sourcing?.precio,
+                    precio_transporte: pr.sourcing?.precio_transporte ?? 0, // 👈 nuevo
+                    cantidad: pr.sourcing?.cantidad,
+                    link_compra: pr.sourcing?.link_compra,
+                },
+                pagos: (pr.pagos ?? [])
+                    .sort((a, b) => a.fecha_pago.getTime() - b.fecha_pago.getTime())
+                    .map((p) => ({
+                        ...p,
+                        attachments: attachmentsByPayment.get(p.id) ?? [],
+                    })),
+                monto_producto: montoProducto,     // 👈 nuevo, desglosado
+                monto_transporte: montoTransporte, // 👈 nuevo, desglosado
+                total_pagado: totalPagado,
+                saldo_pendiente: saldoPendiente,
+                estado_pago: estadoPago,
+            }),
+        );
 
         await enrichPartRequestAttachmentsWithSignedUrls(
             data.flatMap((d) => d.pagos), // firma comprobantes de todos los pagos de la página
@@ -887,7 +897,10 @@ export class OrderPartRequestService {
                 where: { part_request_id: partRequest.id },
             });
             const totalPagadoPrevio = existingPayments.reduce((sum, p) => sum + Number(p.monto), 0);
-            const precio = Number(partRequest.sourcing.precio);
+            const precioProducto = Number(partRequest.sourcing.precio) * Number(partRequest.sourcing.cantidad ?? 1);
+            const precioTransporte = Number(partRequest.sourcing.precio_transporte ?? 0);
+            const precio = precioProducto + precioTransporte; // total a pagar
+
             const saldoPendientePrevio = precio - totalPagadoPrevio;
 
             if (dto.monto > saldoPendientePrevio) {
@@ -1561,7 +1574,9 @@ export class OrderPartRequestService {
             throw new RpcException(new NotFoundException('No se encontró información de compra (sourcing) para esta solicitud'));
         }
 
-        const montoTotal = Number(partRequest.sourcing.precio ?? 0) * Number(partRequest.sourcing.cantidad ?? 1);
+        const montoProducto = Number(partRequest.sourcing.precio ?? 0) * Number(partRequest.sourcing.cantidad ?? 1);
+        const montoTransporte = Number(partRequest.sourcing.precio_transporte ?? 0);
+        const montoTotal = montoProducto + montoTransporte;
 
         return {
             id: partRequest.id,
@@ -1571,8 +1586,11 @@ export class OrderPartRequestService {
             modelo: partRequest.modelo,
             descripcion: partRequest.descripcion,
             proveedor: partRequest.sourcing.proveedor,
-            precioUnitario: partRequest.sourcing.precio,
-            cantidad: partRequest.sourcing.cantidad,
+            precioUnitario: Number(partRequest.sourcing.precio),   // 👈 forzar number
+            cantidad: Number(partRequest.sourcing.cantidad),        // 👈 forzar number
+            precioTransporte: montoTransporte,                      // ya es number
+            montoProducto,
+            montoTransporte,
             montoTotal,
             contactoProveedor: partRequest.sourcing.contacto_proveedor,
             linkCompra: partRequest.sourcing.link_compra,
