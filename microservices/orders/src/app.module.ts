@@ -25,6 +25,7 @@ import { OrderValidationLockModule } from './order-validation-lock/order-validat
 import { OrderExtrasModule } from './order-extras/order-extras.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { OrderPartRequestModule } from './order-part-request/order-part-request.module';
+import { OrderDiscountsModule } from './order-discounts/order-discounts.module';
 
 @Module({
   imports: [
@@ -51,6 +52,8 @@ import { OrderPartRequestModule } from './order-part-request/order-part-request.
     OrderValidationLockModule,
 
     OrderPartRequestModule,
+
+    OrderDiscountsModule,
 
 
   ],

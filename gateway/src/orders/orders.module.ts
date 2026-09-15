@@ -6,6 +6,8 @@ import { OrdersGatewayService } from './orders.service';
 import { PartRequestsController } from './part-requests/part-requests.controller';
 import { PartRequestsGatewayService } from './part-requests/part-requests-gateway.service';
 import { OrderServiceClient } from '../common/microservices/order-service-client';
+import { DiscountsController } from './discounts/discounts.controller';
+import { DiscountsGatewayService } from './discounts/discounts-gateway.service';
 
 @Module({
   imports: [

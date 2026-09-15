@@ -68,4 +68,7 @@ export class EncontradoNacionalGatewayDto {
     @IsString({ message: 'El titular de la cuenta debe ser texto' })
     @IsNotEmpty({ message: 'El titular de la cuenta es obligatorio' })
     titularCuenta: string;
+    @IsOptional()
+    @IsNumber()
+    precioTransporte?: number;
 }
