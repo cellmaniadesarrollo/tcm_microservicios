@@ -24,7 +24,11 @@ import { PartRequestArrival } from './entities/part-request-arrival.entity';
 import { RegistrarLlegadaDto } from './dto/registrar-llegada.dto';
 import { AprobarLlegadaDto } from './dto/aprobar-llegada.dto';
 import { NoAprobarLlegadaDto } from './dto/no-aprobar-llegada.dto';
-
+export const GRUPOS_CON_ACCESO_ESPERA_PAGO = [
+    'ADMINS',
+    'ORDER_AUDIT',
+    'COMPANY_ADMIN',
+];
 @Injectable()
 export class OrderPartRequestService {
     constructor(
@@ -335,6 +339,7 @@ export class OrderPartRequestService {
 
         const pagos = (pr.pagos ?? []).map((p) => ({
             ...p,
+            monto: Number(p.monto), // 👈 normalizado
             attachments: attachmentsByPayment.get(p.id) ?? [],
         }));
 
@@ -383,14 +388,19 @@ export class OrderPartRequestService {
         }
 
         // Cálculo de estado de pago (mismo criterio que listParaPago)
+        let montoProducto: number | null = null;
+        let montoTransporte: number | null = null;
         let totalPagado: number | null = null;
         let saldoPendiente: number | null = null;
         let estadoPago: 'PENDIENTE' | 'PARCIAL' | 'PAGADO' | null = null;
 
         if (pr.sourcing?.precio) {
-            const precio = Number(pr.sourcing.precio);
+            montoProducto = Number(pr.sourcing.precio) * Number(pr.sourcing.cantidad ?? 1);
+            montoTransporte = Number(pr.sourcing.precio_transporte ?? 0);
+            const precioTotal = montoProducto + montoTransporte;
+
             totalPagado = pagos.reduce((sum, p) => sum + Number(p.monto), 0);
-            saldoPendiente = Number((precio - totalPagado).toFixed(2));
+            saldoPendiente = Number((precioTotal - totalPagado).toFixed(2));
             estadoPago = saldoPendiente <= 0 ? 'PAGADO' : totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
         }
 
@@ -409,7 +419,14 @@ export class OrderPartRequestService {
             technician: mapUser(pr.technician),
             responsableBusqueda: mapUser(pr.responsableBusqueda),
             responsableRecepcion: mapUser(pr.responsableRecepcion),
-            sourcing: pr.sourcing ?? null,
+            sourcing: pr.sourcing
+                ? {
+                    ...pr.sourcing,
+                    precio: pr.sourcing.precio !== null && pr.sourcing.precio !== undefined ? Number(pr.sourcing.precio) : null,
+                    precio_transporte: Number(pr.sourcing.precio_transporte ?? 0),
+                    cantidad: Number(pr.sourcing.cantidad),
+                }
+                : null,
             shipping,
             arrival,
             order: pr.order
@@ -452,6 +469,8 @@ export class OrderPartRequestService {
         if (puedeVerPagos) {
             result.pagos = pagos;
             result.total_pagado = totalPagado;
+            result.monto_producto = montoProducto;
+            result.monto_transporte = montoTransporte;
             result.saldo_pendiente = saldoPendiente;
             result.estado_pago = estadoPago;
         }
@@ -470,6 +489,7 @@ export class OrderPartRequestService {
 
         return result;
     }
+
     async tomarPartRequest(id: number, user: { userId: string; companyId: string }) {
         return this.partRequestRepo.manager.transaction(async (manager) => {
             // 1. Buscar el pedido validando que pertenezca a la empresa del usuario
@@ -642,6 +662,7 @@ export class OrderPartRequestService {
             if (sourcing) {
                 sourcing.proveedor = dto.proveedor;
                 sourcing.precio = dto.precio;
+                sourcing.precio_transporte = dto.precioTransporte ?? sourcing.precio_transporte ?? 0;
                 sourcing.cantidad = dto.cantidad ?? sourcing.cantidad ?? 1;
                 sourcing.contacto_proveedor = dto.contactoProveedor;
                 sourcing.link_compra = dto.linkCompra;
@@ -656,6 +677,7 @@ export class OrderPartRequestService {
                     part_request_id: partRequest.id,
                     proveedor: dto.proveedor,
                     precio: dto.precio,
+                    precio_transporte: dto.precioTransporte ?? 0,
                     cantidad: dto.cantidad ?? 1,
                     contacto_proveedor: dto.contactoProveedor,
                     link_compra: dto.linkCompra,
@@ -748,15 +770,18 @@ export class OrderPartRequestService {
 
         const partRequests = await qb.orderBy('pr.updatedAt', 'DESC').getMany();
 
-        // Cálculo de pago por pedido
+        // Cálculo de pago por pedido (producto + transporte)
         const enriched = partRequests.map((pr) => {
-            const precio = Number(pr.sourcing?.precio);
+            const montoProducto = Number(pr.sourcing?.precio ?? 0) * Number(pr.sourcing?.cantidad ?? 1);
+            const montoTransporte = Number(pr.sourcing?.precio_transporte ?? 0);
+            const precio = montoProducto + montoTransporte; // total a pagar
+
             const totalPagado = (pr.pagos ?? []).reduce((sum, p) => sum + Number(p.monto), 0);
             const saldoPendiente = Number((precio - totalPagado).toFixed(2));
             const estadoPago =
                 saldoPendiente <= 0 ? 'PAGADO' : totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
 
-            return { pr, precio, totalPagado, saldoPendiente, estadoPago };
+            return { pr, montoProducto, montoTransporte, precio, totalPagado, saldoPendiente, estadoPago };
         });
 
         // Filtro por condición de pago (combobox)
@@ -791,33 +816,38 @@ export class OrderPartRequestService {
             attachmentsByPayment.set(att.entity_id, list);
         }
 
-        const data = pageItems.map(({ pr, precio, totalPagado, saldoPendiente, estadoPago }) => ({
-            id: pr.id,
-            order_id: pr.order_id,
-            order_number: (pr as any).order?.order_number ?? null,
-            fecha_solicitud: pr.createdAt,
-            descripcion: pr.descripcion,
-            tipo: pr.tipo,
-            estado: pr.estado,
-            technician: mapUser(pr.technician),
-            responsableBusqueda: mapUser(pr.responsableBusqueda),
-            sourcing: {
-                id: pr.sourcing?.id,
-                proveedor: pr.sourcing?.proveedor,
-                precio: pr.sourcing?.precio,
-                cantidad: pr.sourcing?.cantidad,
-                link_compra: pr.sourcing?.link_compra,
-            },
-            pagos: (pr.pagos ?? [])
-                .sort((a, b) => a.fecha_pago.getTime() - b.fecha_pago.getTime())
-                .map((p) => ({
-                    ...p,
-                    attachments: attachmentsByPayment.get(p.id) ?? [],
-                })),
-            total_pagado: totalPagado,
-            saldo_pendiente: saldoPendiente,
-            estado_pago: estadoPago,
-        }));
+        const data = pageItems.map(
+            ({ pr, montoProducto, montoTransporte, totalPagado, saldoPendiente, estadoPago }) => ({
+                id: pr.id,
+                order_id: pr.order_id,
+                order_number: (pr as any).order?.order_number ?? null,
+                fecha_solicitud: pr.createdAt,
+                descripcion: pr.descripcion,
+                tipo: pr.tipo,
+                estado: pr.estado,
+                technician: mapUser(pr.technician),
+                responsableBusqueda: mapUser(pr.responsableBusqueda),
+                sourcing: {
+                    id: pr.sourcing?.id,
+                    proveedor: pr.sourcing?.proveedor,
+                    precio: pr.sourcing?.precio,
+                    precio_transporte: pr.sourcing?.precio_transporte ?? 0, // 👈 nuevo
+                    cantidad: pr.sourcing?.cantidad,
+                    link_compra: pr.sourcing?.link_compra,
+                },
+                pagos: (pr.pagos ?? [])
+                    .sort((a, b) => a.fecha_pago.getTime() - b.fecha_pago.getTime())
+                    .map((p) => ({
+                        ...p,
+                        attachments: attachmentsByPayment.get(p.id) ?? [],
+                    })),
+                monto_producto: montoProducto,     // 👈 nuevo, desglosado
+                monto_transporte: montoTransporte, // 👈 nuevo, desglosado
+                total_pagado: totalPagado,
+                saldo_pendiente: saldoPendiente,
+                estado_pago: estadoPago,
+            }),
+        );
 
         await enrichPartRequestAttachmentsWithSignedUrls(
             data.flatMap((d) => d.pagos), // firma comprobantes de todos los pagos de la página
@@ -883,7 +913,10 @@ export class OrderPartRequestService {
                 where: { part_request_id: partRequest.id },
             });
             const totalPagadoPrevio = existingPayments.reduce((sum, p) => sum + Number(p.monto), 0);
-            const precio = Number(partRequest.sourcing.precio);
+            const precioProducto = Number(partRequest.sourcing.precio) * Number(partRequest.sourcing.cantidad ?? 1);
+            const precioTransporte = Number(partRequest.sourcing.precio_transporte ?? 0);
+            const precio = precioProducto + precioTransporte; // total a pagar
+
             const saldoPendientePrevio = precio - totalPagadoPrevio;
 
             if (dto.monto > saldoPendientePrevio) {
@@ -1557,7 +1590,9 @@ export class OrderPartRequestService {
             throw new RpcException(new NotFoundException('No se encontró información de compra (sourcing) para esta solicitud'));
         }
 
-        const montoTotal = Number(partRequest.sourcing.precio ?? 0) * Number(partRequest.sourcing.cantidad ?? 1);
+        const montoProducto = Number(partRequest.sourcing.precio ?? 0) * Number(partRequest.sourcing.cantidad ?? 1);
+        const montoTransporte = Number(partRequest.sourcing.precio_transporte ?? 0);
+        const montoTotal = montoProducto + montoTransporte;
 
         return {
             id: partRequest.id,
@@ -1567,8 +1602,11 @@ export class OrderPartRequestService {
             modelo: partRequest.modelo,
             descripcion: partRequest.descripcion,
             proveedor: partRequest.sourcing.proveedor,
-            precioUnitario: partRequest.sourcing.precio,
-            cantidad: partRequest.sourcing.cantidad,
+            precioUnitario: Number(partRequest.sourcing.precio),   // 👈 forzar number
+            cantidad: Number(partRequest.sourcing.cantidad),        // 👈 forzar number
+            precioTransporte: montoTransporte,                      // ya es number
+            montoProducto,
+            montoTransporte,
             montoTotal,
             contactoProveedor: partRequest.sourcing.contacto_proveedor,
             linkCompra: partRequest.sourcing.link_compra,
@@ -1581,7 +1619,12 @@ export class OrderPartRequestService {
             },
         };
     }
-    async getPartRequestCounts(user: { companyId: string }) {
+
+    async getPartRequestCounts(user: { companyId: string; groups?: string[] }) {
+        const puedeVerEsperaPago = (user.groups || []).some(g =>
+            GRUPOS_CON_ACCESO_ESPERA_PAGO.includes(g)
+        );
+
         const [sinAceptar, esperaPago] = await Promise.all([
             this.partRequestRepo
                 .createQueryBuilder('pr')
@@ -1591,12 +1634,14 @@ export class OrderPartRequestService {
                 .andWhere('pr.responsable_busqueda_id IS NULL')
                 .getCount(),
 
-            this.partRequestRepo
-                .createQueryBuilder('pr')
-                .leftJoin('pr.order', 'order')
-                .where('order.company_id = :companyId', { companyId: user.companyId })
-                .andWhere('pr.estado = :estado', { estado: 'ESPERA_DE_PAGO' })
-                .getCount(),
+            puedeVerEsperaPago
+                ? this.partRequestRepo
+                    .createQueryBuilder('pr')
+                    .leftJoin('pr.order', 'order')
+                    .where('order.company_id = :companyId', { companyId: user.companyId })
+                    .andWhere('pr.estado = :estado', { estado: 'ESPERA_DE_PAGO' })
+                    .getCount()
+                : Promise.resolve(null), // 👈 no se calcula si no tiene permiso
         ]);
 
         return { sinAceptar, esperaPago };

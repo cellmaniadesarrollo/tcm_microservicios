@@ -13,4 +13,5 @@ export interface EncontradoNacionalDto {
     numeroCuenta?: string;
     tipoCuenta?: string;
     titularCuenta?: string;
+    precioTransporte?: number;
 }

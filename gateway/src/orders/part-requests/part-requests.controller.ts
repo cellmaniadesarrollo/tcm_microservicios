@@ -172,6 +172,7 @@ export class PartRequestsController {
             linkCompra: formData.linkCompra || undefined,
             notas: formData.notas || undefined,
             precioVenta: formData.precioVenta ? Number(formData.precioVenta) : undefined,
+            precioTransporte: formData.precioTransporte ? Number(formData.precioTransporte) : undefined, // 👈 nuevo
             banco: formData.banco,
             numeroCuenta: formData.numeroCuenta,
             tipoCuenta: formData.tipoCuenta,
@@ -371,6 +372,7 @@ export class PartRequestsController {
             userId: user.sub,
             companyId: user.companyId,
             branchId: user.branchId,
+            groups: user.groups
         });
     }
 }
