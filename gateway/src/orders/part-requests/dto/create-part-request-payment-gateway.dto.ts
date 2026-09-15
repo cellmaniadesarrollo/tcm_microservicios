@@ -23,6 +23,12 @@ export class CreatePartRequestPaymentGatewayDto {
     @IsNotEmpty({ message: 'El monto es obligatorio' })
     monto: number;
 
+    @Type(() => Number)
+    @IsInt({ message: 'La cantidad de la orden debe ser un número entero' })
+    @IsPositive({ message: 'La cantidad de la orden debe ser mayor a 0' })
+    cantidadOrden?: number;
+
+
     @IsOptional()
     @IsDateString({}, { message: 'La fecha de pago debe tener un formato ISO 8601 válido (ej. YYYY-MM-DD)' })
     fechaPago?: string;

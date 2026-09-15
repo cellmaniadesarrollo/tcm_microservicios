@@ -12,6 +12,7 @@ import {
 } from 'typeorm';
 import { Order } from '../../order-workflow/entities/order.entity';
 import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
+import { PartRequest } from '../../order-part-request/entities/part-request.entity';
 
 @Entity('order_pending_products')
 @Index(['company_id'])
@@ -69,6 +70,13 @@ export class OrderPendingProduct {
     @ManyToOne(() => UserEmployeeCache, { eager: true })
     @JoinColumn({ name: 'created_by_id' })
     createdBy!: UserEmployeeCache;
+
+    @Column({ type: 'int', nullable: true })
+    part_request_id?: number | null;
+
+    @ManyToOne(() => PartRequest, { nullable: true })
+    @JoinColumn({ name: 'part_request_id' })
+    partRequest?: PartRequest | null;
 
     @Column()
     created_by_id!: string;

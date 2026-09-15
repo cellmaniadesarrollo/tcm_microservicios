@@ -9,5 +9,6 @@ export interface CreatePartRequestDto {
     tipo: string;
     color?: string;
     calidad?: string;
+    precioAcordado?: number;
     posiblesLugares?: string[];
 }

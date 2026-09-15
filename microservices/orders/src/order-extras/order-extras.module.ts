@@ -8,6 +8,7 @@ import { OrderServiceType } from './entities/order-service-type.entity';
 import { Module } from '@nestjs/common';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { Attachment } from '../order-findings/entities/attachment.entity';
+import { PartRequest } from '../order-part-request/entities/part-request.entity';
 @Module({
   imports: [
     AwsS3Module,
@@ -15,7 +16,7 @@ import { Attachment } from '../order-findings/entities/attachment.entity';
       OrderPendingProduct,
       OrderExtraService,
       OrderServiceType,
-      Attachment
+      Attachment, PartRequest
     ]),
   ],
   controllers: [OrderExtrasController],
