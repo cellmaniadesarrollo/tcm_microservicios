@@ -180,7 +180,7 @@ export class PartRequestsController {
         });
     }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
-    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
     @Get('para-pago')
     async listParaPago(
         @Query('page') page: string,
@@ -202,7 +202,7 @@ export class PartRequestsController {
             branchId: user.branchId,
         });
     }
-    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
     @Get(':id/datos-pago')
     async datosPago(
         @Param('id', ParseIntPipe) id: number,
@@ -213,7 +213,7 @@ export class PartRequestsController {
         });
     }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
-    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
     @Post(':id/pagos')
     async createPartRequestPayment(
         @Param('id', ParseIntPipe) id: number,
