@@ -2,5 +2,5 @@
 
 export interface AprobarLlegadaDto {
     id: number;
-    cantidadOrden: number;
+
 }
