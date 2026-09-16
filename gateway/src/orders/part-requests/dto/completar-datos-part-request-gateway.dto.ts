@@ -25,4 +25,10 @@ export class CompletarDatosPartRequestGatewayDto {
     @IsNumber({}, { message: 'El precio de venta debe ser un número válido' })
     @Min(0.01, { message: 'El precio de venta debe ser mayor a 0' })
     precioVenta?: number;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsNumber({}, { message: 'El precio acordado debe ser un número válido' })
+    @Min(0.01, { message: 'El precio acordado debe ser mayor a 0' })
+    precioAcordado?: number;   // ← nuevo
 }

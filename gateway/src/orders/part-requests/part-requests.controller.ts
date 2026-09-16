@@ -1,6 +1,6 @@
 // gateway/src/orders/part-requests.controller.ts
 
-import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
 import { Auth } from '../../common/auth/decorators/auth.decorator';
@@ -43,7 +43,14 @@ export class PartRequestsController {
                 ? formData.posiblesLugares
                 : JSON.parse(formData.posiblesLugares);
         }
-
+        let precioAcordado: number | undefined;
+        if (formData.precioAcordado) {
+            const parsed = Number(formData.precioAcordado);
+            if (isNaN(parsed)) {
+                throw new BadRequestException('El precio acordado debe ser un número válido');
+            }
+            precioAcordado = parsed;
+        }
         const dto: CreatePartRequestGatewayDto = {
             orderId: Number(formData.orderId),
             descripcion: formData.descripcion,
@@ -53,6 +60,7 @@ export class PartRequestsController {
             tipo: formData.tipo,
             color: formData.color || undefined,
             calidad: formData.calidad || undefined,
+            precioAcordado: formData.precioAcordado ? Number(formData.precioAcordado) : undefined, // ← nuevo
             posiblesLugares,
         };
 
@@ -114,43 +122,6 @@ export class PartRequestsController {
         });
     }
 
-    // ─── LOGISTICA_REPUESTOS ────────────────────────────────────────
-    @Groups('LOGISTICA_REPUESTOS')
-    @Patch(':id/tomar')
-    async tomarPartRequest(
-        @Param('id', ParseIntPipe) id: number,
-        @User() user: any,
-    ) {
-        return this.partRequestsGatewayService.tomarPartRequest(id, {
-            userId: user.sub,
-            companyId: user.companyId,
-            branchId: user.branchId,
-        });
-    }
-
-    // ─── LOGISTICA_REPUESTOS ────────────────────────────────────────
-    // @Groups('LOGISTICA_REPUESTOS')
-    // @Get('mis-aceptadas')
-    // async listMyAcceptedPartRequests(
-    //     @Query('page') page: string,
-    //     @Query('limit') limit: string,
-    //     @Query('search') search: string,
-    //     @Query('estado') estado: string,
-    //     @User() user: any,
-    // ) {
-    //     const dto: ListPartRequestsGatewayDto = {
-    //         page: page ? Number(page) : undefined,
-    //         limit: limit ? Number(limit) : undefined,
-    //         search: search || undefined,
-    //         estado: estado || undefined,
-    //     };
-
-    //     return this.partRequestsGatewayService.listMyAcceptedPartRequests(dto, {
-    //         userId: user.sub,
-    //         companyId: user.companyId,
-    //         branchId: user.branchId,
-    //     });
-    // }
 
     // ─── LOGISTICA_REPUESTOS ────────────────────────────────────────
     @Groups('LOGISTICA_REPUESTOS')
@@ -209,7 +180,7 @@ export class PartRequestsController {
         });
     }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
-    @Groups('ORDER_AUDIT')
+    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
     @Get('para-pago')
     async listParaPago(
         @Query('page') page: string,
@@ -231,7 +202,7 @@ export class PartRequestsController {
             branchId: user.branchId,
         });
     }
-    @Groups('ORDER_AUDIT')
+    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
     @Get(':id/datos-pago')
     async datosPago(
         @Param('id', ParseIntPipe) id: number,
@@ -242,7 +213,7 @@ export class PartRequestsController {
         });
     }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
-    @Groups('ORDER_AUDIT')
+    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
     @Post(':id/pagos')
     async createPartRequestPayment(
         @Param('id', ParseIntPipe) id: number,
@@ -257,6 +228,7 @@ export class PartRequestsController {
             monto: Number(formData.monto),
             fechaPago: formData.fechaPago || undefined,
             notas: formData.notas || undefined,
+            cantidadOrden: formData.cantidadOrden ? Number(formData.cantidadOrden) : undefined,   // ← nuevo
         };
 
         return this.partRequestsGatewayService.createPartRequestPayment(
@@ -333,8 +305,7 @@ export class PartRequestsController {
         const processedFiles = await processAndValidateFiles(files);
 
         const dto: AprobarLlegadaGatewayDto = {
-            id,
-            cantidadOrden: Number(formData.cantidadOrden),
+            id
         };
 
         return this.partRequestsGatewayService.aprobarLlegada(

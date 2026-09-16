@@ -38,6 +38,10 @@ export class CreatePartRequestGatewayDto {
     calidad?: string;
 
     @IsOptional()
+    @IsString({ message: 'Precio acordado debe ser numerico' })
+    precioAcordado?: number;
+
+    @IsOptional()
     @IsArray({ message: 'Los posibles lugares deben ser una lista' })
     @IsString({ each: true, message: 'Cada elemento en posibles lugares debe ser una cadena de texto' })
     posiblesLugares?: string[];

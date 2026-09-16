@@ -5,4 +5,5 @@ export interface CreatePartRequestPaymentDto {
     monto: number;
     fechaPago?: string; // ISO date, opcional (default: ahora)
     notas?: string;
+    cantidadOrden: number;
 }

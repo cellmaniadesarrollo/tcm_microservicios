@@ -21,6 +21,7 @@ import { PartRequestSourcing } from './part-request-sourcing.entity';
 import { PartRequestShipping } from './part-request-shipping.entity';
 import { PartRequestArrival } from './part-request-arrival.entity';
 import { PartRequestStatus, PartRequestType } from './enums/part-request-status.enum';
+import { OrderPendingProduct } from '../../order-extras/entities/order-pending-product.entity';
 
 @Entity('part_requests')
 export class PartRequest {
@@ -67,6 +68,9 @@ export class PartRequest {
     @Column({ nullable: true })
     calidad?: string;
 
+    @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+    precio_acordado?: number;
+
     // ─── Precio de venta (editable en registrar-envío y aprobar-llegada) ──
     @Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
     precio_venta?: number;
@@ -106,6 +110,9 @@ export class PartRequest {
 
     @OneToMany(() => PartRequestStatusHistory, (hist) => hist.partRequest, { cascade: true })
     historial!: PartRequestStatusHistory[];
+
+    @OneToMany(() => OrderPendingProduct, (p) => p.partRequest)
+    pendingProducts?: OrderPendingProduct[];
 
     attachments?: Attachment[];
 
