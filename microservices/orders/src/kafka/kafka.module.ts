@@ -6,12 +6,13 @@ import { KafkaListenersOrchestrator } from './kafka-listeners.orchestrator';
 import { CompaniesModule } from '../companies/companies.module';
 import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
 import { CustomersEventsModule } from '../customers-events/customers-events.module';
-import { SpareAssignmentsModule } from '../spare-assignments/spare-assignments.module'; 
+import { SpareAssignmentsModule } from '../spare-assignments/spare-assignments.module';
 import { ReportingHubModule } from '../reporting-hub/reporting-hub.module';
+import { InvoicesModule } from '../invoices/invoices.module';
 @Global()
 @Module({
     imports: [CompaniesModule, UsersEmployeesEventsModule, UsersEmployeesEventsModule, CustomersEventsModule,
-        SpareAssignmentsModule, ReportingHubModule 
+        SpareAssignmentsModule, ReportingHubModule, InvoicesModule
     ],
     providers: [KafkaProducerService, KafkaConsumerService, KafkaListenersOrchestrator],
     exports: [KafkaProducerService, KafkaConsumerService],
