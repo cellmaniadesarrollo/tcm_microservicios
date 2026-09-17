@@ -139,21 +139,46 @@ export class OrderPartRequestController {
   }
   @MessagePattern({ cmd: 'create_part_request_payment' })
   async createPartRequestPayment(@Payload() data: any) {
+    const timestamp = new Date().toISOString();
+    console.log(`\n==================================================`);
+    console.log(`📥 [${timestamp}] [INICIO] CMD: create_part_request_payment`);
+    console.log(`📦 Payload recibido:`, JSON.stringify(data, null, 2));
+
     try {
-      if (!data.dto || !data.user) {
-        console.error('❌ Error: Payload incompleto', data);
+      if (!data?.dto || !data?.user) {
+        console.error(`❌ [${timestamp}] [ERROR VALIDACIÓN] Payload incompleto.`);
+        console.error(`👉 Recibido: dto=${!!data?.dto}, user=${!!data?.user}, files=${data?.files?.length ?? 0}`);
         throw new RpcException('Payload incompleto: falta dto o user');
       }
-      console.log(data)
 
-      return await this.partRequestsService.createPartRequestPayment(
+      console.log(`⚙️ [${timestamp}] Procesando pago en servicio...`);
+      console.log(`👤 Usuario ID:`, data.user.id ?? data.user);
+      console.log(`📄 Archivos adjuntos:`, data.files ? data.files.length : 0);
+
+      const result = await this.partRequestsService.createPartRequestPayment(
         data.dto,
         data.files ?? [],
         data.user,
       );
+
+      console.log(`✅ [${timestamp}] [ÉXITO] Pago de solicitud creado correctamente.`);
+      console.log(`📤 Resultado:`, JSON.stringify(result, null, 2));
+      console.log(`==================================================\n`);
+
+      return result;
     } catch (error: any) {
-      console.error('🔥 Error crítico en MS Órdenes (createPartRequestPayment):', error);
-      if (error.stack) console.error(error.stack);
+      console.error(`🔥 [${timestamp}] [ERROR CRÍTICO] MS Órdenes (createPartRequestPayment)`);
+      console.error(`💬 Mensaje:`, error.message);
+      console.error(`📌 Detalle/Response:`, error.response || 'Sin detalles extra');
+      if (error.stack) {
+        console.error(`📜 Stack Trace:\n`, error.stack);
+      }
+      console.log(`==================================================\n`);
+
+      // Mantiene el lanzamiento de la excepción RpcException tal como lo tenías
+      if (error instanceof RpcException) {
+        throw error;
+      }
 
       throw new RpcException({
         status: 'error',
