@@ -144,6 +144,7 @@ export class OrderPartRequestController {
         console.error('❌ Error: Payload incompleto', data);
         throw new RpcException('Payload incompleto: falta dto o user');
       }
+      console.log(data)
 
       return await this.partRequestsService.createPartRequestPayment(
         data.dto,

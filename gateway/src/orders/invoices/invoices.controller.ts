@@ -25,7 +25,6 @@ export class InvoicesController {
         @Query('to') to: string,
         @User() user: any,
     ) {
-        console.log('asdasd')
         const dto: ListInvoicesGatewayDto = {
             page: page ? Number(page) : undefined,
             limit: limit ? Number(limit) : undefined,
