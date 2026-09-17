@@ -32,13 +32,13 @@ export class OrderInvoice {
     branch_id: string;
 
     @Column({ type: 'uuid' })
-    closed_by_user_id: string; // quien cerró la orden (= user_id enviado al legacy)
+    closed_by_user_id: string;
 
     @Column({ type: 'int', nullable: true })
     payment_method_id: number;
 
     @Column({ type: 'varchar', length: 20, default: 'FACTURA' })
-    type_id: string; // fijo: órdenes solo emite facturas
+    type_id: string;
 
     // ── Snapshot mínimo de billing ──
     @Column({ type: 'varchar', length: 24 })
@@ -64,11 +64,39 @@ export class OrderInvoice {
     @Column({ type: 'enum', enum: InvoiceEmissionStatus, default: InvoiceEmissionStatus.PENDING })
     status: InvoiceEmissionStatus;
 
+    // ⬇️ AGREGA AQUÍ LAS COLUMNAS QUE TE FALTAN ⬇️
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    legacy_invoice_id: string | null;
+
     @Column({ type: 'varchar', length: 50, nullable: true })
-    legacy_invoice_number: string;
+    legacy_invoice_number: string | null;
+
+    @Column({ type: 'timestamp', nullable: true })
+    legacy_issue_date: Date | null;
+
+    @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+    legacy_subtotal: number | null;
+
+    @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+    legacy_total: number | null;
+
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    legacy_clave_acceso: string | null;
+
+    @Column({ type: 'varchar', length: 10, nullable: true })
+    legacy_code_establecimiento: string | null;
+
+    @Column({ type: 'varchar', length: 10, nullable: true })
+    legacy_code_punto_emision: string | null;
+
+    @Column({ type: 'varchar', length: 50, nullable: true })
+    legacy_payment_code: string | null;
+
+    @Column({ type: 'varchar', length: 50, nullable: true })
+    legacy_sri_response: string | null;
 
     @Column({ type: 'varchar', length: 500, nullable: true })
-    error_message: string;
+    error_message: string | null;
 
     @CreateDateColumn({ type: 'timestamp' })
     createdAt: Date;

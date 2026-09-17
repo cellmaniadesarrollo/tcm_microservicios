@@ -7,12 +7,13 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrderExtraService } from '../order-extras/entities/order-extra-service.entity';
 import { OrderFinding } from '../order-findings/entities/order-finding.entity';
 import { OrderInvoice } from './entities/order-invoice.entity';
+import { InvoicesEventsListener } from './invoices-events.listener';
 
 @Module({
 
   imports: [BroadcastModule, TypeOrmModule.forFeature([OrderExtraService, OrderFinding, OrderInvoice])],
   controllers: [InvoicesController],
-  providers: [InvoicesService],
-  exports: [InvoicesService]
+  providers: [InvoicesService, InvoicesEventsListener],
+  exports: [InvoicesService, InvoicesEventsListener]
 })
 export class InvoicesModule { }
