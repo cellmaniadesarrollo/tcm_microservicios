@@ -834,16 +834,30 @@ export class OrderPartRequestService {
             const pagoCompleto = Math.abs(saldoPendiente) < 0.01; // tolerancia por redondeo decimal
 
             if (pagoCompleto) {
+                // 🔍 DEBUG: Imprimir valores reales y sus tipos desde BD
+                console.log(`\n🔍 [DEBUG PAGO COMPLETO] PartRequest ID: ${partRequest.id}`);
+                console.log(`👉 raw precio_venta:`, partRequest.precio_venta, `(tipo: ${typeof partRequest.precio_venta})`);
+                console.log(`👉 raw sourcing.precio:`, partRequest.sourcing?.precio, `(tipo: ${typeof partRequest.sourcing?.precio})`);
+
+                const precioVentaNum = Number(partRequest.precio_venta ?? 0);
+                const costoCompraNum = Number(partRequest.sourcing?.precio ?? 0);
+
+                console.log(`🔢 parsed precioVentaNum:`, precioVentaNum);
+                console.log(`🔢 parsed costoCompraNum:`, costoCompraNum);
+                console.log(`❓ ¿Es menor?:`, precioVentaNum < costoCompraNum, `\n`);
+
                 // ─── Único checkpoint duro: si nunca se llenó el precio de venta, no se puede completar el pago ───
-                if (!partRequest.precio_venta || partRequest.precio_venta <= 0) {
+                if (!precioVentaNum || precioVentaNum <= 0) {
                     throw new RpcException(
                         new BadRequestException('Debes indicar el precio de venta antes de completar el pago'),
                     );
                 }
 
-                if (partRequest.precio_venta < partRequest.sourcing.precio) {
+                if (precioVentaNum < costoCompraNum) {
                     throw new RpcException(
-                        new BadRequestException('El precio de venta no puede ser menor al costo de compra'),
+                        new BadRequestException(
+                            `El precio de venta ($${precioVentaNum}) no puede ser menor al costo de compra ($${costoCompraNum})`
+                        ),
                     );
                 }
 
