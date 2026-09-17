@@ -4,8 +4,12 @@ import { InvoicesGatewayService } from './invoices-gateway.service';
 import { ListInvoicesGatewayDto } from './dto/list-invoices-gateway.dto';
 import { Groups } from '../../common/auth/decorators/groups.decorator';
 import { User } from '../../common/auth/decorators/user.decorator';
+import { Features } from '../../common/auth/decorators/features.decorator';
+import { Auth } from '../../common/auth/decorators/auth.decorator';
 
 @Controller('invoices')
+@Auth()
+@Features('orders')
 export class InvoicesController {
     constructor(private readonly invoicesGatewayService: InvoicesGatewayService) { }
 

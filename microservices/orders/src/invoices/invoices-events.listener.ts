@@ -25,12 +25,12 @@ export class InvoicesEventsListener {   // ← sin OnModuleInit, igual que Users
     private async handleInvoiceStatusUpdated(eventType: string, data: any) {
         // billing-topics.js define eventType 'INVOICE_ISSUED' | 'INVOICE_FAILED'
         // dentro del mismo topic ms.billing.invoice.status.updated
+
         if (eventType === 'INVOICE_ISSUED') {
             console.log(`🔵 [${eventType}] Factura confirmada para orden ${data?.order_id}`);
             await this.invoicesService.confirmEmission(data as InvoiceIssuedEventDto);
             return;
         }
-
         if (eventType === 'INVOICE_FAILED') {
             console.log(`🔴 [${eventType}] Emisión fallida para orden ${data?.order_id}`);
             const failed = data as InvoiceFailedEventDto;

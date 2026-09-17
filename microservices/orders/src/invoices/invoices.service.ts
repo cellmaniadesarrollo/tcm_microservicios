@@ -10,6 +10,7 @@ import { Order } from '../order-workflow/entities/order.entity';
 import { OrderInvoice, InvoiceEmissionStatus } from './entities/order-invoice.entity';
 import { ListInvoicesDto } from './dto/list-invoices.dto';
 import { InvoiceIssuedEventDto } from './dto/invoice-status-event.dto';
+import { extractDecimal } from './utils/decimal.util';
 
 export interface InvoiceDetailLine {
     movement_id?: string;
@@ -162,11 +163,11 @@ export class InvoicesService {
     }
 
     async confirmEmission(event: InvoiceIssuedEventDto): Promise<void> {
+        // Ajusta esto según el campo real que indique éxito/fallo
         const invoiceStatus =
-            event.status === 'success' ? InvoiceEmissionStatus.CONFIRMED : InvoiceEmissionStatus.ERROR;
-        // 'pending' (SRI aún no responde) lo dejamos como CONFIRMED igual,
-        // porque la factura SÍ se emitió del lado del legacy; solo falta el
-        // veredicto del SRI. Si prefieres un tercer estado, lo agregamos al enum.
+            event.sri_response === 'AUTORIZADO'
+                ? InvoiceEmissionStatus.CONFIRMED
+                : InvoiceEmissionStatus.ERROR;
 
         await this.orderInvoiceRepo.update(
             { order_id: event.order_id },
@@ -175,16 +176,15 @@ export class InvoicesService {
                 legacy_invoice_id: event.invoice_id,
                 legacy_invoice_number: event.invoice_number,
                 legacy_issue_date: event.issue_date ? new Date(event.issue_date) : undefined,
-                legacy_subtotal: event.subtotal,
-                legacy_total: event.total,
+                legacy_subtotal: extractDecimal(event.subtotal),
+                legacy_total: extractDecimal(event.total),
                 legacy_clave_acceso: event.clave_acceso,
                 legacy_code_establecimiento: event.code_establecimiento,
                 legacy_code_punto_emision: event.code_punto_emision,
                 legacy_payment_code: event.payment_code,
-                legacy_sri_response: event.sri_response
-                    ? JSON.parse(event.sri_response)
-                    : undefined,
-                error_message: invoiceStatus === InvoiceEmissionStatus.ERROR ? 'Rechazada por el SRI' : null,
+                legacy_sri_response: event.sri_response ?? null,
+                error_message:
+                    invoiceStatus === InvoiceEmissionStatus.ERROR ? 'Rechazada por el SRI' : null,
             },
         );
     }

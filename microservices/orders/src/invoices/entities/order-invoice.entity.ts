@@ -92,8 +92,8 @@ export class OrderInvoice {
     @Column({ type: 'varchar', length: 50, nullable: true })
     legacy_payment_code: string | null;
 
-    @Column({ type: 'jsonb', nullable: true })
-    legacy_sri_response: any;
+    @Column({ type: 'varchar', length: 50, nullable: true })
+    legacy_sri_response: string | null;
 
     @Column({ type: 'varchar', length: 500, nullable: true })
     error_message: string | null;
