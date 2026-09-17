@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { BroadcastService } from '../broadcast/broadcast.service';
@@ -6,7 +6,11 @@ import { OrderExtraService } from '../order-extras/entities/order-extra-service.
 import { OrderFinding } from '../order-findings/entities/order-finding.entity';
 import { SpareAssignment } from '../spare-assignments/entities/spare-assignment.entity';
 import { BillingSnapshotDto } from '../order-findings/dto/close-order.dto';
+import { Order } from '../order-workflow/entities/order.entity';
 import { OrderInvoice, InvoiceEmissionStatus } from './entities/order-invoice.entity';
+import { ListInvoicesDto } from './dto/list-invoices.dto';
+import { InvoiceIssuedEventDto } from './dto/invoice-status-event.dto';
+import { extractDecimal } from './utils/decimal.util';
 
 export interface InvoiceDetailLine {
     movement_id?: string;
@@ -15,7 +19,14 @@ export interface InvoiceDetailLine {
     discount: number;
     unit_price: number;
 }
-const INVOICE_TYPE_ID = 'FACTURA'; // órdenes solo emite este tipo
+
+interface AuthContext {
+    userId: string;
+    companyId: string;
+    branchId?: string;
+}
+
+const INVOICE_TYPE_ID = 'FACTURA';
 const GENERIC_LABOR_SERVICE_CODE = 'MANO_DE_OBRA_ORDENES';
 
 @Injectable()
@@ -44,15 +55,6 @@ export class InvoicesService {
             }
         }, 2000);
     }
-
-    /**
-     * Guarda el snapshot de la factura en `order_invoices` (status PENDING) y
-     * publica el evento INVOICE_EMISSION_REQUESTED. El registro local sirve como:
-     *   1. Fuente de reconciliación bulk para el legacy (pull por updatedAt).
-     *   2. Blindaje: si Kafka falla o el legacy no responde, queda evidencia
-     *      de que la orden debía facturarse, con status PENDING para reintentar.
-     */
-
 
     async requestInvoiceEmission(
         orderId: number,
@@ -97,9 +99,7 @@ export class InvoicesService {
 
         return saved;
     }
-    /**
-     * Arma el `details[]` que va en el payload de INVOICE_EMISSION_REQUESTED.
-     */
+
     async buildInvoiceDetails(
         manager: EntityManager,
         orderId: number,
@@ -151,10 +151,6 @@ export class InvoicesService {
         return details;
     }
 
-    /**
-     * Reconciliación bulk: usado por el consumer de RabbitMQ que el legacy
-     * llama con fromCache (mismo patrón que spare-assignments-handler).
-     */
     async getInvoicesUpdatedAfter(fromCache: Date | null): Promise<OrderInvoice[]> {
         if (!fromCache) {
             return this.orderInvoiceRepo.find({ order: { updatedAt: 'ASC' } as any });
@@ -166,14 +162,30 @@ export class InvoicesService {
             .getMany();
     }
 
-    /**
-     * Actualiza el status cuando el legacy confirma o rechaza la emisión.
-     * Se llama desde el handler que consume la respuesta del legacy.
-     */
-    async confirmEmission(orderId: number, legacyInvoiceNumber: string): Promise<void> {
+    async confirmEmission(event: InvoiceIssuedEventDto): Promise<void> {
+        // Ajusta esto según el campo real que indique éxito/fallo
+        const invoiceStatus =
+            event.sri_response === 'AUTORIZADO'
+                ? InvoiceEmissionStatus.CONFIRMED
+                : InvoiceEmissionStatus.ERROR;
+
         await this.orderInvoiceRepo.update(
-            { order_id: orderId },
-            { status: InvoiceEmissionStatus.CONFIRMED, legacy_invoice_number: legacyInvoiceNumber },
+            { order_id: event.order_id },
+            {
+                status: invoiceStatus,
+                legacy_invoice_id: event.invoice_id,
+                legacy_invoice_number: event.invoice_number,
+                legacy_issue_date: event.issue_date ? new Date(event.issue_date) : undefined,
+                legacy_subtotal: extractDecimal(event.subtotal),
+                legacy_total: extractDecimal(event.total),
+                legacy_clave_acceso: event.clave_acceso,
+                legacy_code_establecimiento: event.code_establecimiento,
+                legacy_code_punto_emision: event.code_punto_emision,
+                legacy_payment_code: event.payment_code,
+                legacy_sri_response: event.sri_response ?? null,
+                error_message:
+                    invoiceStatus === InvoiceEmissionStatus.ERROR ? 'Rechazada por el SRI' : null,
+            },
         );
     }
 
@@ -183,5 +195,99 @@ export class InvoicesService {
             { status: InvoiceEmissionStatus.ERROR, error_message: errorMessage },
         );
     }
-}
 
+    // ───────────────────────── Endpoints REST (vía gateway) ─────────────────────────
+
+    /**
+     * Listado paginado de facturas para el módulo de facturación.
+     */
+    async listInvoices(dto: ListInvoicesDto, user: any) {
+        const companyId = user.companyId;
+        const branchId = user.branchId;
+
+        const page = dto.page && dto.page > 0 ? dto.page : 1;
+        const limit = dto.limit && dto.limit > 0 ? dto.limit : 20;
+
+        const qb = this.orderInvoiceRepo
+            .createQueryBuilder('invoice')
+            .leftJoin(Order, 'order', 'order.id = invoice.order_id')
+            .addSelect(['order.order_number', 'order.public_id'])
+            .where('invoice.company_id = :companyId', { companyId });
+
+        if (branchId) {
+            qb.andWhere('invoice.branch_id = :branchId', { branchId });
+        }
+        if (dto.status) {
+            qb.andWhere('invoice.status = :status', { status: dto.status });
+        }
+        if (dto.search) {
+            qb.andWhere(
+                `(invoice.billing_name ILIKE :search
+                  OR invoice.billing_id_number ILIKE :search
+                  OR invoice.legacy_invoice_number ILIKE :search
+                  OR CAST(order.order_number AS TEXT) ILIKE :search)`,
+                { search: `%${dto.search}%` },
+            );
+        }
+        if (dto.from) {
+            qb.andWhere('invoice.createdAt >= :from', { from: dto.from });
+        }
+        if (dto.to) {
+            qb.andWhere('invoice.createdAt <= :to', { to: dto.to });
+        }
+
+        qb.orderBy('invoice.updatedAt', 'DESC')
+            .skip((page - 1) * limit)
+            .take(limit);
+
+        const [items, total] = await qb.getManyAndCount();
+
+        return {
+            items,
+            meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+        };
+    }
+
+    /**
+     * Reenvía una factura: republica INVOICE_EMISSION_REQUESTED al MISMO topic
+     * que usa la emisión original, reutilizando el snapshot ya guardado
+     * (no recalcula details[] — evita inconsistencias si SpareAssignment/
+     * OrderFinding cambiaron después del cierre).
+     */
+    async resendInvoice(invoiceId: number, user: any): Promise<OrderInvoice> {
+        const invoice = await this.orderInvoiceRepo.findOne({
+            where: { id: invoiceId, company_id: user.companyId },
+        });
+
+        if (!invoice) {
+            throw new NotFoundException(`Factura ${invoiceId} no encontrada`);
+        }
+
+        invoice.status = InvoiceEmissionStatus.PENDING;
+        invoice.error_message = '';
+        const saved = await this.orderInvoiceRepo.save(invoice);
+
+        try {
+            await this.broadcastService.publishInvoiceEmissionRequested({
+                order_id: saved.order_id,
+                details: saved.details,
+                emisor_id: saved.billing_id,
+                user_id: saved.closed_by_user_id,
+                emisor: {
+                    establishment: saved.branch_id,
+                },
+                payment_method: saved.payment_method_id,
+                type_id: saved.type_id,
+                is_resend: true, // permite al legacy distinguir retry de emisión original si necesita upsert
+            });
+        } catch (err: any) {
+            console.error(`❌ Error republicando INVOICE_EMISSION_REQUESTED (reenvío) orden ${saved.order_id}:`, err.message);
+            saved.status = InvoiceEmissionStatus.ERROR;
+            saved.error_message = `Error al republicar: ${err.message?.slice(0, 450)}`;
+            await this.orderInvoiceRepo.save(saved);
+            throw err;
+        }
+
+        return saved;
+    }
+}

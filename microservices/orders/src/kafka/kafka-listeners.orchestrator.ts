@@ -6,6 +6,7 @@ import { UsersEventsListener } from '../users-employees-events/users-events.list
 import { CustomersEventsListener } from '../customers-events/customers-events.listener';
 import { SpareAssignmentsEventsListener } from '../spare-assignments/spare-assignments-events.listener';
 import { ReportingHubEventsListener } from '../reporting-hub/reporting-hub-events.listener';
+import { InvoicesEventsListener } from '../invoices/invoices-events.listener';
 
 @Injectable()
 export class KafkaListenersOrchestrator implements OnModuleInit {
@@ -16,6 +17,7 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
         private readonly customersListener: CustomersEventsListener,
         private readonly spareAssignmentsListener: SpareAssignmentsEventsListener,
         private readonly reportingHubListener: ReportingHubEventsListener,
+        private readonly invoicesListener: InvoicesEventsListener,
     ) { }
 
     async onModuleInit() {
@@ -34,6 +36,9 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
 
         try { this.reportingHubListener.registerHandlers(); }
         catch (e) { console.error('❌ ReportingHub handler error:', e); }
+
+        try { this.invoicesListener.registerHandlers(); }
+        catch (e) { console.error('❌ Invoices handler error:', e); }
 
         await this.kafkaConsumer.start();
     }

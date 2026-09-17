@@ -8,6 +8,8 @@ import { PartRequestsGatewayService } from './part-requests/part-requests-gatewa
 import { OrderServiceClient } from '../common/microservices/order-service-client';
 import { DiscountsController } from './discounts/discounts.controller';
 import { DiscountsGatewayService } from './discounts/discounts-gateway.service';
+import { InvoicesController } from './invoices/invoices.controller';
+import { InvoicesGatewayService } from './invoices/invoices-gateway.service';
 
 @Module({
   imports: [
@@ -24,7 +26,7 @@ import { DiscountsGatewayService } from './discounts/discounts-gateway.service';
     ]),
     AuthModule
   ],
-  controllers: [OrdersController, PartRequestsController],
-  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient]
+  controllers: [OrdersController, PartRequestsController, InvoicesController],
+  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient, InvoicesGatewayService]
 })
 export class OrdersModule { }
