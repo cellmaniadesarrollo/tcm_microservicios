@@ -5,11 +5,15 @@ import {
     PrimaryGeneratedColumn,
     Column,
     OneToOne,
+    OneToMany,
+    ManyToOne,
     JoinColumn,
     CreateDateColumn,
     UpdateDateColumn,
 } from 'typeorm';
 import { PartRequest } from './part-request.entity';
+import { Provider } from './provider.entity'; // NUEVO
+import { SourcingProviderAccount } from './sourcing-provider-account.entity'; // NUEVO
 
 @Entity('part_request_sourcing')
 export class PartRequestSourcing {
@@ -23,8 +27,13 @@ export class PartRequestSourcing {
     @JoinColumn({ name: 'part_request_id' })
     partRequest!: PartRequest;
 
+    // CAMBIO: "proveedor" (texto libre) → provider_id (FK)
     @Column({ nullable: true })
-    proveedor?: string;
+    provider_id?: number;
+
+    @ManyToOne(() => Provider, { nullable: true })
+    @JoinColumn({ name: 'provider_id' })
+    provider?: Provider;
 
     @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
     precio?: number;
@@ -40,20 +49,15 @@ export class PartRequestSourcing {
 
     @Column({ type: 'text', nullable: true })
     notas?: string;
+
     @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, default: 0 })
     precio_transporte?: number;
-    // ─── Datos bancarios (para que quien pague sepa a dónde) ───────────
-    @Column({ nullable: true })
-    banco?: string;
 
-    @Column({ nullable: true })
-    numero_cuenta?: string;
+    // CAMBIO: se eliminan banco / numero_cuenta / tipo_cuenta / titular_cuenta
+    // (ahora viven en ProviderAccount, referenciadas vía el pivote de abajo)
 
-    @Column({ nullable: true })
-    tipo_cuenta?: string;
-
-    @Column({ nullable: true })
-    titular_cuenta?: string;
+    @OneToMany(() => SourcingProviderAccount, (s) => s.sourcing, { cascade: true }) // NUEVO
+    cuentasSeleccionadas!: SourcingProviderAccount[];
 
     @Column({ type: 'uuid' })
     registrado_por_id!: string;

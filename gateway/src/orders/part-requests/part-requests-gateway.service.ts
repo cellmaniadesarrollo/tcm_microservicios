@@ -72,4 +72,27 @@ export class PartRequestsGatewayService {
     async getPartRequestCounts(user: any) {
         return this.orderServiceClient.send('get_part_request_counts', { user });
     }
+    async searchProviders(query: string, user: any) {
+        return this.orderServiceClient.send('search_providers', { dto: { query }, user });
+    }
+
+    async listPendientesPorProveedor(providerId: number, user: any) {
+        return this.orderServiceClient.send('list_part_requests_pendientes_por_proveedor', { dto: { providerId }, user });
+    }
+
+    async getPaymentDetail(paymentId: number, user: any) {
+        return this.orderServiceClient.send('get_part_request_payment_detail', { dto: { paymentId }, user });
+    }
+    async listPagadasSinCierreOrden(dto: any, user: any) {
+        return this.orderServiceClient.send('list_part_requests_pagadas_sin_cierre', {
+            dto,
+            user,
+        });
+    }
+    async countPagadasSinCierreOrden(dto: any, user: any) {
+        return this.orderServiceClient.send('count_part_requests_pagadas_sin_cierre', {
+            dto,
+            user,
+        });
+    }
 } 

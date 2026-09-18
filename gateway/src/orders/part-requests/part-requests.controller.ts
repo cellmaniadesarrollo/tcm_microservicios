@@ -136,18 +136,20 @@ export class PartRequestsController {
 
         const dto: EncontradoNacionalGatewayDto = {
             id,
-            proveedor: formData.proveedor,
+            providerId: formData.providerId ? Number(formData.providerId) : undefined,
+            proveedor: formData.proveedor || undefined,
             precio: Number(formData.precio),
             cantidad: formData.cantidad ? Number(formData.cantidad) : undefined,
             contactoProveedor: formData.contactoProveedor || undefined,
             linkCompra: formData.linkCompra || undefined,
             notas: formData.notas || undefined,
             precioVenta: formData.precioVenta ? Number(formData.precioVenta) : undefined,
-            precioTransporte: formData.precioTransporte ? Number(formData.precioTransporte) : undefined, // 👈 nuevo
-            banco: formData.banco,
-            numeroCuenta: formData.numeroCuenta,
-            tipoCuenta: formData.tipoCuenta,
-            titularCuenta: formData.titularCuenta,
+            precioTransporte: formData.precioTransporte ? Number(formData.precioTransporte) : undefined,
+            providerAccountId: formData.providerAccountId ? Number(formData.providerAccountId) : undefined,
+            banco: formData.banco || undefined,
+            numeroCuenta: formData.numeroCuenta || undefined,
+            tipoCuenta: formData.tipoCuenta || undefined,
+            titularCuenta: formData.titularCuenta || undefined,
         };
 
         return this.partRequestsGatewayService.encontradoNacional(
@@ -180,13 +182,14 @@ export class PartRequestsController {
         });
     }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
-    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
     @Get('para-pago')
     async listParaPago(
         @Query('page') page: string,
         @Query('limit') limit: string,
         @Query('search') search: string,
         @Query('filtro') filtro: string,
+        @Query('providerId') providerId: string, // NUEVO
         @User() user: any,
     ) {
         const dto = {
@@ -194,6 +197,7 @@ export class PartRequestsController {
             limit: limit ? Number(limit) : undefined,
             search: search || undefined,
             filtro: (filtro as 'pendientes' | 'pagados' | 'todos') || undefined,
+            providerId: providerId ? Number(providerId) : undefined, // NUEVO
         };
 
         return this.partRequestsGatewayService.listParaPago(dto, {
@@ -202,7 +206,7 @@ export class PartRequestsController {
             branchId: user.branchId,
         });
     }
-    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
     @Get(':id/datos-pago')
     async datosPago(
         @Param('id', ParseIntPipe) id: number,
@@ -213,22 +217,33 @@ export class PartRequestsController {
         });
     }
     // ─── ORDER_AUDIT ────────────────────────────────────────────────
-    @Groups('ORDER_AUDIT,LOGISTICA_REPUESTOS')
-    @Post(':id/pagos')
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
+    @Post('providers/:providerId/pagos')
     async createPartRequestPayment(
-        @Param('id', ParseIntPipe) id: number,
+        @Param('providerId', ParseIntPipe) providerId: number,
         @Req() request: FastifyRequest,
         @User() user: any,
     ) {
         const { files, formData } = await parseMultipartRequest(request);
         const processedFiles = await processAndValidateFiles(files);
 
+        const asignaciones = formData.asignaciones
+            ? (Array.isArray(formData.asignaciones) ? formData.asignaciones : JSON.parse(formData.asignaciones))
+            : [];
+
         const dto: CreatePartRequestPaymentGatewayDto = {
-            id,
+            providerId,
             monto: Number(formData.monto),
             fechaPago: formData.fechaPago || undefined,
             notas: formData.notas || undefined,
-            cantidadOrden: formData.cantidadOrden ? Number(formData.cantidadOrden) : undefined,   // ← nuevo
+            asignaciones: asignaciones.map((a: any) => ({
+                partRequestId: Number(a.partRequestId),
+                montoAsignado: Number(a.montoAsignado),
+                cantidadOrden:
+                    a.cantidadOrden !== undefined && a.cantidadOrden !== null && a.cantidadOrden !== ''
+                        ? Number(a.cantidadOrden)
+                        : undefined,
+            })),
         };
 
         return this.partRequestsGatewayService.createPartRequestPayment(
@@ -344,6 +359,83 @@ export class PartRequestsController {
             companyId: user.companyId,
             branchId: user.branchId,
             groups: user.groups
+        });
+    }
+
+    // gateway/src/orders/part-requests.controller.ts  (agregar este endpoint)
+
+    @Get('providers/search')
+    async searchProviders(
+        @Query('q') q: string,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.searchProviders(q, {
+            userId: user.sub,
+            companyId: user.companyId,
+        });
+    }
+
+
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
+    @Get('providers/:providerId/pendientes')
+    async listPendientesPorProveedor(
+        @Param('providerId', ParseIntPipe) providerId: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.listPendientesPorProveedor(providerId, {
+            userId: user.sub,
+            companyId: user.companyId,
+        });
+    }
+
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
+    @Get('pagos/:paymentId')
+    async getPaymentDetail(
+        @Param('paymentId', ParseIntPipe) paymentId: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.getPaymentDetail(paymentId, {
+            userId: user.sub,
+            companyId: user.companyId,
+        });
+    }
+
+    @Get('pagadas-sin-cierre')
+    async listPagadasSinCierreOrden(
+        @Query('page') page?: string,
+        @Query('limit') limit?: string,
+        @Query('search') search?: string,
+        @Query('dias') dias?: string,
+        @User() user?: any,
+    ) {
+        const dto = {
+            page: page ? Number(page) : undefined,
+            limit: limit ? Number(limit) : undefined,
+            search: search?.trim() || undefined,
+            dias: dias ? Number(dias) : undefined,
+        };
+
+        return this.partRequestsGatewayService.listPagadasSinCierreOrden(dto, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
+    }
+    @Get('pagadas-sin-cierre/count')
+    async countPagadasSinCierreOrden(
+        @Query('dias') dias?: string,
+        @Query('search') search?: string,
+        @User() user?: any,
+    ) {
+        const dto = {
+            dias: dias ? Number(dias) : undefined,
+            search: search?.trim() || undefined,
+        };
+
+        return this.partRequestsGatewayService.countPagadasSinCierreOrden(dto, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
         });
     }
 }

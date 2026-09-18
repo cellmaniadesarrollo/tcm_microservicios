@@ -1,9 +1,14 @@
 // microservices/orders/src/order-part-requests/dto/create-part-request-payment.dto.ts
 
 export interface CreatePartRequestPaymentDto {
-    id: number; // part_request_id
+    providerId: number;
     monto: number;
-    fechaPago?: string; // ISO date, opcional (default: ahora)
+    fechaPago?: string;
     notas?: string;
-    cantidadOrden: number;
+
+    asignaciones: {
+        partRequestId: number;
+        montoAsignado: number;
+        cantidadOrden?: number; // 0 o ausente si esa solicitud no está vinculada a una orden
+    }[];
 }
