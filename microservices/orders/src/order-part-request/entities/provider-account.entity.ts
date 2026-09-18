@@ -22,7 +22,7 @@ export class ProviderAccount {
     provider!: Provider;
 
     @Column({ nullable: true })
-    alias?: string; // ej. "Cuenta principal", "Cuenta USD"
+    alias?: string;
 
     @Column()
     banco!: string;

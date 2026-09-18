@@ -22,6 +22,8 @@ import { PartRequestShipping } from './part-request-shipping.entity';
 import { PartRequestArrival } from './part-request-arrival.entity';
 import { PartRequestStatus, PartRequestType } from './enums/part-request-status.enum';
 import { OrderPendingProduct } from '../../order-extras/entities/order-pending-product.entity';
+import { PartRequestPaymentAllocation } from './part-request-payment-allocation.entity';
+import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 
 @Entity('part_requests')
 export class PartRequest {
@@ -92,6 +94,15 @@ export class PartRequest {
     @Column({ type: 'uuid', nullable: true })
     responsable_recepcion_id?: string;
 
+
+    @Index()
+    @Column({ nullable: true }) // Permite NULL a nivel de base de datos / TypeORM
+    company_id?: string | null;
+
+    @ManyToOne(() => CompanyReplica, { nullable: true, onDelete: 'SET NULL' })
+    @JoinColumn({ name: 'company_id' })
+    company?: CompanyReplica | null;
+
     @ManyToOne(() => UserEmployeeCache, { eager: true, nullable: true })
     @JoinColumn({ name: 'responsable_recepcion_id' })
     responsableRecepcion?: UserEmployeeCache;
@@ -105,14 +116,16 @@ export class PartRequest {
     @OneToOne(() => PartRequestArrival, (a) => a.partRequest)
     arrival?: PartRequestArrival;
 
-    @OneToMany(() => PartRequestPayment, (pago) => pago.partRequest, { cascade: true })
-    pagos!: PartRequestPayment[];
+    @OneToMany(() => PartRequestPaymentAllocation, (a) => a.partRequest)
+    pagoAllocations?: PartRequestPaymentAllocation[];
 
     @OneToMany(() => PartRequestStatusHistory, (hist) => hist.partRequest, { cascade: true })
     historial!: PartRequestStatusHistory[];
 
     @OneToMany(() => OrderPendingProduct, (p) => p.partRequest)
     pendingProducts?: OrderPendingProduct[];
+
+
 
     attachments?: Attachment[];
 
