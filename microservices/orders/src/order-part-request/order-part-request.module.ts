@@ -11,6 +11,14 @@ import { Order } from '../order-workflow/entities/order.entity';
 import { PartRequestSourcing } from './entities/part-request-sourcing.entity';
 import { PartRequestShipping } from './entities/part-request-shipping.entity';
 import { PartRequestArrival } from './entities/part-request-arrival.entity';
+import { Provider } from './entities/provider.entity';
+import { ProviderAccount } from './entities/provider-account.entity';
+import { SourcingProviderAccount } from './entities/sourcing-provider-account.entity';
+import { PartRequestPaymentAllocation } from './entities/part-request-payment-allocation.entity';
+import { PartRequestService } from './part-request.service';
+import { PartRequestSourcingService } from './part-request-sourcing.service';
+import { PartRequestPaymentService } from './part-request-payment.service';
+import { PartRequestArrivalService } from './part-request-arrival.service';
 
 @Module({
   imports: [
@@ -22,11 +30,18 @@ import { PartRequestArrival } from './entities/part-request-arrival.entity';
       Order,
       PartRequestSourcing,
       PartRequestShipping,
-      PartRequestArrival
+      PartRequestArrival,
+      Provider,
+      ProviderAccount,
+      SourcingProviderAccount,
+      PartRequestPaymentAllocation
     ]),
     AwsS3Module
   ],
   controllers: [OrderPartRequestController],
-  providers: [OrderPartRequestService],
+  providers: [PartRequestService,
+    PartRequestSourcingService,
+    PartRequestPaymentService,
+    PartRequestArrivalService,],
 })
 export class OrderPartRequestModule { }

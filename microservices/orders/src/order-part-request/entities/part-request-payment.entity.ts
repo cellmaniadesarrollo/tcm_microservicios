@@ -5,9 +5,12 @@ import {
     PrimaryGeneratedColumn,
     Column,
     ManyToOne,
+    OneToMany,
     JoinColumn,
+    CreateDateColumn,
 } from 'typeorm';
-import { PartRequest } from './part-request.entity';
+import { Provider } from './provider.entity';
+import { PartRequestPaymentAllocation } from './part-request-payment-allocation.entity';
 import { Attachment } from '../../order-findings/entities/attachment.entity';
 
 @Entity('part_request_payments')
@@ -15,12 +18,14 @@ export class PartRequestPayment {
     @PrimaryGeneratedColumn()
     id!: number;
 
-    @Column()
-    part_request_id!: number;
+    // FIX: Se agrega nullable: true a la columna y el modificador '?' de TS
+    @Column({ nullable: true })
+    provider_id?: number;
 
-    @ManyToOne(() => PartRequest, (pr) => pr.pagos, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'part_request_id' })
-    partRequest!: PartRequest;
+    // FIX: Se especifica { nullable: true } en la relación
+    @ManyToOne(() => Provider, { eager: true, nullable: true })
+    @JoinColumn({ name: 'provider_id' })
+    provider?: Provider;
 
     @Column({ type: 'decimal', precision: 12, scale: 2 })
     monto!: number;
@@ -40,4 +45,10 @@ export class PartRequestPayment {
 
     @Column({ nullable: true })
     notas?: string;
+
+    @OneToMany(() => PartRequestPaymentAllocation, (a) => a.payment, { cascade: true })
+    allocations!: PartRequestPaymentAllocation[];
+
+    @CreateDateColumn()
+    createdAt!: Date;
 }
