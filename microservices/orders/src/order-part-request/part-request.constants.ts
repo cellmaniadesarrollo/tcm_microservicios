@@ -1,0 +1,5 @@
+export const GRUPOS_CON_ACCESO_ESPERA_PAGO = [
+    'ADMINS',
+    'ORDER_AUDIT',
+    'COMPANY_ADMIN',
+];
