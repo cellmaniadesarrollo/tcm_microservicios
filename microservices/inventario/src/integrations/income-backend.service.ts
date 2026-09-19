@@ -334,6 +334,13 @@ export class IncomeBackendService {
       this.logger.log(`📦 batchSku: ${batchSku}`);
       this.logger.log(`📦 batchUpc: ${batchUpc}`);
       
+      // ✅ HELPER: normaliza BUENA→CLEAN, MALA→LOSS, resto→N/A
+      const normalizePartStatus = (status: any): 'CLEAN' | 'LOSS' | 'N/A' => {
+        if (status === 'BUENA' || status === 'CLEAN') return 'CLEAN';
+        if (status === 'MALA'  || status === 'LOSS')  return 'LOSS';
+        return 'N/A';
+      };
+      
       const partDefinitions = [
         { key: 'screen', label: 'Pantalla' },
         { key: 'backcover', label: 'Backcover / Tapa Trasera' },
@@ -345,47 +352,57 @@ export class IncomeBackendService {
       ];
       
       for (const partDef of partDefinitions) {
-        const partData = partsStatus[partDef.key];
+        const rawPartData = partsStatus[partDef.key];
         
-        if (!partData) {
+        // 1️⃣ Si no hay dato, saltar
+        if (!rawPartData) {
           this.logger.log(`ℹ️ Parte ${partDef.key} no tiene datos, saltando...`);
+          continue;
+        }
+        
+        // 2️⃣ Normalizar
+        const normalizedStatus = normalizePartStatus(rawPartData);
+        
+        // 3️⃣ ✅ Si es N/A, NO guardar (no aporta al desguace)
+        if (normalizedStatus === 'N/A') {
+          this.logger.log(`ℹ️ Parte ${partDef.key} es N/A, no se guarda como verificación`);
           continue;
         }
         
         let value: number | null = null;
         let observation = '';
         
-        if (partDef.key === 'battery' && partsStatus.batteryPercentage !== undefined && partsStatus.batteryPercentage !== null) {
+        if (partDef.key === 'battery' 
+            && partsStatus.batteryPercentage !== undefined 
+            && partsStatus.batteryPercentage !== null) {
           value = partsStatus.batteryPercentage;
           observation = `Porcentaje: ${value}%`;
-        } else if (partDef.key === 'storage' && partsStatus.storageCapacity !== undefined && partsStatus.storageCapacity !== null) {
+        } else if (partDef.key === 'storage' 
+                  && partsStatus.storageCapacity !== undefined 
+                  && partsStatus.storageCapacity !== null) {
           value = partsStatus.storageCapacity;
           observation = `Capacidad: ${value}GB`;
         }
         
-        // ✅ CONSTRUIR METADATA CON TODOS LOS DATOS
+        // ✅ Metadata con todos los datos
         const metadata = {
-          // Datos del dispositivo
           deviceName: data.deviceName || 'Dispositivo',
           deviceSerial: data.deviceSerial || '',
           deviceColor: data.deviceColor || '',
-          // Datos de la orden
           orderId: data.orderId || 0,
           orderNumber: data.orderNumber || 0,
-          // SKU y UPC del batch
           batchSku: batchSku,
           batchUpc: batchUpc,
-          // Información de la parte
           partKey: partDef.key,
           partLabel: partDef.label,
-          // Fecha de verificación
+          // ✅ Guardar el original por trazabilidad
+          statusOriginal: rawPartData,
+          statusNormalized: normalizedStatus,
           verifiedAt: new Date().toISOString(),
-          // Metadata adicional del frontend (si existe)
           ...(data.metadata || {}),
         };
         
         const verification = new this.deviceVerificationModel({
-          // ✅ SOLO CAMPOS DE RELACIÓN Y PARTES
           batchId,
           incomeId,
           inventoryFlowId,
@@ -394,13 +411,23 @@ export class IncomeBackendService {
           customerId: data.customerId || '',
           partName: partDef.key,
           partLabel: partDef.label,
-          status: partData,
+          status: normalizedStatus,   // ✅ CLEAN o LOSS, nunca N/A
           value,
           observation,
-          verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
-          purchasePrice: data.purchasePrice || 0,
-          salePrice: data.salePrice || 0,
-          // ✅ TODO LO DEMÁS DENTRO DE METADATA
+          verificationEnabled: data.verificationEnabled !== undefined 
+            ? data.verificationEnabled 
+            : true,
+          // ✅ Guardar null en lugar de 0 si no hay precio
+          purchasePrice: data.purchasePrice !== undefined 
+            && data.purchasePrice !== null 
+            && !isNaN(Number(data.purchasePrice))
+            ? Number(data.purchasePrice) 
+            : null,
+          salePrice: data.salePrice !== undefined 
+            && data.salePrice !== null 
+            && !isNaN(Number(data.salePrice))
+            ? Number(data.salePrice) 
+            : null,
           metadata: metadata,
           verifiedBy: data.verifiedBy || '',
           verifiedByName: data.verifiedByName || '',
@@ -409,7 +436,9 @@ export class IncomeBackendService {
 
         const saved = await verification.save();
         savedIds.push(saved._id);
-        this.logger.log(`✅ Verificación guardada para parte ${partDef.key}: ${saved._id} - ${partData}`);
+        this.logger.log(
+          `✅ Verificación guardada para parte ${partDef.key}: ${saved._id} - ${normalizedStatus}`
+        );
       }
       
       this.logger.log(`✅ Total de verificaciones guardadas: ${savedIds.length}`);
