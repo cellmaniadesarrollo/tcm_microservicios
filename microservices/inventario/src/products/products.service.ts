@@ -145,7 +145,7 @@ export class ProductsService {
     }
 
     const code = createProductDto.code || (await this.generateProductCode());
-    const quality = createProductDto.quality || 'B';
+    const quality = createProductDto.quality;
 
     const product = new this.productModel({
       ...createProductDto,
@@ -528,11 +528,13 @@ export class ProductsService {
       this.logger.log(`🔍 partsStatus recibido en createFromOrder: ${JSON.stringify(data.partsStatus || 'NO ENVIADO')}`);
       this.logger.log(`🔍 verificationEnabled recibido en createFromOrder: ${data.verificationEnabled !== undefined ? data.verificationEnabled : 'NO ENVIADO'}`);
       this.logger.log(`🔍 deviceSerial recibido en createFromOrder: ${data.deviceSerial || 'NO ENVIADO'}`);
+          this.logger.log(`🔍 data.public_id: ${data.public_id} | data.orderPublicId: ${data.orderPublicId}`);
+    this.logger.log(`🔍 KEYS del payload recibido: ${Object.keys(data).join(', ')}`);
       
       const results = [];
       
       for (const component of data.components) {
-        const quality = component.quality || 'B';
+        const quality = component.quality;
         const isFromInventoryFlow = Boolean(data.inventoryFlowId);
         const isSerializedDevice = (component.type || data.type) === 'COMPLETO';
         
@@ -629,7 +631,7 @@ export class ProductsService {
             upc: upcToUse,
             // ✅ PASAR IMEIS EXPLÍCITAMENTE
             imeis: data.imeis || [],
-            orderPublicId: data.public_id || null,
+            orderPublicId: data.orderPublicId || data.public_id || null,
             inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
             inventory_name: data.inventory_name || 'INVENTORYFLOW',
             tipo_documento: data.tipo_documento || '65ae74b9f978d87a5c41fd2b',
@@ -638,6 +640,7 @@ export class ProductsService {
             createdById: data.createdById,
             // ✅ PASAR VERIFICACIÓN DE PARTES - (NO DUPLICAR deviceSerial, deviceColor)
             partsStatus: data.partsStatus || null,
+            partsDestino: data.partsDestino || null,
             verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
             type: data.type,
             isComplete: data.type === 'COMPLETO',
@@ -713,9 +716,10 @@ export class ProductsService {
             customerId: data.customerId,
             type: data.type,
             imeis: data.imeis || [],
-            orderPublicId: data.public_id || null,
+            orderPublicId: data.orderPublicId || data.public_id || null,
             // ✅ PASAR VERIFICACIÓN DE PARTES
             partsStatus: data.partsStatus || null,
+            partsDestino: data.partsDestino || null,
             verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
             isComplete: data.type === 'COMPLETO',
             verifiedBy: data.verifiedBy || data.createdById,
@@ -955,7 +959,7 @@ export class ProductsService {
         model: payload.model || inventoryFlow.name_model || 'Dispositivo',
         type: payload.type || inventoryFlow.type || 'PARTE',
         color: payload.color || inventoryFlow.name_color || 'No especificado',
-        quality: payload.quality || inventoryFlow.name_quality || 'B',
+        quality: payload.quality || inventoryFlow.name_quality,
         condition: payload.condition || inventoryFlow.condition || 'NUEVO',
         description: payload.observations || `Ingreso desde inventory flow ${inventoryFlow.sku}`,
         quantity: payload.quantity || 1,
