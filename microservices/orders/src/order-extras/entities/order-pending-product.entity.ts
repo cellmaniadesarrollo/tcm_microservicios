@@ -19,7 +19,19 @@ import { PartRequest } from '../../order-part-request/entities/part-request.enti
 export class OrderPendingProduct {
     @PrimaryGeneratedColumn()
     id!: number;
+    @Column({
+        type: 'enum',
+        enum: ['PENDIENTE', 'APROBADO', 'RECHAZADO', 'LITIGIO'], // CAMBIO: se agrega LITIGIO
+        default: 'PENDIENTE',
+    })
+    resultado_validacion!: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'LITIGIO';
 
+    @Column({
+        type: 'enum',
+        enum: ['PRODUCTO_INCORRECTO', 'CALIDAD_DEFICIENTE', 'DAÑADO_EN_TRANSITO', 'CANTIDAD_INCOMPLETA', 'OTRO'],
+        nullable: true,
+    }) // NUEVO
+    motivo_categoria?: 'PRODUCTO_INCORRECTO' | 'CALIDAD_DEFICIENTE' | 'DAÑADO_EN_TRANSITO' | 'CANTIDAD_INCOMPLETA' | 'OTRO';
     @ManyToOne(() => Order, (order) => order.pendingProducts, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'order_id' })
     order!: Order;

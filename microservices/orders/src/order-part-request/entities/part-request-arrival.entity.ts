@@ -31,7 +31,6 @@ export class PartRequestArrival {
 
     // ─── Texto plano, sin FK a catálogo ──────────────────────────
 
-
     @Column({ type: 'text', nullable: true })
     observations?: string;
 
@@ -41,10 +40,10 @@ export class PartRequestArrival {
     // ─── Resultado de la validación ──────────────────────────────
     @Column({
         type: 'enum',
-        enum: ['PENDIENTE', 'APROBADO', 'RECHAZADO'],
+        enum: ['PENDIENTE', 'APROBADO', 'RECHAZADO', 'LITIGIO'], // CAMBIO: se agregó LITIGIO
         default: 'PENDIENTE',
     })
-    resultado_validacion!: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
+    resultado_validacion!: 'PENDIENTE' | 'APROBADO' | 'RECHAZADO' | 'LITIGIO'; // CAMBIO
 
     @Column({ type: 'timestamp', nullable: true })
     fecha_validacion?: Date;
@@ -54,6 +53,14 @@ export class PartRequestArrival {
 
     @Column({ type: 'text', nullable: true })
     motivo_rechazo?: string;
+
+    // NUEVO: categoría estructurada del motivo (rechazo o litigio), para clasificar proveedores a futuro
+    @Column({
+        type: 'enum',
+        enum: ['PRODUCTO_INCORRECTO', 'CALIDAD_DEFICIENTE', 'DAÑADO_EN_TRANSITO', 'CANTIDAD_INCOMPLETA', 'OTRO'],
+        nullable: true,
+    })
+    motivo_categoria?: 'PRODUCTO_INCORRECTO' | 'CALIDAD_DEFICIENTE' | 'DAÑADO_EN_TRANSITO' | 'CANTIDAD_INCOMPLETA' | 'OTRO';
 
     @CreateDateColumn()
     createdAt!: Date;

@@ -24,6 +24,7 @@ import { AprobarLlegadaGatewayDto } from './dto/aprobar-llegada.dto';
 import { RegistrarLlegadaGatewayDto } from './dto/registrar-llegada.dto';
 import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto';
 import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
+import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
 
 @Controller('part-requests')
 @Auth()
@@ -342,6 +343,7 @@ export class PartRequestsController {
 
         const dto: NoAprobarLlegadaGatewayDto = {
             id,
+            motivoCategoria: formData.motivoCategoria,
             motivoRechazo: formData.motivoRechazo,
         };
 
@@ -437,5 +439,53 @@ export class PartRequestsController {
             companyId: user.companyId,
             branchId: user.branchId,
         });
+    }
+
+
+
+    @Patch(':id/litigio-llegada')
+    async litigioLlegada(
+        @Param('id', ParseIntPipe) id: number,
+        @Req() request: FastifyRequest,
+        @User() user: any,
+    ) {
+        const { files, formData } = await parseMultipartRequest(request);
+        const processedFiles = await processAndValidateFiles(files);
+
+        const dto: LitigioLlegadaGatewayDto = {
+            id,
+            motivoCategoria: formData.motivoCategoria,
+            motivo: formData.motivo,
+        };
+
+        return this.partRequestsGatewayService.litigioLlegada(
+            dto,
+            serializeFilesForMicroservice(processedFiles),
+            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        );
+    }
+
+    // gateway controller
+
+    @Groups('LOGISTICA_REPUESTOS', 'ORDER_AUDIT')
+    @Get('litigios')
+    async listLitigios(
+        @Query('page') page: string,
+        @Query('limit') limit: string,
+        @Query('search') search: string,
+        @Query('providerId') providerId: string,
+        @Query('motivoCategoria') motivoCategoria: string,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.listLitigios(
+            {
+                page: page ? Number(page) : undefined,
+                limit: limit ? Number(limit) : undefined,
+                search: search || undefined,
+                providerId: providerId ? Number(providerId) : undefined,
+                motivoCategoria: motivoCategoria || undefined,
+            },
+            { userId: user.sub, companyId: user.companyId },
+        );
     }
 }

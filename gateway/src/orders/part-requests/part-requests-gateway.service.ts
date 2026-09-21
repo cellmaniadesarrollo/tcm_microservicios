@@ -11,6 +11,7 @@ import { RegistrarLlegadaGatewayDto } from './dto/registrar-llegada.dto';
 import { AprobarLlegadaGatewayDto } from './dto/aprobar-llegada.dto';
 import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto';
 import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
+import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
 
 @Injectable()
 export class PartRequestsGatewayService {
@@ -94,5 +95,14 @@ export class PartRequestsGatewayService {
             dto,
             user,
         });
+    }
+    async litigioLlegada(dto: LitigioLlegadaGatewayDto, files: any[], user: any) {
+        return this.orderServiceClient.send('litigio_llegada_part_request', { dto, files, user });
+    }
+
+    // gateway service
+
+    async listLitigios(dto: { page?: number; limit?: number; search?: string; providerId?: number; motivoCategoria?: string }, user: any) {
+        return this.orderServiceClient.send('list_part_requests_litigios', { dto, user });
     }
 } 
