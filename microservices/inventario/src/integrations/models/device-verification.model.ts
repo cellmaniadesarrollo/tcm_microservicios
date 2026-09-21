@@ -34,8 +34,8 @@ export class DeviceVerification extends Document {
   @Prop({ type: String })
   partLabel: string;
 
-  @Prop({ type: String, enum: ['BUENA', 'MALA', 'CLEAN', 'LOSS', 'N/A'], required: true })
-  status: 'BUENA' | 'MALA' | 'CLEAN' | 'LOSS' | 'N/A';
+  @Prop({ type: String, enum: ['BUENA', 'MALA', 'N/A'], required: true })
+  status: 'BUENA' | 'MALA' | 'N/A';
 
   @Prop({ type: Number })
   value: number | null;

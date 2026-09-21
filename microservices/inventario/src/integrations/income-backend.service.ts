@@ -323,24 +323,17 @@ export class IncomeBackendService {
   ): Promise<Types.ObjectId[]> {
     try {
       this.logger.log(`📦 Guardando verificaciones de partes para batch: ${batchId}`);
-      
+
       const savedIds: Types.ObjectId[] = [];
       const partsStatus = data.partsStatus || {};
-      
+
       const batch = await this.batchModel.findById(batchId).lean();
       const batchSku = batch?.sku || data.batchSku || '';
       const batchUpc = data.batchUpc || '';
-      
+
       this.logger.log(`📦 batchSku: ${batchSku}`);
       this.logger.log(`📦 batchUpc: ${batchUpc}`);
-      
-      // ✅ HELPER: normaliza BUENA→CLEAN, MALA→LOSS, resto→N/A
-      const normalizePartStatus = (status: any): 'CLEAN' | 'LOSS' | 'N/A' => {
-        if (status === 'BUENA' || status === 'CLEAN') return 'CLEAN';
-        if (status === 'MALA'  || status === 'LOSS')  return 'LOSS';
-        return 'N/A';
-      };
-      
+
       const partDefinitions = [
         { key: 'screen', label: 'Pantalla' },
         { key: 'backcover', label: 'Backcover / Tapa Trasera' },
@@ -350,58 +343,60 @@ export class IncomeBackendService {
         { key: 'frontCamera', label: 'Cámara Frontal' },
         { key: 'chargingFlex', label: 'Flex de Carga' },
       ];
-      
+
       for (const partDef of partDefinitions) {
         const rawPartData = partsStatus[partDef.key];
-        
+
         // 1️⃣ Si no hay dato, saltar
         if (!rawPartData) {
           this.logger.log(`ℹ️ Parte ${partDef.key} no tiene datos, saltando...`);
           continue;
         }
-        
-        // 2️⃣ Normalizar
-        const normalizedStatus = normalizePartStatus(rawPartData);
-        
-        // 3️⃣ ✅ Si es N/A, NO guardar (no aporta al desguace)
-        if (normalizedStatus === 'N/A') {
+
+        // 2️⃣ Estado real de la parte: BUENA | MALA | N/A
+        const partStatus: 'BUENA' | 'MALA' | 'N/A' =
+          rawPartData === 'BUENA' || rawPartData === 'MALA' ? rawPartData : 'N/A';
+
+        // 3️⃣ Si es N/A, NO guardar
+        if (partStatus === 'N/A') {
           this.logger.log(`ℹ️ Parte ${partDef.key} es N/A, no se guarda como verificación`);
           continue;
         }
-        
+
         let value: number | null = null;
         let observation = '';
-        
-        if (partDef.key === 'battery' 
-            && partsStatus.batteryPercentage !== undefined 
-            && partsStatus.batteryPercentage !== null) {
+
+        if (
+          partDef.key === 'battery' &&
+          partsStatus.batteryPercentage !== undefined &&
+          partsStatus.batteryPercentage !== null
+        ) {
           value = partsStatus.batteryPercentage;
           observation = `Porcentaje: ${value}%`;
-        } else if (partDef.key === 'storage' 
-                  && partsStatus.storageCapacity !== undefined 
-                  && partsStatus.storageCapacity !== null) {
+        } else if (
+          partDef.key === 'storage' &&
+          partsStatus.storageCapacity !== undefined &&
+          partsStatus.storageCapacity !== null
+        ) {
           value = partsStatus.storageCapacity;
           observation = `Capacidad: ${value}GB`;
         }
-        
-        // ✅ Metadata con todos los datos
+
+        // ✅ Metadata con datos adicionales
         const metadata = {
           deviceName: data.deviceName || 'Dispositivo',
           deviceSerial: data.deviceSerial || '',
           deviceColor: data.deviceColor || '',
           orderId: data.orderId || 0,
           orderNumber: data.orderNumber || 0,
-          batchSku: batchSku,
-          batchUpc: batchUpc,
+          batchSku,
+          batchUpc,
           partKey: partDef.key,
           partLabel: partDef.label,
-          // ✅ Guardar el original por trazabilidad
-          statusOriginal: rawPartData,
-          statusNormalized: normalizedStatus,
           verifiedAt: new Date().toISOString(),
           ...(data.metadata || {}),
         };
-        
+
         const verification = new this.deviceVerificationModel({
           batchId,
           incomeId,
@@ -411,39 +406,38 @@ export class IncomeBackendService {
           customerId: data.customerId || '',
           partName: partDef.key,
           partLabel: partDef.label,
-          status: normalizedStatus,   // ✅ CLEAN o LOSS, nunca N/A
+          status: partStatus, // ✅ BUENA | MALA
           value,
           observation,
-          verificationEnabled: data.verificationEnabled !== undefined 
-            ? data.verificationEnabled 
-            : true,
-          // ✅ Guardar null en lugar de 0 si no hay precio
-          purchasePrice: data.purchasePrice !== undefined 
-            && data.purchasePrice !== null 
-            && !isNaN(Number(data.purchasePrice))
-            ? Number(data.purchasePrice) 
-            : null,
-          salePrice: data.salePrice !== undefined 
-            && data.salePrice !== null 
-            && !isNaN(Number(data.salePrice))
-            ? Number(data.salePrice) 
-            : null,
-          metadata: metadata,
+          verificationEnabled:
+            data.verificationEnabled !== undefined ? data.verificationEnabled : true,
+          purchasePrice:
+            data.purchasePrice !== undefined &&
+            data.purchasePrice !== null &&
+            !isNaN(Number(data.purchasePrice))
+              ? Number(data.purchasePrice)
+              : null,
+          salePrice:
+            data.salePrice !== undefined &&
+            data.salePrice !== null &&
+            !isNaN(Number(data.salePrice))
+              ? Number(data.salePrice)
+              : null,
+          metadata,
           verifiedBy: data.verifiedBy || '',
           verifiedByName: data.verifiedByName || '',
-          verifiedAt: new Date()
+          verifiedAt: new Date(),
         });
 
         const saved = await verification.save();
         savedIds.push(saved._id);
         this.logger.log(
-          `✅ Verificación guardada para parte ${partDef.key}: ${saved._id} - ${normalizedStatus}`
+          `✅ Verificación guardada para parte ${partDef.key}: ${saved._id} - ${partStatus}`
         );
       }
-      
+
       this.logger.log(`✅ Total de verificaciones guardadas: ${savedIds.length}`);
       return savedIds;
-      
     } catch (error: any) {
       this.logger.error(`❌ Error guardando verificaciones de partes: ${error.message}`);
       throw error;
@@ -542,6 +536,7 @@ export class IncomeBackendService {
           inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
           inventory_name: data.inventory_name || 'INVENTORYFLOW',
           partsStatus: data.partsStatus || null,
+          partsDestino: data.partsDestino || null,
           verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
           isComplete: data.isComplete || data.type === 'COMPLETO' || false,
           deviceSerial: data.deviceSerial || '',
@@ -588,6 +583,7 @@ export class IncomeBackendService {
                 
                 const verificationData = {
                   partsStatus: data.partsStatus,
+                  // destino,
                   verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
                   batchSku: data.sku || item?.sku || '',      // ✅ batchSku
                   batchUpc: data.upc || item?.upc || '',      // ✅ batchUpc
@@ -700,6 +696,11 @@ export class IncomeBackendService {
       const orderPublicId = data.orderPublicId || data.public_id || null;
       const isCompleteDevice = data.isComplete || data.type === 'COMPLETO' || false;
 
+      const partsDestino: 'CLEAN' | 'LOST' | null =
+        data.partsDestino === 'LOST' ? 'LOST' :
+        data.partsDestino === 'CLEAN' ? 'CLEAN' :
+        null;
+
       const nuevoBatch = new this.batchModel({
         item: itemId,
         sku: itemInfo.sku || data.sku,
@@ -714,6 +715,7 @@ export class IncomeBackendService {
         notes: data.observaciones || data.notes || '',
         orderPublicId,
         isCompleteDevice,
+        partsDestino,
         deviceVerificationIds: [],
       });
 
@@ -913,6 +915,7 @@ export class IncomeBackendService {
         type: orderData?.type || 'PARTE',
         isComplete: orderData?.type === 'COMPLETO',
         partsStatus: orderData?.partsStatus || null,
+        partsDestino: orderData?.partsDestino || null,
         verificationEnabled: orderData?.verificationEnabled !== undefined ? orderData?.verificationEnabled : true,
         deviceId: orderData?.deviceId || 0,
         deviceName: orderData?.deviceName || '',
@@ -1033,6 +1036,7 @@ export class IncomeBackendService {
         type: orderData?.type || 'PARTE',
         isComplete: orderData?.type === 'COMPLETO',
         partsStatus: orderData?.partsStatus || null,
+        partsDestino: orderData?.partsDestino || null,
         verificationEnabled: orderData?.verificationEnabled !== undefined ? orderData?.verificationEnabled : true,
         deviceId: orderData?.deviceId || 0,
         deviceName: orderData?.deviceName || '',
