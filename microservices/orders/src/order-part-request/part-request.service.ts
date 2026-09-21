@@ -215,11 +215,10 @@ export class PartRequestService {
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
     ) {
-        console.log(dto)
+        // console.log(dto)
         const page = dto.page && dto.page > 0 ? dto.page : 1;
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const skip = (page - 1) * limit;
-
         const qb = this.partRequestRepo
             .createQueryBuilder('pr')
             .leftJoinAndSelect('pr.order', 'order')
@@ -238,6 +237,21 @@ export class PartRequestService {
 
         if (dto.estado) {
             qb.andWhere('pr.estado = :estado', { estado: dto.estado });
+        }
+
+        const ordenSecundario = dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt';
+
+        if (!dto.estado) {
+            // Sin filtro de estado: SOLICITADO primero, luego el resto en su orden normal
+            qb.orderBy(
+                'CASE WHEN pr.estado = :estadoSolicitado THEN 0 ELSE 1 END',
+                'ASC',
+            )
+                .addOrderBy(ordenSecundario, 'DESC')
+                .setParameter('estadoSolicitado', PartRequestStatus.SOLICITADO);
+        } else {
+            // Con filtro de estado: mantiene el orden original, no aplica priorizar
+            qb.orderBy(ordenSecundario, 'DESC');
         }
 
         // Antes: 'mias' ordenaba por updatedAt, la general por createdAt.
