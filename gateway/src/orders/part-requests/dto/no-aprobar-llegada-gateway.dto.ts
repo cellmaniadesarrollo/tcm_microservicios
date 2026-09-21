@@ -9,6 +9,10 @@ export class NoAprobarLlegadaGatewayDto {
     @IsNotEmpty({ message: 'El ID es obligatorio' })
     id: number;
 
+    @IsString({ message: 'La categoría del motivo debe ser una cadena de texto' })
+    @IsNotEmpty({ message: 'La categoría del motivo es obligatoria' })
+    motivoCategoria: string;
+
     @IsString({ message: 'El motivo de rechazo debe ser una cadena de texto' })
     @IsNotEmpty({ message: 'El motivo de rechazo es obligatorio' })
     motivoRechazo: string;
