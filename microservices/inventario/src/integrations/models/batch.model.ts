@@ -59,6 +59,9 @@ export class Batch extends Document {
   // ✅ INDICADOR DE SI ES UN DISPOSITIVO COMPLETO
   @Prop({ type: Boolean, default: false })
   isCompleteDevice: boolean;
+
+  @Prop({ type: String, enum: ['CLEAN', 'LOST', null], default: null })
+  partsDestino: 'CLEAN' | 'LOST' | null;
 }
 
 export const BatchSchema = SchemaFactory.createForClass(Batch);
