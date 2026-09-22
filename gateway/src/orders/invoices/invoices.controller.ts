@@ -1,7 +1,8 @@
 // src/orders/invoices/invoices.controller.ts
-import { Controller, Get, Post, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, ParseIntPipe, Query } from '@nestjs/common';
 import { InvoicesGatewayService } from './invoices-gateway.service';
 import { ListInvoicesGatewayDto } from './dto/list-invoices-gateway.dto';
+import { GetSoldStatusGatewayDto } from './dto/get-sold-status-gateway.dto';
 import { Groups } from '../../common/auth/decorators/groups.decorator';
 import { User } from '../../common/auth/decorators/user.decorator';
 import { Features } from '../../common/auth/decorators/features.decorator';
@@ -44,5 +45,12 @@ export class InvoicesController {
         @User() user: any,
     ) {
         return this.invoicesGatewayService.resendInvoice(id, user);
+    }
+
+    // 👇 NUEVO — sin @Groups: cualquier usuario autenticado con acceso al feature 'orders'
+    // puede consultar si una orden está vendida (solo lectura, para pintar el ícono en la lista)
+    @Post('sold-status')
+    async getSoldStatus(@Body() dto: GetSoldStatusGatewayDto) {
+        return this.invoicesGatewayService.getSoldStatus(dto);
     }
 }

@@ -343,4 +343,28 @@ export class InvoicesService {
             }
         }
     }
+
+    /**
+     * Dado un array de order_public_id, devuelve cuáles ya fueron vendidos
+     * (tienen al menos una fila en order_invoice_batches).
+     */
+    async getSoldStatusByPublicIds(orderPublicIds: string[]): Promise<Record<string, boolean>> {
+        if (!orderPublicIds || orderPublicIds.length === 0) {
+            return {};
+        }
+
+        const rows = await this.orderInvoiceBatchRepo
+            .createQueryBuilder('b')
+            .select('DISTINCT b.order_public_id', 'order_public_id')
+            .where('b.order_public_id IN (:...ids)', { ids: orderPublicIds })
+            .getRawMany();
+
+        const soldSet = new Set(rows.map(r => r.order_public_id));
+
+        const result: Record<string, boolean> = {};
+        for (const id of orderPublicIds) {
+            result[id] = soldSet.has(id);
+        }
+        return result;
+    }
 }
