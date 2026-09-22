@@ -11,6 +11,8 @@ import { OrderInvoice, InvoiceEmissionStatus } from './entities/order-invoice.en
 import { ListInvoicesDto } from './dto/list-invoices.dto';
 import { InvoiceIssuedEventDto } from './dto/invoice-status-event.dto';
 import { extractDecimal } from './utils/decimal.util';
+import { OrderInvoiceBatch } from './entities/order-invoice-batch.entity';
+import { SaleConfirmedEventDto } from './dto/invoice-status-event.dto';
 
 export interface InvoiceDetailLine {
     movement_id?: string;
@@ -39,6 +41,8 @@ export class InvoicesService {
         private readonly findingRepo: Repository<OrderFinding>,
         @InjectRepository(OrderInvoice)
         private readonly orderInvoiceRepo: Repository<OrderInvoice>,
+        @InjectRepository(OrderInvoiceBatch)
+        private readonly orderInvoiceBatchRepo: Repository<OrderInvoiceBatch>,
     ) { }
 
     async onModuleInit() {
@@ -289,5 +293,54 @@ export class InvoicesService {
         }
 
         return saved;
+    }
+
+    /**
+     * Persiste cada batch vendido que venía de una orden (evento SALE_CONFIRMED).
+     * Idempotente por batch_id: si Kafka reentrega el mensaje, no duplica.
+     */
+    async registerSoldBatches(event: SaleConfirmedEventDto): Promise<void> {
+        const items = event.items || [];
+
+        if (items.length === 0) {
+            console.warn(`⚠️ [registerSoldBatches] SALE_CONFIRMED sin items (invoice_id=${event.invoice_id})`);
+            return;
+        }
+
+        for (const item of items) {
+            if (!item.batch_id) {
+                console.warn(`⚠️ [registerSoldBatches] item sin batch_id, se omite (invoice_id=${event.invoice_id})`);
+                continue;
+            }
+
+            try {
+                await this.orderInvoiceBatchRepo.upsert(
+                    {
+                        order_id: event.order_id ?? 0,
+                        invoice_id: event.invoice_id,
+                        invoice_number: event.invoice_number ?? null,
+                        order_public_id: item.order_public_id ?? null,
+                        batch_id: item.batch_id,
+                        batch_number: item.batch_number ?? null,
+                        is_complete_device: item.is_complete_device ?? false,
+                        sku: item.sku ?? null,
+                        product_name: item.product_name ?? null,
+                        code_establecimiento: event.code_establecimiento ?? null,
+                        code_punto_emision: event.code_punto_emision ?? null,
+                        quantity: item.quantity ?? 0,
+                        unit_price: item.unit_price ?? 0,
+                        discount: item.discount ?? 0,
+                        subtotal: item.subtotal ?? 0,
+                        total: item.total ?? 0,
+                    },
+                    ['batch_id'], // conflict target: usa el unique index que ya tenés en batch_id
+                );
+
+                console.log(`✅ [registerSoldBatches] batch_id=${item.batch_id} order_public_id=${item.order_public_id} guardado`);
+            } catch (err: any) {
+                console.error(`❌ [registerSoldBatches] error guardando batch_id=${item.batch_id}:`, err.message);
+                // no cortamos el loop: un item con error no debe tumbar el resto
+            }
+        }
     }
 }
