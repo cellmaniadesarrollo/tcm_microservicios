@@ -54,9 +54,7 @@ export class PartRequestsGatewayService {
     async registrarEnvio(dto: RegistrarEnvioGatewayDto, files: any[], user: any) {
         return this.orderServiceClient.send('registrar_envio_part_request', { dto, files, user });
     }
-    async registrarLlegada(dto: RegistrarLlegadaGatewayDto, files: any[], user: any) {
-        return this.orderServiceClient.send('registrar_llegada_part_request', { dto, files, user });
-    }
+
 
     async aprobarLlegada(dto: AprobarLlegadaGatewayDto, files: any[], user: any) {
         return this.orderServiceClient.send('aprobar_llegada_part_request', { dto, files, user });

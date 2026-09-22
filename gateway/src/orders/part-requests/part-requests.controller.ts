@@ -280,36 +280,6 @@ export class PartRequestsController {
         );
     }
 
-    // ─── LOGISTICA_REPUESTOS ────────────────────────────────────────
-    @Groups('LOGISTICA_REPUESTOS')
-    @Patch(':id/registrar-llegada')
-    async registrarLlegada(
-        @Param('id', ParseIntPipe) id: number,
-        @Req() request: FastifyRequest,
-        @User() user: any,
-    ) {
-        const { files, formData } = await parseMultipartRequest(request);
-        const processedFiles = await processAndValidateFiles(files);
-
-        const dto: RegistrarLlegadaGatewayDto = {
-            id,
-            cantidad: formData.cantidad ? Number(formData.cantidad) : undefined,
-            precioVenta: formData.precioVenta ? Number(formData.precioVenta) : undefined,
-            marca: formData.marca || undefined,
-            modelo: formData.modelo || undefined,
-            tipo: formData.tipo || undefined,
-            color: formData.color || undefined,
-            calidad: formData.calidad || undefined,
-            observations: formData.observations || undefined,
-        };
-
-        return this.partRequestsGatewayService.registrarLlegada(
-            dto,
-            serializeFilesForMicroservice(processedFiles),
-            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
-        );
-    }
-
     // ─── Cualquier logueado ────────────────────────────────────────
     @Patch(':id/aprobar-llegada')
     async aprobarLlegada(
