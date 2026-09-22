@@ -215,10 +215,10 @@ export class PartRequestService {
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
     ) {
-        // console.log(dto)
         const page = dto.page && dto.page > 0 ? dto.page : 1;
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const skip = (page - 1) * limit;
+
         const qb = this.partRequestRepo
             .createQueryBuilder('pr')
             .leftJoinAndSelect('pr.order', 'order')
@@ -239,24 +239,14 @@ export class PartRequestService {
             qb.andWhere('pr.estado = :estado', { estado: dto.estado });
         }
 
-        const ordenSecundario = dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt';
+        // NUEVO: prioridad 0 para SOLICITADO, 1 para el resto — van primero sin importar su fecha
+        qb.addSelect(
+            `CASE WHEN pr.estado = :estadoPrioritario THEN 0 ELSE 1 END`,
+            'estado_prioridad',
+        ).setParameter('estadoPrioritario', PartRequestStatus.SOLICITADO);
 
-        if (!dto.estado) {
-            // Sin filtro de estado: SOLICITADO primero, luego el resto en su orden normal
-            qb.orderBy(
-                'CASE WHEN pr.estado = :estadoSolicitado THEN 0 ELSE 1 END',
-                'ASC',
-            )
-                .addOrderBy(ordenSecundario, 'DESC')
-                .setParameter('estadoSolicitado', PartRequestStatus.SOLICITADO);
-        } else {
-            // Con filtro de estado: mantiene el orden original, no aplica priorizar
-            qb.orderBy(ordenSecundario, 'DESC');
-        }
-
-        // Antes: 'mias' ordenaba por updatedAt, la general por createdAt.
-        // Mantengo ese matiz condicionado al flag; si prefieres uniformar, deja solo una línea.
-        qb.orderBy(dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt', 'DESC');
+        qb.orderBy('estado_prioridad', 'ASC')
+            .addOrderBy(dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt', 'DESC');
 
         const [partRequests, total] = await qb
             .skip(skip)

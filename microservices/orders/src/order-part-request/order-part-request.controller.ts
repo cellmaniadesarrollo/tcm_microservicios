@@ -334,30 +334,6 @@ export class OrderPartRequestController {
     }
   }
 
-  /** Registrar la llegada del repuesto */
-  @MessagePattern({ cmd: 'registrar_llegada_part_request' })
-  async registrarLlegada(@Payload() data: any) {
-    try {
-      if (!data.dto || !data.user) {
-        throw new RpcException('Payload incompleto: falta dto o user');
-      }
-
-      return await this.partRequestArrivalService.registrarLlegada(
-        data.dto,
-        data.files ?? [],
-        data.user,
-      );
-    } catch (error: any) {
-      console.error('🔥 Error crítico en MS Órdenes (registrarLlegada):', error);
-      if (error.stack) console.error(error.stack);
-
-      throw new RpcException({
-        status: 'error',
-        message: error.message || 'Error interno en MS Órdenes',
-        details: error.response || null,
-      });
-    }
-  }
 
   /** Aprobar la llegada del repuesto */
   @MessagePattern({ cmd: 'aprobar_llegada_part_request' })
