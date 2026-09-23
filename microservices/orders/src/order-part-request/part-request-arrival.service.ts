@@ -16,6 +16,7 @@ import { AprobarLlegadaDto } from './dto/aprobar-llegada.dto';
 import { NoAprobarLlegadaDto } from './dto/no-aprobar-llegada.dto';
 import { enrichPartRequestAttachmentsWithSignedUrls, mapUser } from './helpers/part-requests.helpers';
 import { LitigioLlegadaDto } from './dto/litigio-llegada.dto';
+import { ResolverLitigioDto } from './dto/resolver-litigio.dto';
 
 /**
  * Dueño de la máquina de estados post-pago: registrar envío, registrar
@@ -25,6 +26,8 @@ import { LitigioLlegadaDto } from './dto/litigio-llegada.dto';
 export class PartRequestArrivalService {
     constructor(
         @InjectRepository(PartRequest) private readonly partRequestRepo: Repository<PartRequest>,
+
+        @InjectRepository(OrderPendingProduct) private readonly orderPendingProductRepo: Repository<OrderPendingProduct>,
         private readonly awsS3Service: AwsS3Service,
     ) { }
 
@@ -509,6 +512,7 @@ export class PartRequestArrivalService {
             .leftJoinAndSelect('sourcing.provider', 'provider')
             .leftJoinAndSelect('pr.order', 'order')
             .leftJoinAndSelect('pr.arrival', 'arrival')
+            .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor') // 👈 nuevo
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .where('pr.company_id = :companyId', { companyId: user.companyId })
@@ -535,23 +539,39 @@ export class PartRequestArrivalService {
             .take(limit)
             .getManyAndCount();
 
-        const data = partRequests.map((pr) => ({
-            id: pr.id,
-            order_id: pr.order_id,
-            order_number: pr.order?.order_number ?? null,
-            descripcion: pr.descripcion,
-            marca: pr.marca,
-            modelo: pr.modelo,
-            provider: pr.sourcing?.provider
-                ? { id: pr.sourcing.provider.id, nombre: pr.sourcing.provider.nombre }
-                : null,
-            technician: mapUser(pr.technician),
-            responsableBusqueda: mapUser(pr.responsableBusqueda),
-            motivo_categoria: pr.arrival?.motivo_categoria ?? null,
-            motivo: pr.arrival?.motivo_rechazo ?? null,
-            fecha_litigio: pr.arrival?.fecha_validacion ?? null,
-            validado_por_id: pr.arrival?.validado_por_id ?? null,
-        }));
+        const data = partRequests.map((pr) => {
+            const arrivalIncompleto =
+                pr.arrival?.resultado_validacion !== 'LITIGIO' ||
+                !pr.arrival?.motivo_categoria ||
+                !pr.arrival?.motivo_rechazo?.trim() ||
+                !pr.arrival?.fecha_validacion;
+
+            return {
+                id: pr.id,
+                order_id: pr.order_id,
+                order_number: pr.order?.order_number ?? null,
+                descripcion: pr.descripcion,
+                marca: pr.marca,
+                modelo: pr.modelo,
+                provider: pr.sourcing?.provider
+                    ? { id: pr.sourcing.provider.id, nombre: pr.sourcing.provider.nombre }
+                    : null,
+                technician: mapUser(pr.technician),
+                responsableBusqueda: mapUser(pr.responsableBusqueda),
+                motivo_categoria: pr.arrival?.motivo_categoria ?? null,
+                motivo: pr.arrival?.motivo_rechazo ?? null,
+                fecha_litigio: pr.arrival?.fecha_validacion ?? null,
+                validado_por_id: pr.arrival?.validado_por_id ?? null,
+                resuelto: pr.arrival?.resuelto ?? false,
+                fecha_resolucion: pr.arrival?.fecha_resolucion ?? null,
+                descripcion_resolucion: pr.arrival?.descripcion_resolucion ?? null,
+                resueltoPor: mapUser(pr.arrival?.resueltoPor),
+
+                // 👇 nuevo: bandera para que el frontend avise "dato inconsistente" en vez de
+                // dejar litigar/resolver algo que nunca se registró correctamente
+                dato_inconsistente: arrivalIncompleto,
+            };
+        });
 
         return {
             data,
@@ -571,5 +591,94 @@ export class PartRequestArrivalService {
                 ],
             },
         };
+    }
+    async resolverLitigio(
+        dto: ResolverLitigioDto,
+        files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
+        user: { userId: string; companyId: string },
+    ) {
+        return this.partRequestRepo.manager.transaction(async (manager) => {
+            const partRequest = await manager
+                .createQueryBuilder(PartRequest, 'pr')
+                .leftJoinAndSelect('pr.arrival', 'arrival')
+                .where('pr.id = :id', { id: dto.id })
+                .andWhere('pr.company_id = :companyId', { companyId: user.companyId })
+                .getOne();
+
+            if (!partRequest) {
+                throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
+            }
+
+            if (partRequest.estado !== PartRequestStatus.LITIGIO) {
+                throw new RpcException(
+                    new BadRequestException(`No se puede resolver: la solicitud está en estado "${partRequest.estado}", no en LITIGIO`),
+                );
+            }
+
+            if (!partRequest.arrival) {
+                throw new RpcException(new BadRequestException('No hay datos de llegada/litigio registrados'));
+            }
+
+            // 🛡️ Seguro extra: detecta datos residuales/inconsistentes (solicitudes que quedaron
+            // en estado LITIGIO sin haber pasado realmente por litigioLlegada, ej. datos de dev
+            // previos a tener el flujo definido). Un litigio real SIEMPRE llena estos 4 campos
+            // juntos en la misma transacción; si falta alguno, el estado no es confiable.
+            const arrivalIncompleto =
+                partRequest.arrival.resultado_validacion !== 'LITIGIO' ||
+                !partRequest.arrival.motivo_categoria ||
+                !partRequest.arrival.motivo_rechazo?.trim() ||
+                !partRequest.arrival.fecha_validacion;
+
+            if (arrivalIncompleto) {
+                throw new RpcException(
+                    new BadRequestException(
+                        `Inconsistencia de datos: la solicitud #${partRequest.id} está en estado LITIGIO pero no tiene un registro de litigio completo (motivo_categoria, motivo o fecha_validacion faltantes). No se puede resolver un litigio que nunca fue registrado correctamente; contacta a soporte para corregir el estado manualmente.`,
+                    ),
+                );
+            }
+
+            if (partRequest.arrival.resuelto) {
+                throw new RpcException(new BadRequestException('Este litigio ya fue resuelto anteriormente'));
+            }
+
+            if (!dto.descripcionResolucion?.trim()) {
+                throw new RpcException(new BadRequestException('La descripción de la resolución es requerida'));
+            }
+
+            // ...resto del método sin cambios (marcar resuelto, adjuntos, etc.)
+        });
+    }
+    // ─── Nuevo: litigar desde un OrderPendingProduct ──────────────────
+    // ─── Nuevo: litigar desde un OrderPendingProduct ──────────────────
+    async litigarDesdeProductoPendiente(
+        dto: { pendingProductId: number; motivoCategoria: string; motivo: string },
+        files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
+        user: { userId: string; companyId: string },
+    ) {
+        const pendingProduct = await this.orderPendingProductRepo.findOne({
+            where: { id: dto.pendingProductId, company_id: user.companyId },
+        });
+
+        if (!pendingProduct) {
+            throw new RpcException(new NotFoundException('Producto pendiente no encontrado'));
+        }
+
+        if (!pendingProduct.part_request_id) {
+            throw new RpcException(
+                new BadRequestException('Este producto no proviene de una solicitud de repuesto, no se puede litigar'),
+            );
+        }
+
+        // litigioLlegada ya valida el estado de la PartRequest, exige motivoCategoria/motivo,
+        // marca arrival.resultado_validacion = 'LITIGIO', elimina (softDelete) el
+        // OrderPendingProduct asociado y cambia partRequest.estado = LITIGIO — todo en una
+        // sola transacción. No hace falta repetir nada de eso aquí.
+        const resultado = await this.litigioLlegada(
+            { id: pendingProduct.part_request_id, motivoCategoria: dto.motivoCategoria, motivo: dto.motivo } as LitigioLlegadaDto,
+            files,
+            user,
+        );
+
+        return { ...resultado, pending_product_id: pendingProduct.id };
     }
 }

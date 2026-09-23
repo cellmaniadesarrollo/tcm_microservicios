@@ -12,6 +12,7 @@ import { AprobarLlegadaGatewayDto } from './dto/aprobar-llegada.dto';
 import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto';
 import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
 import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
+import { ResolverLitigioGatewayDto } from './dto/resolver-litigio.gateway.dto';
 
 @Injectable()
 export class PartRequestsGatewayService {
@@ -102,5 +103,12 @@ export class PartRequestsGatewayService {
 
     async listLitigios(dto: { page?: number; limit?: number; search?: string; providerId?: number; motivoCategoria?: string }, user: any) {
         return this.orderServiceClient.send('list_part_requests_litigios', { dto, user });
+    }
+    async resolverLitigio(dto: ResolverLitigioGatewayDto, files: any[], user: any) {
+        return this.orderServiceClient.send('resolver_litigio_part_request', { dto, files, user });
+    }
+
+    async litigarDesdeProductoPendiente(dto: any, files: any[], user: any) {
+        return this.orderServiceClient.send('litigar_producto_pendiente', { dto, files, user });
     }
 } 
