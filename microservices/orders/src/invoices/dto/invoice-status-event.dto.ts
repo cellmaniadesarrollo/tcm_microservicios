@@ -19,3 +19,31 @@ export interface InvoiceFailedEventDto {
     order_id: number;
     message: string;
 }
+
+// 👇 NUEVO
+export interface SaleConfirmedBatchItemDto {
+    batch_id: string;
+    batch_number?: number | null;
+    order_public_id: string | null;
+    is_complete_device: boolean;
+    product_id?: string | null;
+    service_id?: string | null;
+    sku?: string | null;
+    product_name?: string | null;
+    quantity: number;
+    unit_price: number;
+    discount: number;
+    subtotal: number;
+    total: number;
+}
+
+export interface SaleConfirmedEventDto {
+    order_id: number | null;
+    order_public_id: string | null;
+    invoice_id: string;
+    invoice_number: string;
+    order_public_ids: string[];
+    code_establecimiento?: string | null;
+    code_punto_emision?: string | null;
+    items: SaleConfirmedBatchItemDto[];
+}
