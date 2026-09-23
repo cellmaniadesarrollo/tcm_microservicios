@@ -8,10 +8,11 @@ import { OrderExtraService } from '../order-extras/entities/order-extra-service.
 import { OrderFinding } from '../order-findings/entities/order-finding.entity';
 import { OrderInvoice } from './entities/order-invoice.entity';
 import { InvoicesEventsListener } from './invoices-events.listener';
+import { OrderInvoiceBatch } from './entities/order-invoice-batch.entity';
 
 @Module({
 
-  imports: [BroadcastModule, TypeOrmModule.forFeature([OrderExtraService, OrderFinding, OrderInvoice])],
+  imports: [BroadcastModule, TypeOrmModule.forFeature([OrderExtraService, OrderFinding, OrderInvoice, OrderInvoiceBatch])],
   controllers: [InvoicesController],
   providers: [InvoicesService, InvoicesEventsListener],
   exports: [InvoicesService, InvoicesEventsListener]
