@@ -25,6 +25,7 @@ import { RegistrarLlegadaGatewayDto } from './dto/registrar-llegada.dto';
 import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto';
 import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
 import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
+import { ResolverLitigioGatewayDto } from './dto/resolver-litigio.gateway.dto';
 
 @Controller('part-requests')
 @Auth()
@@ -456,6 +457,52 @@ export class PartRequestsController {
                 motivoCategoria: motivoCategoria || undefined,
             },
             { userId: user.sub, companyId: user.companyId },
+        );
+    }
+
+    // gateway controller
+
+    @Patch(':id/resolver-litigio')
+    async resolverLitigio(
+        @Param('id', ParseIntPipe) id: number,
+        @Req() request: FastifyRequest,
+        @User() user: any,
+    ) {
+        const { files, formData } = await parseMultipartRequest(request);
+        const processedFiles = await processAndValidateFiles(files);
+
+        const dto: ResolverLitigioGatewayDto = {
+            id,
+            descripcionResolucion: formData.descripcionResolucion,
+        };
+
+        return this.partRequestsGatewayService.resolverLitigio(
+            dto,
+            serializeFilesForMicroservice(processedFiles),
+            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        );
+    }
+
+    // gateway controller
+    @Patch('pending-products/:id/litigar')
+    async litigarDesdeProductoPendiente(
+        @Param('id', ParseIntPipe) id: number,
+        @Req() request: FastifyRequest,
+        @User() user: any,
+    ) {
+        const { files, formData } = await parseMultipartRequest(request);
+        const processedFiles = await processAndValidateFiles(files);
+
+        const dto = {
+            pendingProductId: id,
+            motivoCategoria: formData.motivoCategoria,
+            motivo: formData.motivo,
+        };
+
+        return this.partRequestsGatewayService.litigarDesdeProductoPendiente(
+            dto,
+            serializeFilesForMicroservice(processedFiles),
+            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         );
     }
 }

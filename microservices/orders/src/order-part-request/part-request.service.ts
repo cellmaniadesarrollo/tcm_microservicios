@@ -673,6 +673,7 @@ export class PartRequestService {
             .leftJoinAndSelect('allocations.payment', 'payment')
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
+            .leftJoinAndSelect('pr.arrival', 'arrival') // 👈 nuevo: para saber si está en litigio y por qué
             .where('pr.company_id = :companyId', { companyId: user.companyId })
             .andWhere('pr.order_id IS NOT NULL')
             .andWhere('order.current_status_id NOT IN (:...estadosCerrados)', {
@@ -683,8 +684,8 @@ export class PartRequestService {
         if (dto.search?.trim()) {
             qb.andWhere(
                 `(pr.descripcion ILIKE :search
-              OR provider.nombre ILIKE :search
-              OR CAST(order.order_number AS TEXT) ILIKE :search)`,
+          OR provider.nombre ILIKE :search
+          OR CAST(order.order_number AS TEXT) ILIKE :search)`,
                 { search: `%${dto.search.trim()}%` },
             );
         }
@@ -734,6 +735,8 @@ export class PartRequestService {
                 };
             })
             // Solo pagadas completas + último pago hace más de N días
+            // Nota: los que están en LITIGIO se incluyen igual (no se filtran por estado != LITIGIO),
+            // así siguen visibles en esta lista pero con el form bloqueado en el frontend.
             .filter(
                 (e) =>
                     e.pagadaCompleta &&
@@ -761,6 +764,7 @@ export class PartRequestService {
                 id: pr.id,
                 descripcion: pr.descripcion,
                 tipo: pr.tipo,
+                estado: pr.estado, // 👈 nuevo: el frontend lo usa para saber si está en LITIGIO
                 estado_solicitud: pr.estado,
                 fecha_solicitud: pr.createdAt,
                 fecha_ultimo_pago: fechaUltimoPago,
@@ -770,6 +774,15 @@ export class PartRequestService {
                 monto_total: montoTotal,
                 total_pagado: totalPagado,
                 saldo_pendiente: saldoPendiente,
+
+                // 👇 nuevo: datos del litigio, si aplica
+                en_litigio: pr.estado === PartRequestStatus.LITIGIO && !pr.arrival?.resuelto,
+                motivo_litigio: pr.arrival?.motivo_rechazo ?? null,
+                fecha_litigio: pr.arrival?.fecha_validacion ?? null,
+                litigio_resuelto: pr.arrival?.resuelto ?? false,
+                fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
+                descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
+
                 provider: pr.sourcing?.provider
                     ? {
                         id: pr.sourcing.provider.id,
@@ -786,7 +799,6 @@ export class PartRequestService {
                     current_status: pr.order!.currentStatus
                         ? {
                             id: pr.order!.currentStatus.id,
-                            // ajusta el nombre del campo si en tu entidad es distinto (name, label, etc.)
                             nombre:
                                 (pr.order!.currentStatus as any).name ??
                                 (pr.order!.currentStatus as any).status_name ??
@@ -815,9 +827,6 @@ export class PartRequestService {
                 dias_umbral: diasUmbral,
             },
         };
-
-
-
     }
     async countPagadasSinCierreOrden(
         dto: { dias?: number; search?: string },

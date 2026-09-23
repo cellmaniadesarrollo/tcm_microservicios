@@ -19,6 +19,7 @@ import { PartRequestService } from './part-request.service';
 import { PartRequestSourcingService } from './part-request-sourcing.service';
 import { PartRequestPaymentService } from './part-request-payment.service';
 import { PartRequestArrivalService } from './part-request-arrival.service';
+import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
 
 @Module({
   imports: [
@@ -34,7 +35,8 @@ import { PartRequestArrivalService } from './part-request-arrival.service';
       Provider,
       ProviderAccount,
       SourcingProviderAccount,
-      PartRequestPaymentAllocation
+      PartRequestPaymentAllocation,
+      OrderPendingProduct
     ]),
     AwsS3Module
   ],
