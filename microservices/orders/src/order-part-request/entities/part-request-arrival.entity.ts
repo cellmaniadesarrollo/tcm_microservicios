@@ -8,8 +8,10 @@ import {
     JoinColumn,
     CreateDateColumn,
     UpdateDateColumn,
+    ManyToOne,
 } from 'typeorm';
 import { PartRequest } from './part-request.entity';
+import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
 
 @Entity('part_request_arrivals')
 export class PartRequestArrival {
@@ -55,12 +57,28 @@ export class PartRequestArrival {
     motivo_rechazo?: string;
 
     // NUEVO: categoría estructurada del motivo (rechazo o litigio), para clasificar proveedores a futuro
+    // part-request-arrival.entity.ts — ajuste al enum existente
+
     @Column({
         type: 'enum',
-        enum: ['PRODUCTO_INCORRECTO', 'CALIDAD_DEFICIENTE', 'DAÑADO_EN_TRANSITO', 'CANTIDAD_INCOMPLETA', 'OTRO'],
+        enum: ['PRODUCTO_INCORRECTO', 'CALIDAD_DEFICIENTE', 'DAÑADO_EN_TRANSITO', 'CANTIDAD_INCOMPLETA', 'VENDIDO', 'OTRO'],
         nullable: true,
     })
-    motivo_categoria?: 'PRODUCTO_INCORRECTO' | 'CALIDAD_DEFICIENTE' | 'DAÑADO_EN_TRANSITO' | 'CANTIDAD_INCOMPLETA' | 'OTRO';
+    motivo_categoria?: 'PRODUCTO_INCORRECTO' | 'CALIDAD_DEFICIENTE' | 'DAÑADO_EN_TRANSITO' | 'CANTIDAD_INCOMPLETA' | 'VENDIDO' | 'OTRO';
+    @Column({ default: false })
+    resuelto!: boolean;
+
+    @Column({ type: 'timestamp', nullable: true })
+    fecha_resolucion?: Date;
+
+    @Column({ type: 'uuid', nullable: true })
+    resuelto_por_id?: string;
+
+    @Column({ type: 'text', nullable: true })
+    descripcion_resolucion?: string;
+    @ManyToOne(() => UserEmployeeCache, { nullable: true })
+    @JoinColumn({ name: 'resuelto_por_id' })
+    resueltoPor?: UserEmployeeCache;
 
     @CreateDateColumn()
     createdAt!: Date;

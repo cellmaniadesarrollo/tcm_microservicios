@@ -513,4 +513,26 @@ export class OrderPartRequestController {
       throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
     }
   }
+  @MessagePattern({ cmd: 'resolver_litigio_part_request' })
+  async resolverLitigio(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) throw new RpcException('Payload incompleto: falta dto o user');
+      return await this.partRequestArrivalService.resolverLitigio(data.dto, data.files ?? [], data.user);
+    } catch (error: any) {
+      console.error('🔥 Error crítico en MS Órdenes (resolverLitigio):', error);
+      throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
+    }
+  }
+
+
+  @MessagePattern({ cmd: 'litigar_producto_pendiente' })
+  async litigarDesdeProductoPendiente(@Payload() data: any) {
+    try {
+      if (!data.dto || !data.user) throw new RpcException('Payload incompleto: falta dto o user');
+      return await this.partRequestArrivalService.litigarDesdeProductoPendiente(data.dto, data.files ?? [], data.user);
+    } catch (error: any) {
+      console.error('🔥 Error en litigarDesdeProductoPendiente:', error);
+      throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
+    }
+  }
 }

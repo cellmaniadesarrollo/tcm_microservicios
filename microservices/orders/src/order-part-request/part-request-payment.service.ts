@@ -52,6 +52,11 @@ export class PartRequestPaymentService {
             const qb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .leftJoinAndSelect('pago.allocations', 'allocations')
+                .leftJoinAndSelect('allocations.partRequest', 'partRequest')
+                .leftJoinAndSelect('partRequest.order', 'prOrder')
+                .leftJoinAndSelect('partRequest.technician', 'prTechnician')           // 👈 nuevo
+                .leftJoinAndSelect('partRequest.responsableBusqueda', 'prResponsable') // 👈 nuevo
+                .leftJoinAndSelect('partRequest.arrival', 'prArrival')                 // 👈 nuevo, para litigio
                 .innerJoinAndSelect('pago.provider', 'provider')
                 .where('provider.company_id = :companyId', { companyId: user.companyId });
 
@@ -66,7 +71,6 @@ export class PartRequestPaymentService {
                 );
             }
 
-            // Total (DISTINCT por si un pago tiene varias allocations)
             const totalQb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .innerJoin('pago.provider', 'provider')
@@ -113,6 +117,26 @@ export class PartRequestPaymentService {
                 provider: p.provider
                     ? { id: p.provider.id, nombre: p.provider.nombre }
                     : null,
+
+                // 👇 nuevo: cada solicitud cubierta, con la data completa que necesita la tabla
+                solicitudes_cubiertas: (p.allocations ?? []).map((a) => ({
+                    id: a.part_request_id,
+                    order_id: a.partRequest?.order_id ?? null,
+                    order_number: a.partRequest?.order?.order_number ?? null,
+                    descripcion: a.partRequest?.descripcion ?? null,
+                    fecha_solicitud: a.partRequest?.createdAt ?? null,
+                    estado: a.partRequest?.estado ?? null,
+                    technician: mapUser(a.partRequest?.technician),
+                    responsableBusqueda: mapUser(a.partRequest?.responsableBusqueda),
+                    monto_asignado: Number(a.monto_asignado),
+                    fecha_litigio: a.partRequest?.arrival?.fecha_validacion ?? null,
+                    motivo_litigio: a.partRequest?.arrival?.motivo_rechazo ?? null,
+
+                    // 👇 nuevo
+                    litigio_resuelto: a.partRequest?.arrival?.resuelto ?? false,
+                    fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
+                    descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
+                })),
             }));
 
             return {
@@ -131,8 +155,6 @@ export class PartRequestPaymentService {
                     ],
                 },
             };
-
-
         }
         // ═══════════════════════════════════════════════════════════
         // CASO 2: PENDIENTES / TODOS → agrupar por PROVEEDOR
@@ -145,6 +167,7 @@ export class PartRequestPaymentService {
             .leftJoinAndSelect('pr.pagoAllocations', 'allocations')
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
+            .leftJoinAndSelect('pr.arrival', 'arrival') // 👈 nuevo: para datos del litigio
             .where('pr.company_id = :companyId', { companyId: user.companyId })
             .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO });
 
@@ -232,6 +255,13 @@ export class PartRequestPaymentService {
                     total_pagado: totalPagado,
                     saldo_pendiente: saldoPendiente,
                     estado_pago: estadoPago,
+                    fecha_litigio: pr.arrival?.fecha_validacion ?? null,
+                    motivo_litigio: pr.arrival?.motivo_rechazo ?? null,
+
+                    // 👇 nuevo
+                    litigio_resuelto: pr.arrival?.resuelto ?? false,
+                    fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
+                    descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
                 }),
             ),
         }));
@@ -253,6 +283,9 @@ export class PartRequestPaymentService {
             },
         };
     }
+
+
+
     async createPartRequestPayment(
         dto: CreatePartRequestPaymentDto,
         files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
@@ -677,9 +710,6 @@ export class PartRequestPaymentService {
             },
         });
 
-        // (Opcional) firmar URLs si usas el mismo helper que en create
-        // await enrichPartRequestAttachmentsWithSignedUrls([{ id: payment.id, attachments }], this.awsS3Service);
-
         const solicitudes = (payment.allocations ?? []).map((a) => {
             const pr = a.partRequest;
             const montoProducto =
@@ -700,6 +730,23 @@ export class PartRequestPaymentService {
             };
         });
 
+        // 👇 Attachment[] tal cual, no el mapeo final — enrichPartRequestAttachmentsWithSignedUrls
+        // necesita objetos Attachment reales para poder mutar/leer su file_url
+        const comprobantes = attachments.map((att) => ({
+            id: att.id,
+            file_name: att.file_name,
+            file_url: att.file_url,
+            file_type: att.file_type,
+        }));
+
+        // 👇 nuevo: firmar las URLs, mismo patrón que en resolverLitigio / getPartRequestFullData
+        if (attachments.length) {
+            await enrichPartRequestAttachmentsWithSignedUrls(
+                [{ id: payment.id, attachments: attachments }],
+                this.awsS3Service,
+            );
+        }
+
         return {
             id: payment.id,
             monto: Number(payment.monto),
@@ -711,7 +758,7 @@ export class PartRequestPaymentService {
                 : null,
             cantidad_solicitudes_cubiertas: solicitudes.length,
             solicitudes,
-            comprobantes: attachments.map((att) => ({
+            comprobantes: attachments.map((att) => ({ // 👈 se remapea DESPUÉS de firmar, para tomar el file_url ya actualizado
                 id: att.id,
                 file_name: att.file_name,
                 file_url: att.file_url,
