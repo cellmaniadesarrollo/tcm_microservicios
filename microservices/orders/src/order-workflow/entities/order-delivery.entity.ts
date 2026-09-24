@@ -85,9 +85,8 @@ export class OrderDelivery {
     @JoinColumn({ name: 'branch_id' })
     branch: BranchReplica;
 
-    // agregar a OrderDelivery
-    @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-    subtotal_before_discount: number; // precio base al momento del cierre
+    @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, default: 0 })
+    subtotal_before_discount: number | null; // precio base al momento del cierre
 
     @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
     discount_total: number; // suma de calculated_amount de los descuentos aplicados
@@ -97,10 +96,4 @@ export class OrderDelivery {
 
     @UpdateDateColumn()
     updatedAt: Date;
-    // agregar a order-delivery.entity.ts
-    @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
-    subtotal_before_discount: number | null;
-
-    @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
-    discount_total: number;
 }
