@@ -1,100 +1,153 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+    BadRequestException,
+    Injectable,
+    NotFoundException,
+} from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
-import { IsNull, Repository } from 'typeorm';
-import { DiscountType, OrderDiscount } from './entities/order-discount.entity';
 import { InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import {
+    DiscountStatus,
+    DiscountType,
+    OrderDiscount,
+} from './entities/order-discount.entity';
 import { Order } from '../order-workflow/entities/order.entity';
+import { CreateOrderDiscountDto } from './dto/create-order-discount.dto';
+import { CancelOrderDiscountDto } from './dto/cancel-order-discount.dto';
+import { ListOrderDiscountsDto } from './dto/list-order-discounts.dto';
+
+interface RpcUserContext {
+    userId: string;
+    companyId: string;
+    branchId: string;
+}
+
+const BLOCKED_STATUSES_FOR_DISCOUNT = [
+    'ENTREGADA',
+    'PASAR A BODEGA',
+    'EN INVENTARIO',
+];
 
 @Injectable()
 export class OrderDiscountsService {
     constructor(
         @InjectRepository(OrderDiscount)
-        private readonly orderDiscountRepo: Repository<OrderDiscount>,
+        private readonly discountRepo: Repository<OrderDiscount>,
+
         @InjectRepository(Order)
         private readonly orderRepo: Repository<Order>,
+
+        private readonly dataSource: DataSource, // para la transacción
     ) { }
 
-    async registrarDescuento(
-        orderId: number,
-        body: { tipo: DiscountType; valor: number; motivo: string },
-        user: { userId: string; username?: string; companyId: string },
-    ) {
-        const order = await this.orderRepo.findOne({
-            where: { id: orderId, company_id: user.companyId },
-            select: ['id', 'order_number'],
+    async create(dto: CreateOrderDiscountDto, user: RpcUserContext) {
+        return this.dataSource.transaction(async (manager) => {
+            const order = await manager.findOne(Order, {
+                where: {
+                    id: dto.orderId,
+                    company_id: user.companyId,
+                    branch_id: user.branchId,
+                },
+                relations: ['currentStatus'],
+            });
+
+            if (!order) {
+                throw new RpcException(new NotFoundException('La orden no existe'));
+            }
+
+            const statusName = order.currentStatus?.name?.toUpperCase().trim();
+            if (BLOCKED_STATUSES_FOR_DISCOUNT.includes(statusName)) {
+                throw new RpcException(
+                    new BadRequestException(
+                        `No se puede aplicar un descuento a una orden en estado "${order.currentStatus.name}"`,
+                    ),
+                );
+            }
+
+            if (
+                dto.discountType === DiscountType.PERCENTAGE &&
+                dto.discountValue > 100
+            ) {
+                throw new RpcException(
+                    new BadRequestException(
+                        'El descuento porcentual no puede ser mayor a 100',
+                    ),
+                );
+            }
+
+            const discount = manager.create(OrderDiscount, {
+                order_id: order.id,
+                discount_type: dto.discountType,
+                discount_value: dto.discountValue,
+                reason: dto.reason ?? null,
+                status: DiscountStatus.PENDING,
+                created_by_id: user.userId,
+                company_id: user.companyId,
+                branch_id: user.branchId,
+            });
+
+            return manager.save(OrderDiscount, discount);
         });
+    }
+    async cancel(dto: CancelOrderDiscountDto, user: RpcUserContext) {
+        return this.dataSource.transaction(async (manager) => {
+            const discount = await manager.findOne(OrderDiscount, {
+                where: {
+                    id: dto.discountId,
+                    order_id: dto.orderId,
+                    company_id: user.companyId,
+                    branch_id: user.branchId,
+                },
+            });
 
-        if (!order) {
-            throw new RpcException(new NotFoundException('Orden no encontrada'));
-        }
+            if (!discount) {
+                throw new RpcException(new NotFoundException('El descuento no existe'));
+            }
 
-        if (!body.tipo || !Object.values(DiscountType).includes(body.tipo)) {
-            throw new RpcException(new BadRequestException('Tipo de descuento inválido, debe ser PORCENTAJE o FIJO'));
-        }
+            if (discount.status === DiscountStatus.CANCELLED) {
+                throw new RpcException(
+                    new BadRequestException('El descuento ya se encuentra cancelado'),
+                );
+            }
 
-        if (body.valor == null || body.valor <= 0) {
-            throw new RpcException(new BadRequestException('El valor del descuento debe ser mayor a 0'));
-        }
+            if (discount.status === DiscountStatus.APPLIED) {
+                throw new RpcException(
+                    new BadRequestException(
+                        'No se puede cancelar un descuento que ya fue aplicado en el cierre de la orden',
+                    ),
+                );
+            }
 
-        if (body.tipo === DiscountType.PORCENTAJE && body.valor > 100) {
-            throw new RpcException(new BadRequestException('El porcentaje no puede ser mayor a 100'));
-        }
+            discount.status = DiscountStatus.CANCELLED;
+            discount.cancelled_by_id = user.userId;
+            discount.cancelled_at = new Date();
+            discount.cancelled_reason = dto.cancelledReason ?? null;
 
-        if (!body.motivo?.trim()) {
-            throw new RpcException(new BadRequestException('El motivo del descuento es obligatorio'));
-        }
-
-        const descuento = this.orderDiscountRepo.create({
-            order_id: order.id,
-            tipo: body.tipo,
-            valor: body.valor,
-            motivo: body.motivo.trim(),
-            registrado_por_id: user.userId,
-            registrado_por_nombre: user.username,
+            return manager.save(OrderDiscount, discount);
         });
-
-        return this.orderDiscountRepo.save(descuento);
     }
 
-    async getDescuentos(orderId: number, user: { companyId: string }) {
+    async list(dto: ListOrderDiscountsDto, user: RpcUserContext) {
         const order = await this.orderRepo.findOne({
-            where: { id: orderId, company_id: user.companyId },
-            select: ['id'],
+            where: {
+                id: dto.orderId,
+                company_id: user.companyId,
+                branch_id: user.branchId,
+            },
         });
 
         if (!order) {
-            throw new RpcException(new NotFoundException('Orden no encontrada'));
+            throw new RpcException(new NotFoundException('La orden no existe'));
         }
 
-        return this.orderDiscountRepo.find({
-            where: { order_id: orderId, deletedAt: IsNull() },
+        return this.discountRepo.find({
+            where: {
+                order_id: dto.orderId,
+                company_id: user.companyId,
+                branch_id: user.branchId,
+                ...(dto.status ? { status: dto.status } : {}),
+            },
             order: { createdAt: 'DESC' },
         });
-    }
-
-    async eliminarDescuento(
-        discountId: number,
-        user: { userId: string; username?: string; companyId: string },
-    ) {
-        const descuento = await this.orderDiscountRepo.findOne({
-            where: { id: discountId, deletedAt: IsNull() },
-            relations: ['order'],
-        });
-
-        if (!descuento) {
-            throw new RpcException(new NotFoundException('Descuento no encontrado'));
-        }
-
-        if (descuento.order.company_id !== user.companyId) {
-            throw new RpcException(new ForbiddenException('No tienes acceso a este descuento'));
-        }
-
-        descuento.deletedAt = new Date();
-        descuento.deletedPorId = user.userId;
-        descuento.deletedPorNombre = user.username || null;
-
-        await this.orderDiscountRepo.save(descuento);
-
-        return { success: true, discountId };
     }
 }
