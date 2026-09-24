@@ -3169,7 +3169,7 @@ export class OrderWorkflowService {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
       }
 
-      await this.orderValidationLockService.assertEditable(order.id);
+      await this.orderValidationLockService.assertEditable(order.id, ['PASAR A BODEGA']);
 
       const observation =
         dto.observation?.trim() || 'Orden enviada a bodega para gestión de inventario';
