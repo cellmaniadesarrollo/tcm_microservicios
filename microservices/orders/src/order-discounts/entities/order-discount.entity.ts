@@ -1,54 +1,91 @@
+// microservices/orders/src/order-discounts/entities/order-discount.entity.ts
 import {
-    Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn,
-    CreateDateColumn, UpdateDateColumn,
+    Entity,
+    PrimaryGeneratedColumn,
+    Column,
+    ManyToOne,
+    JoinColumn,
+    CreateDateColumn,
+    UpdateDateColumn,
+    Index,
 } from 'typeorm';
 import { Order } from '../../order-workflow/entities/order.entity';
+import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
 
 export enum DiscountType {
-    PORCENTAJE = 'PORCENTAJE',
-    FIJO = 'FIJO',
+    FIXED = 'FIXED',
+    PERCENTAGE = 'PERCENTAGE',
+}
+
+export enum DiscountStatus {
+    PENDING = 'PENDING',
+    APPLIED = 'APPLIED',
+    CANCELLED = 'CANCELLED',
 }
 
 @Entity('order_discounts')
+@Index(['order_id', 'status'])
 export class OrderDiscount {
     @PrimaryGeneratedColumn()
-    id: number;
+    id!: number;
 
-    @Column({ name: 'order_id' })
-    order_id: number;
-
-    @ManyToOne(() => Order)
+    @ManyToOne(() => Order, (order) => order.discounts, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'order_id' })
-    order: Order;
+    order!: Order;
+
+    @Column()
+    order_id!: number;
 
     @Column({ type: 'enum', enum: DiscountType })
-    tipo: DiscountType;
+    discount_type!: DiscountType;
 
-    // Si tipo = PORCENTAJE, valor es 0-100. Si tipo = FIJO, valor es el monto en $.
-    @Column('decimal', { precision: 10, scale: 2 })
-    valor: number;
+    // Valor tal cual lo ingresan: 10.00 (FIXED) o 15.00 (=15% si PERCENTAGE)
+    @Column({ type: 'decimal', precision: 12, scale: 2 })
+    discount_value!: number;
 
-    @Column({ type: 'text' })
-    motivo: string;
+    // Null mientras está PENDING. Se congela con el monto real al cerrar la orden.
+    @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+    calculated_amount?: number | null;
 
-    @Column({ name: 'registrado_por_id' })
-    registrado_por_id: string;
+    @Column({ type: 'enum', enum: DiscountStatus, default: DiscountStatus.PENDING })
+    status!: DiscountStatus;
 
-    @Column({ name: 'registrado_por_nombre', nullable: true })
-    registrado_por_nombre: string;
+    @Column({ type: 'text', nullable: true })
+    reason?: string | null;
 
-    @CreateDateColumn({ name: 'created_at' })
-    createdAt: Date;
+    @ManyToOne(() => UserEmployeeCache, { eager: true })
+    @JoinColumn({ name: 'created_by_id' })
+    createdBy!: UserEmployeeCache;
 
-    @UpdateDateColumn({ name: 'updated_at' })
-    updatedAt: Date;
+    @Column()
+    created_by_id!: string;
 
-    @Column({ name: 'deleted_at', type: 'timestamp', nullable: true })
-    deletedAt: Date | null;
+    @ManyToOne(() => UserEmployeeCache, { nullable: true })
+    @JoinColumn({ name: 'cancelled_by_id' })
+    cancelledBy?: UserEmployeeCache | null;
 
-    @Column({ name: 'deleted_por_id', type: 'varchar', nullable: true })
-    deletedPorId: string | null;
+    @Column({ nullable: true })
+    cancelled_by_id?: string | null;
 
-    @Column({ name: 'deleted_por_nombre', type: 'varchar', nullable: true })
-    deletedPorNombre: string | null;
+    // Fecha en que se congeló el monto (= fecha de cierre de la orden)
+    @Column({ type: 'timestamp', nullable: true })
+    applied_at?: Date | null;
+
+    @Column({ type: 'uuid' })
+    company_id!: string;
+
+    @Column({ type: 'uuid' })
+    branch_id!: string;
+
+    @CreateDateColumn()
+    createdAt!: Date;
+
+    @UpdateDateColumn()
+    updatedAt!: Date;
+
+    @Column({ type: 'text', nullable: true })
+    cancelled_reason?: string | null;
+
+    @Column({ type: 'timestamp', nullable: true })
+    cancelled_at?: Date | null;
 }

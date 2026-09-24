@@ -97,4 +97,10 @@ export class OrderDelivery {
 
     @UpdateDateColumn()
     updatedAt: Date;
+    // agregar a order-delivery.entity.ts
+    @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true })
+    subtotal_before_discount: number | null;
+
+    @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
+    discount_total: number;
 }
