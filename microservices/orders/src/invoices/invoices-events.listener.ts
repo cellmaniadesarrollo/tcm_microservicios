@@ -3,9 +3,11 @@ import { Injectable } from '@nestjs/common';
 import { KafkaConsumerService } from '../kafka/kafka.consumer';
 import { InvoicesService } from './invoices.service';
 import { InvoiceIssuedEventDto, InvoiceFailedEventDto } from './dto/invoice-status-event.dto';
+import { SaleConfirmedEventDto } from './dto/invoice-status-event.dto';
 
 const TOPICS = {
     INVOICE_STATUS_UPDATED: 'ms.billing.invoice.status.updated',
+    SALE_CONFIRMED: 'ms.billing.sale.confirmed',
 } as const;
 
 @Injectable()
@@ -19,6 +21,10 @@ export class InvoicesEventsListener {   // ← sin OnModuleInit, igual que Users
         this.kafkaConsumer.registerHandler(
             TOPICS.INVOICE_STATUS_UPDATED,
             (eventType, data) => this.handleInvoiceStatusUpdated(eventType, data),
+        );
+        this.kafkaConsumer.registerHandler(
+            TOPICS.SALE_CONFIRMED,
+            (eventType, data) => this.handleSaleConfirmed(eventType, data),
         );
     }
 
@@ -39,5 +45,16 @@ export class InvoicesEventsListener {   // ← sin OnModuleInit, igual que Users
         }
 
         console.warn(`⚠️ [InvoicesEventsListener] eventType desconocido: ${eventType}`);
+    }
+    private async handleSaleConfirmed(eventType: string, data: any) {
+        if (eventType !== 'SALE_CONFIRMED') {
+            console.warn(`⚠️ [InvoicesEventsListener] eventType desconocido en ${TOPICS.SALE_CONFIRMED}: ${eventType}`);
+            return;
+        }
+
+        const event = data as SaleConfirmedEventDto;
+        console.log(`🟢 [SALE_CONFIRMED] order_id=${event.order_id} items=${event.items?.length ?? 0}`);
+
+        await this.invoicesService.registerSoldBatches(event);
     }
 }

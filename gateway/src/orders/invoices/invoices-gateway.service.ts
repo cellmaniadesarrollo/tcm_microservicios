@@ -2,6 +2,7 @@
 import { Injectable } from '@nestjs/common';
 import { OrderServiceClient } from '../../common/microservices/order-service-client';
 import { ListInvoicesGatewayDto } from './dto/list-invoices-gateway.dto';
+import { GetSoldStatusGatewayDto } from './dto/get-sold-status-gateway.dto';
 
 @Injectable()
 export class InvoicesGatewayService {
@@ -14,5 +15,9 @@ export class InvoicesGatewayService {
 
     async resendInvoice(invoiceId: number, user: any) {
         return this.orderServiceClient.send('resend_invoice', { invoiceId, user });
+    }
+
+    async getSoldStatus(dto: GetSoldStatusGatewayDto) {
+        return this.orderServiceClient.send('get_sold_status', { orderPublicIds: dto.orderPublicIds });
     }
 }
