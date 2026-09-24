@@ -34,6 +34,7 @@ import { OrderShipping } from './order-shipping.entity';
 import { OrderPendingProduct } from '../../order-extras/entities/order-pending-product.entity';
 import { OrderExtraService } from '../../order-extras/entities/order-extra-service.entity';
 import { OrderPriceAgreement } from './order-price-agreement.entity';
+import { OrderDiscount } from '../../order-discounts/entities/order-discount.entity';
 
 @Entity('orders')
 @Index(['company_id', 'order_number'], { unique: true })
@@ -182,4 +183,7 @@ export class Order {
 
   @OneToMany(() => OrderPriceAgreement, (agreement) => agreement.order, { cascade: true })
   priceAgreements!: OrderPriceAgreement[];
+
+  @OneToMany(() => OrderDiscount, (discount) => discount.order, { cascade: true })
+  discounts!: OrderDiscount[];
 }
