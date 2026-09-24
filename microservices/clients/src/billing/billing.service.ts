@@ -90,10 +90,19 @@ export class BillingService {
                 throw new RpcException(new BadRequestException('mainEmail es requerido'));
             if (!data?.address)
                 throw new RpcException(new BadRequestException('address es requerido'));
+
+            // Normalización a mayúsculas
+            const firstName = data.firstName?.trim()?.toUpperCase();
+            const lastName = data.lastName?.trim()?.toUpperCase();
+            const address = data.address?.trim()?.toUpperCase();
+            const city = data.city?.trim()?.toUpperCase();
+            const tradeName = data.tradeName?.trim()?.toUpperCase();
+
             const businessName =
-                data.businessName?.trim() ||
-                [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
+                data.businessName?.trim()?.toUpperCase() ||
+                [firstName, lastName].filter(Boolean).join(' ').trim() ||
                 undefined;
+
             return await this.upsertCustomerAndBillingData(
                 {
                     companyId: data.user.companyId,
@@ -101,16 +110,16 @@ export class BillingService {
                     idTypeId: data.idTypeId,
                     personTypeId: data.personTypeId,
                     genderId: data.genderId,
-                    firstName: data.firstName,
-                    lastName: data.lastName,
+                    firstName,
+                    lastName,
                     businessName,
-                    tradeName: data.tradeName,
+                    tradeName,
                     mainEmail: data.mainEmail,
                     cellphone: data.cellphone,
                     phone: data.phone,
                     birthdate: data.birthdate,
-                    address: data.address,
-                    city: data.city,
+                    address,
+                    city,
                     isCompanyClient: data.isCompanyClient ?? false,
                 },
                 logger,
@@ -347,6 +356,7 @@ export class BillingService {
             throw new RpcException(new InternalServerErrorException('Error procesando billing desde legacy'));
         }
     }
+
     async updateFromLegacyRaw(raw: any) {
         if (!raw?.company_id && !raw?.user?.companyId)
             throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));

@@ -26,6 +26,7 @@ import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto
 import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
 import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
 import { ResolverLitigioGatewayDto } from './dto/resolver-litigio.gateway.dto';
+import { CreatePartRequestTravelItemGatewayDto } from './dto/create-part-request-travel-item-gateway.dto';
 
 @Controller('part-requests')
 @Auth()
@@ -505,4 +506,17 @@ export class PartRequestsController {
             { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         );
     }
+
+    // @Post()
+    // @Features('part-request-travel-items/part-requests')
+    // createTravelItem(
+    //     @Body() dto: CreatePartRequestTravelItemGatewayDto,
+    //     @User() user: any,
+    // ) {
+    //     return this.partRequestsGatewayService.createTravelItem(dto, {
+    //         userId: user.sub,
+    //         companyId: user.companyId,
+    //         branchId: user.branchId,
+    //     });
+    // }
 }
