@@ -10,6 +10,8 @@ import { DiscountsController } from './discounts/discounts.controller';
 import { DiscountsGatewayService } from './discounts/discounts-gateway.service';
 import { InvoicesController } from './invoices/invoices.controller';
 import { InvoicesGatewayService } from './invoices/invoices-gateway.service';
+import { OrderDiscountsController } from './order-discounts/order-discounts.controller';
+import { OrderDiscountsService } from './order-discounts/order-discounts.service';
 
 @Module({
   imports: [
@@ -26,7 +28,7 @@ import { InvoicesGatewayService } from './invoices/invoices-gateway.service';
     ]),
     AuthModule
   ],
-  controllers: [OrdersController, PartRequestsController, InvoicesController],
-  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient, InvoicesGatewayService]
+  controllers: [OrdersController, PartRequestsController, InvoicesController, OrderDiscountsController],
+  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient, InvoicesGatewayService, OrderDiscountsService]
 })
 export class OrdersModule { }

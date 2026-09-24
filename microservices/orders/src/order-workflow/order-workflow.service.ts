@@ -52,6 +52,8 @@ import { CreateWarehousePaymentDto } from './dto/create-warehouse-payment.dto';
 import { WarehousePayment, WarehousePaymentFlowType } from './entities/warehouse-payment.entity';
 import { OrderExtraService } from '../order-extras/entities/order-extra-service.entity';
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
+import { DiscountStatus, DiscountType, OrderDiscount } from '../order-discounts/entities/order-discount.entity';
+import { FindingProcedure } from '../order-findings/entities/finding-procedure.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -518,6 +520,12 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('o.branch', 'branch')
       .leftJoinAndSelect('o.company', 'company')
       .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+      .leftJoinAndSelect(
+        'o.discounts',
+        'discounts',
+        'discounts.status != :cancelledStatusListOrders',
+        { cancelledStatusListOrders: 'CANCELLED' },
+      )
       .leftJoinAndMapOne(
         'o.potentialPurchase',
         OrderPotentialPurchase,
@@ -610,6 +618,12 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('payments.paymentType', 'paymentType')
       .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
       .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+      .leftJoinAndSelect(
+        'o.discounts',
+        'discounts',
+        'discounts.status != :cancelledStatusMyOrders',
+        { cancelledStatusMyOrders: 'CANCELLED' },
+      )
       .leftJoinAndMapOne(
         'o.potentialPurchase',
         OrderPotentialPurchase,
@@ -661,24 +675,25 @@ export class OrderWorkflowService {
           { userId: user.userId },
         );
         qb.groupBy(`
-        o.id,
-        c.id,
-        contact.id,
-        type.id,
-        status.id,
-        priority.id,
-        technicians.id,
-        device.id,
-        deviceModel.id,
-        deviceBrand.id,
-        imei.id,
-        payments.id,
-        paymentType.id,
-        paymentMethod.id,
-        receivedBy.id,
-        potentialPurchase.id,
-        potentialMarkedBy.id
-      `);
+  o.id,
+  c.id,
+  contact.id,
+  type.id,
+  status.id,
+  priority.id,
+  technicians.id,
+  device.id,
+  deviceModel.id,
+  deviceBrand.id,
+  imei.id,
+  payments.id,
+  paymentType.id,
+  paymentMethod.id,
+  receivedBy.id,
+  potentialPurchase.id,
+  potentialMarkedBy.id,
+  discounts.id
+`);
         qb.orderBy('o.entry_date', 'DESC');
         break;
 
@@ -847,6 +862,12 @@ export class OrderWorkflowService {
         .leftJoinAndSelect('payments.paymentType', 'paymentType')
         .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
         .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
+        .leftJoinAndSelect(
+          'o.discounts',
+          'discounts',
+          'discounts.status != :cancelledStatusEjecutadas',
+          { cancelledStatusEjecutadas: 'CANCELLED' },
+        )
         .whereInIds(pagedIds)
         .orderBy('o.entry_date', 'DESC')
         .getMany();
@@ -1493,12 +1514,12 @@ export class OrderWorkflowService {
         );
       }
 
-      // ── NUEVO: determinar si corresponde emisión automática de factura ──
-      // Regla de negocio:
-      //   - Sin repuestos asignados (solo mano de obra)          → NO se emite automático.
-      //   - Con repuestos, pero al menos uno no es facturable    → NO se emite automático
-      //     (queda para hacerlo manual, como hasta ahora).
-      //   - Con repuestos y TODOS son facturables                → SÍ se emite automático.
+      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
+      const isOutgoing = order.order_type_id === 3;
+      const deliveryRepo = manager.getRepository(OrderDelivery);
+      const deliveredAt = new Date();
+
+      // ── Repuestos activos (se reutiliza para subtotal y para decisión de factura) ──
       const spareAssignments = await manager.getRepository(SpareAssignment).find({
         where: {
           order_id: dto.orderId,
@@ -1506,11 +1527,31 @@ export class OrderWorkflowService {
         },
       });
 
+      // ── NUEVO: calcular subtotal y congelar descuentos pendientes ───────────
+      const subtotal = await this.calculateOrderSubtotal(manager, dto.orderId, spareAssignments);
+      const { discountTotal, hadDiscounts } = await this.freezeOrderDiscounts(
+        manager,
+        dto.orderId,
+        subtotal,
+        deliveredAt,
+      );
+      // ─────────────────────────────────────────────────────────────────────
+
+      // ── Determinar si corresponde emisión automática de factura ──────────
+      // Regla de negocio:
+      //   - Sin repuestos asignados (solo mano de obra)          → NO se emite automático.
+      //   - Con repuestos, pero al menos uno no es facturable    → NO se emite automático.
+      //   - Con repuestos y TODOS son facturables                → SÍ, salvo que...
+      //   - La orden tenga descuentos aplicados                  → NO se emite automático
+      //     (el monto facturado no coincidiría con el cobrado; se factura manual).
       const nonBillableSpares = spareAssignments.filter(
         (sa) => !sa.is_billable_in_repair_orders,
       );
 
-      const shouldEmitInvoice = spareAssignments.length > 0 && nonBillableSpares.length === 0;
+      const shouldEmitInvoice =
+        spareAssignments.length > 0 &&
+        nonBillableSpares.length === 0 &&
+        !hadDiscounts; // 👈 NUEVO: bloquea emisión automática si hubo descuento
 
       if (spareAssignments.length === 0) {
         console.log(`ℹ️ Orden ${dto.orderId} sin repuestos asignados, no aplica emisión automática de factura`);
@@ -1519,23 +1560,23 @@ export class OrderWorkflowService {
           `⚠️ Orden ${dto.orderId} tiene ${nonBillableSpares.length} repuesto(s) no facturable(s), no se emitirá factura automática (queda pendiente de facturación manual)`,
           nonBillableSpares.map((sa) => sa.sku),
         );
+      } else if (hadDiscounts) {
+        console.log(
+          `⏭️ Orden ${dto.orderId} tiene descuento(s) aplicado(s) (total: ${discountTotal}), no se emitirá factura automática (queda pendiente de facturación manual)`,
+        );
       } else {
-        console.log(`✅ Orden ${dto.orderId}: ${spareAssignments.length} repuesto(s), todos facturables → se emitirá factura automática`);
+        console.log(`✅ Orden ${dto.orderId}: ${spareAssignments.length} repuesto(s), todos facturables, sin descuentos → se emitirá factura automática`);
       }
-      // ── NUEVO: bloquear el cierre si corresponde facturar pero falta billingId ──
+
+      // ── Bloquear el cierre si corresponde facturar pero falta billingId ──
       if (shouldEmitInvoice && !dto.billing) {
         throw new RpcException(
           new BadRequestException(
             'Esta orden requiere emisión automática de factura (todos los repuestos son facturables), pero no se proporcionó información de facturación. Registre los datos de facturación del cliente antes de cerrar la orden.',
           ),
         );
-      } //1720
+      }
       // ──────────────────────────────────────────────────────────────────
-
-      const fromStatusName = order.currentStatus?.name ?? 'TRABAJO FINALIZADO';
-      const isOutgoing = order.order_type_id === 3;
-      const deliveryRepo = manager.getRepository(OrderDelivery);
-      const deliveredAt = new Date();
 
       const deliveryData = {
         order_id: dto.orderId,
@@ -1546,9 +1587,11 @@ export class OrderWorkflowService {
         signature_collected: dto.signatureCollected ?? false,
         is_outgoing_payment: isOutgoing,
         amount: dto.amount,
+        subtotal_before_discount: subtotal,
+        discount_total: discountTotal,
         payment_method_id: dto.paymentMethodId ?? null,
         closure_observation: dto.closureObservation ?? null,
-        billing_id: dto.billing?.id ?? null,             // 👈 sigue siendo columnas planas en la tabla
+        billing_id: dto.billing?.id ?? null,
         billing_name: dto.billing?.name ?? null,
         billing_id_number: dto.billing?.idNumber ?? null,
         company_id: user.companyId,
@@ -1641,6 +1684,8 @@ export class OrderWorkflowService {
         signature_collected: dto.signatureCollected ?? false,
         is_outgoing_payment: isOutgoing,
         amount: dto.amount,
+        subtotal_before_discount: subtotal,
+        discount_total: discountTotal,
         payment_method_id: dto.paymentMethodId ?? null,
         closure_observation: dto.closureObservation ?? null,
         company_id: user.companyId,
@@ -1657,9 +1702,8 @@ export class OrderWorkflowService {
         savedPayment,
         paymentType,
         attachments,
-        // ── NUEVO: se llevan fuera de la transacción para decidir si se dispara Kafka ──
         shouldEmitInvoice,
-        spareAssignments, // los billables ya confirmados si shouldEmitInvoice === true
+        spareAssignments,
         billing: dto.billing,
         order,
       };
@@ -1708,9 +1752,7 @@ export class OrderWorkflowService {
       },
     });
 
-    // ── NUEVO: disparar emisión de factura solo si corresponde ───────────
-    // El armado del payload completo (emisor, tax, details, etc.) lo vemos
-    // en el siguiente paso; acá solo dejamos el punto de entrada condicionado.
+    // ── Disparar emisión de factura solo si corresponde ───────────────────
     if (result.shouldEmitInvoice && result.billing) {
       const details = await this.invoicesService.buildInvoiceDetails(
         this.orderRepo.manager,
@@ -1721,8 +1763,8 @@ export class OrderWorkflowService {
         dto.orderId,
         user.companyId,
         user.branchId,
-        user.userId,           // 👈 quien cerró la orden
-        dto.paymentMethodId ?? null,  // 👈 el método de pago del cierre
+        user.userId,
+        dto.paymentMethodId ?? null,
         details,
         result.billing,
       );
@@ -3401,6 +3443,93 @@ export class OrderWorkflowService {
       orderNumber: order.order_number,
       payments: result,
     };
+  }
+
+
+
+
+
+  private async calculateOrderSubtotal(
+    manager: EntityManager,
+    orderId: number,
+    spareAssignments: SpareAssignment[],
+  ): Promise<number> {
+    let subtotal = 0;
+
+    // Mano de obra: procedures activos de los findings de la orden
+    const procedures = await manager
+      .getRepository(FindingProcedure)
+      .createQueryBuilder('procedure')
+      .innerJoin('procedure.finding', 'finding')
+      .where('finding.order_id = :orderId', { orderId })
+      .andWhere('procedure.is_active = true')
+      .getMany();
+
+    subtotal += procedures.reduce(
+      (sum, p) => sum + Number(p.procedure_cost || 0),
+      0,
+    );
+
+    // Repuestos activos (ya vienen consultados desde closeOrder, se reutilizan)
+    subtotal += spareAssignments.reduce(
+      (sum, sa: any) => sum + Number(sa.unit_price || 0) * Number(sa.quantity || 1),
+      0,
+    );
+
+    // Servicios extra
+    const extraServices = await manager.getRepository(OrderExtraService).find({
+      where: { order_id: orderId },
+    });
+    subtotal += extraServices.reduce(
+      (sum, s) => sum + Number(s.total_price || 0),
+      0,
+    );
+
+    // Productos pendientes
+    const pendingProducts = await manager.getRepository(OrderPendingProduct).find({
+      where: { order_id: orderId },
+    });
+    subtotal += pendingProducts.reduce(
+      (sum, p: any) => sum + Number(p.sale_price || 0) * Number(p.quantity || 1),
+      0,
+    );
+
+    return subtotal;
+  }
+
+  private async freezeOrderDiscounts(
+    manager: EntityManager,
+    orderId: number,
+    subtotal: number,
+    appliedAt: Date,
+  ): Promise<{ discountTotal: number; hadDiscounts: boolean }> {
+    const pendingDiscounts = await manager.find(OrderDiscount, {
+      where: { order_id: orderId, status: DiscountStatus.PENDING },
+    });
+
+    if (pendingDiscounts.length === 0) {
+      return { discountTotal: 0, hadDiscounts: false };
+    }
+
+    let discountTotal = 0;
+
+    for (const discount of pendingDiscounts) {
+      const amount = discount.discount_type === DiscountType.FIXED
+        ? Number(discount.discount_value)
+        : subtotal * (Number(discount.discount_value) / 100);
+
+      discount.calculated_amount = amount;
+      discount.status = DiscountStatus.APPLIED;
+      discount.applied_at = appliedAt;
+
+      discountTotal += amount;
+    }
+
+    discountTotal = Math.min(discountTotal, subtotal);
+
+    await manager.save(OrderDiscount, pendingDiscounts);
+
+    return { discountTotal, hadDiscounts: true };
   }
 }
 
