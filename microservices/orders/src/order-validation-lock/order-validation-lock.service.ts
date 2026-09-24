@@ -18,9 +18,13 @@ export class OrderValidationLockService {
         return replica?.is_checked === true;
     }
 
-    async assertEditable(orderId: number): Promise<void> {
+    async assertEditable(orderId: number, allowedTargetStatusNames?: string[]): Promise<void> {
         const locked = await this.isLocked(orderId);
         if (locked) {
+            // Si se proporcionan estados permitidos, no lanzar error
+            if (allowedTargetStatusNames && allowedTargetStatusNames.length > 0) {
+                return; // Permitir el cambio aunque esté locked
+            }
             throw new RpcException(
                 new BadRequestException(`La orden #${orderId} ya fue validada y no puede ser editada`),
             );
