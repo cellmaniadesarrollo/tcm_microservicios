@@ -867,21 +867,51 @@ export class OrdersReportsService {
                 { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
             ]),
 
+            // ── drillCounts: ahora received/finished/delivered vienen desglosados por type.id ──
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 {
                     $facet: {
-                        today_received: [{ $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } }, { $count: 'n' }],
-                        today_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
-                        today_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+                        today_received: [
+                            { $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        today_finished: [
+                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        today_delivered: [
+                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
                         today_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
-                        week_received: [{ $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } }, { $count: 'n' }],
-                        week_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
-                        week_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
+
+                        week_received: [
+                            { $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        week_finished: [
+                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        week_delivered: [
+                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
                         week_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
-                        month_received: [{ $match: { entry_date: { $gte: monthStart, $lte: now } } }, { $count: 'n' }],
-                        month_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
-                        month_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
+
+                        month_received: [
+                            { $match: { entry_date: { $gte: monthStart, $lte: now } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        month_finished: [
+                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        month_delivered: [
+                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
                         month_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
                     },
                 },
@@ -896,13 +926,44 @@ export class OrdersReportsService {
             ]),
         ]);
 
+        // ── Helpers ────────────────────────────────────────────────────────────────
         const c = (key: string): number => drillCounts[0]?.[key]?.[0]?.n ?? 0;
+
+        /** Convierte [{ _id: typeId, n }] en { total, byType: { '1': n, '2': n, '3': n } } */
+        const cByType = (key: string) => {
+            const rows: { _id: number | null; n: number }[] = drillCounts[0]?.[key] ?? [];
+            const byType: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
+            let total = 0;
+            for (const r of rows) {
+                if (r._id != null && byType[String(r._id)] !== undefined) {
+                    byType[String(r._id)] = r.n;
+                }
+                total += r.n;
+            }
+            return { total, byType };
+        };
+
         const statusMap: Record<number, number> = Object.fromEntries(byStatus.map((s: any) => [s.id, s.count]));
 
         const counts = {
-            today: { received: c('today_received'), finished: c('today_finished'), delivered: c('today_delivered'), collected: c('today_collected') },
-            week: { received: c('week_received'), finished: c('week_finished'), delivered: c('week_delivered'), collected: c('week_collected') },
-            month: { received: c('month_received'), finished: c('month_finished'), delivered: c('month_delivered'), collected: c('month_collected') },
+            today: {
+                received: cByType('today_received'),
+                finished: cByType('today_finished'),
+                delivered: cByType('today_delivered'),
+                collected: c('today_collected'),
+            },
+            week: {
+                received: cByType('week_received'),
+                finished: cByType('week_finished'),
+                delivered: cByType('week_delivered'),
+                collected: c('week_collected'),
+            },
+            month: {
+                received: cByType('month_received'),
+                finished: cByType('month_finished'),
+                delivered: cByType('month_delivered'),
+                collected: c('month_collected'),
+            },
             global: {
                 all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
                 pending: statusMap[1] ?? 0,
@@ -914,7 +975,7 @@ export class OrdersReportsService {
             },
             validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
         };
-        // console.log(counts)
+
         // ── Cálculos derivados ────────────────────────────────────────────────────
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
@@ -1024,13 +1085,23 @@ export class OrdersReportsService {
                 { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
             ]),
 
+            // ── rangeCounts: received/finished/delivered ahora desglosados por type.id ──
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 {
                     $facet: {
-                        range_received: [{ $match: { entry_date: { $gte: rangeStart, $lt: rangeEnd } } }, { $count: 'n' }],
-                        range_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: rangeStart, $lt: rangeEnd } } } } }, { $count: 'n' }],
-                        range_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: rangeStart, $lt: rangeEnd } } } } }, { $count: 'n' }],
+                        range_received: [
+                            { $match: { entry_date: { $gte: rangeStart, $lt: rangeEnd } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        range_finished: [
+                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: rangeStart, $lt: rangeEnd } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
+                        range_delivered: [
+                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: rangeStart, $lt: rangeEnd } } } } },
+                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
+                        ],
                         range_payments_count: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: rangeStart, $lt: rangeEnd } } } } }, { $count: 'n' }],
                     },
                 },
@@ -1045,16 +1116,36 @@ export class OrdersReportsService {
             ]),
         ]);
 
+        // ── Helpers ────────────────────────────────────────────────────────────────
         const c = (key: string): number => rangeCounts[0]?.[key]?.[0]?.n ?? 0;
+
+        const cByType = (key: string) => {
+            const rows: { _id: number | null; n: number }[] = rangeCounts[0]?.[key] ?? [];
+            const byType: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
+            let total = 0;
+            for (const r of rows) {
+                if (r._id != null && byType[String(r._id)] !== undefined) {
+                    byType[String(r._id)] = r.n;
+                }
+                total += r.n;
+            }
+            return { total, byType };
+        };
+
         const statusMap: Record<number, number> = Object.fromEntries(byStatus.map((s: any) => [s.id, s.count]));
 
-        const rangeDelivered = c('range_delivered');
+        const rangeDeliveredCount = cByType('range_delivered');
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
-        const avgTicket = rangeDelivered > 0 ? +(totalPaid / rangeDelivered).toFixed(2) : 0;
+        const avgTicket = rangeDeliveredCount.total > 0 ? +(totalPaid / rangeDeliveredCount.total).toFixed(2) : 0;
 
         const counts = {
-            range: { received: c('range_received'), finished: c('range_finished'), delivered: rangeDelivered, collected: c('range_payments_count') },
+            range: {
+                received: cByType('range_received'),
+                finished: cByType('range_finished'),
+                delivered: rangeDeliveredCount,
+                collected: c('range_payments_count'),
+            },
             global: {
                 all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
                 pending: statusMap[1] ?? 0, in_progress: statusMap[6] ?? 0,

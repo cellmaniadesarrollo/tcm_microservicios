@@ -40,6 +40,35 @@ export class CustomersService {
                 );
             }
 
+            // ── Normalización ────────────────────────────────────────
+            const c = data.customer;
+            if (c.firstName) c.firstName = c.firstName.trim().toUpperCase();
+            if (c.lastName) c.lastName = c.lastName.trim().toUpperCase();
+            if (c.idNumber) c.idNumber = c.idNumber.trim().toUpperCase();
+
+            if (c.contacts) {
+                c.contacts = c.contacts.map(ct => ({
+                    ...ct,
+                    value: ct.contactTypeId === 1  // MÓVIL ya tiene normalizeMobilePhone
+                        ? ct.value
+                        : typeof ct.value === 'string'
+                            ? ct.value.trim().toLowerCase()  // EMAIL en minúsculas
+                            : ct.value,
+                }));
+            }
+
+            if (c.addresses) {
+                c.addresses = c.addresses.map(a => ({
+                    ...a,
+                    zone: a.zone?.trim().toUpperCase(),
+                    sector: a.sector?.trim().toUpperCase(),
+                    locality: a.locality?.trim().toUpperCase(),
+                    mainStreet: a.mainStreet?.trim().toUpperCase(),
+                    secondaryStreet: a.secondaryStreet?.trim().toUpperCase(),
+                    reference: a.reference?.trim().toUpperCase(),
+                }));
+            }
+            // ─────────────────────────────────────────────────────────
             // 2️⃣ Crear instancia
             const customer = this.customerRepo.create({
                 idType: { id: data.customer.idTypeId },
@@ -145,20 +174,18 @@ export class CustomersService {
         delete updates.idTypeId;
 
         // Actualizar datos simples
+        // Actualizar datos simples
         if (updates.firstName !== undefined)
-            customer.firstName = updates.firstName;
+            customer.firstName = updates.firstName.trim().toUpperCase();
 
         if (updates.lastName !== undefined)
-            customer.lastName = updates.lastName;
+            customer.lastName = updates.lastName.trim().toUpperCase();
 
         if (updates.birthDate !== undefined)
             customer.birthDate = updates.birthDate;
 
         if (updates.genderId !== undefined)
             customer.gender = { id: updates.genderId } as any;
-
-        if (updates.company !== undefined)
-            customer.company = updates.company;
 
         // CONTACTOS (si vienen)
         if (updates.contacts) {
@@ -167,9 +194,11 @@ export class CustomersService {
                 contactType: c.contactTypeId ? { id: c.contactTypeId } : undefined,
                 value: c.contactTypeId === 1
                     ? this.normalizeMobilePhone(c.value)
-                    : c.value,
+                    : typeof c.value === 'string'
+                        ? c.value.trim().toLowerCase()   // EMAIL en minúsculas
+                        : c.value,
                 isPrimary: c.isPrimary ?? false,
-                customer: { id } as any
+                customer: { id } as any,
             }));
         }
 
@@ -178,14 +207,14 @@ export class CustomersService {
             customer.addresses = updates.addresses.map(a => ({
                 id: a.id ?? undefined,
                 city: a.cityId ? { id: a.cityId } : null,
-                zone: a.zone,
-                sector: a.sector,
-                locality: a.locality,
-                mainStreet: a.mainStreet,
-                secondaryStreet: a.secondaryStreet,
-                reference: a.reference,
-                postalCode: a.postalCode,
-                customer: { id } as any
+                zone: a.zone?.trim().toUpperCase(),
+                sector: a.sector?.trim().toUpperCase(),
+                locality: a.locality?.trim().toUpperCase(),
+                mainStreet: a.mainStreet?.trim().toUpperCase(),
+                secondaryStreet: a.secondaryStreet?.trim().toUpperCase(),
+                reference: a.reference?.trim().toUpperCase(),
+                postalCode: a.postalCode?.trim(),
+                customer: { id } as any,
             }));
         }
 

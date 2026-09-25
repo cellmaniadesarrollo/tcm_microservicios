@@ -13,6 +13,8 @@ import { NoAprobarLlegadaGatewayDto } from './dto/no-aprobar-llegada-gateway.dto
 import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-request-gateway.dto';
 import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
 import { ResolverLitigioGatewayDto } from './dto/resolver-litigio.gateway.dto';
+import { CreatePartRequestTravelItemGatewayDto } from './dto/create-part-request-travel-item-gateway.dto';
+import { RequestContext } from '@nestjs/microservices';
 
 @Injectable()
 export class PartRequestsGatewayService {
@@ -110,5 +112,9 @@ export class PartRequestsGatewayService {
 
     async litigarDesdeProductoPendiente(dto: any, files: any[], user: any) {
         return this.orderServiceClient.send('litigar_producto_pendiente', { dto, files, user });
+    }
+
+    createTravelItem(dto: CreatePartRequestTravelItemGatewayDto, user: any) {
+        return this.orderServiceClient.send('create_part_request_travel_item', { dto, user });
     }
 } 
