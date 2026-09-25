@@ -3,4 +3,5 @@
 export interface ResolverLitigioDto {
     id: number;
     descripcionResolucion: string;
+    resultado: 'REABRIR' | 'CERRAR';
 }
