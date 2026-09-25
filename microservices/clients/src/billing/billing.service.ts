@@ -90,10 +90,19 @@ export class BillingService {
                 throw new RpcException(new BadRequestException('mainEmail es requerido'));
             if (!data?.address)
                 throw new RpcException(new BadRequestException('address es requerido'));
+
+            // Normalización a mayúsculas
+            const firstName = data.firstName?.trim()?.toUpperCase();
+            const lastName = data.lastName?.trim()?.toUpperCase();
+            const address = data.address?.trim()?.toUpperCase();
+            const city = data.city?.trim()?.toUpperCase();
+            const tradeName = data.tradeName?.trim()?.toUpperCase();
+
             const businessName =
-                data.businessName?.trim() ||
-                [data.firstName, data.lastName].filter(Boolean).join(' ').trim() ||
+                data.businessName?.trim()?.toUpperCase() ||
+                [firstName, lastName].filter(Boolean).join(' ').trim() ||
                 undefined;
+
             return await this.upsertCustomerAndBillingData(
                 {
                     companyId: data.user.companyId,
@@ -101,16 +110,16 @@ export class BillingService {
                     idTypeId: data.idTypeId,
                     personTypeId: data.personTypeId,
                     genderId: data.genderId,
-                    firstName: data.firstName,
-                    lastName: data.lastName,
+                    firstName,
+                    lastName,
                     businessName,
-                    tradeName: data.tradeName,
+                    tradeName,
                     mainEmail: data.mainEmail,
                     cellphone: data.cellphone,
                     phone: data.phone,
                     birthdate: data.birthdate,
-                    address: data.address,
-                    city: data.city,
+                    address,
+                    city,
                     isCompanyClient: data.isCompanyClient ?? false,
                 },
                 logger,
@@ -165,6 +174,11 @@ export class BillingService {
                 if (data.updates?.[key] !== undefined) {
                     if (key === 'idTypeId') {
                         billing.idType = { id: data.updates.idTypeId } as any;
+                    } else if (typeof data.updates[key] === 'string') {
+                        // email en minúsculas, el resto en mayúsculas
+                        (billing as any)[key] = key === 'mainEmail'
+                            ? data.updates[key].trim().toLowerCase()
+                            : data.updates[key].trim().toUpperCase();
                     } else {
                         (billing as any)[key] = data.updates[key];
                     }
@@ -347,6 +361,7 @@ export class BillingService {
             throw new RpcException(new InternalServerErrorException('Error procesando billing desde legacy'));
         }
     }
+
     async updateFromLegacyRaw(raw: any) {
         if (!raw?.company_id && !raw?.user?.companyId)
             throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));
@@ -530,21 +545,21 @@ export class BillingService {
 
         // 5. Construir el payload que espera createFromLegacy
         return {
-            user,                               // { companyId }
+            user,
             idNumber: raw.identification,
             idTypeId: idType.id,
             personTypeId: personType.id,
             genderId,
-            firstName: raw.first_name,
-            lastName: raw.last_name,
-            businessName: raw.business_name,   // undefined en persona natural → ok
+            firstName: raw.first_name?.trim()?.toUpperCase(),
+            lastName: raw.last_name?.trim()?.toUpperCase(),
+            businessName: raw.business_name?.trim()?.toUpperCase(),
             tradeName: undefined,
-            mainEmail: raw.email,
-            cellphone: raw.cellphone,
-            phone: raw.phone,
+            mainEmail: raw.email?.trim()?.toLowerCase(),   // email → minúsculas
+            cellphone: raw.cellphone?.trim(),
+            phone: raw.phone?.trim(),
             birthdate,
-            address: raw.address,
-            city: raw.city,
+            address: raw.address?.trim()?.toUpperCase(),
+            city: raw.city?.trim()?.toUpperCase(),
             isCompanyClient: raw.person_type === 'juridica',
         };
     }
@@ -653,8 +668,18 @@ export class BillingService {
                 let billingSaved: BillingData | null = null;
                 let billingCreated = false;
 
+                // Normalización a mayúsculas
+                if (c.firstName) c.firstName = c.firstName.trim().toUpperCase();
+                if (c.lastName) c.lastName = c.lastName.trim().toUpperCase();
+                if (c.idNumber) c.idNumber = c.idNumber.trim().toUpperCase();
+
                 if (data.billing) {
                     const b = data.billing;
+                    if (b.businessName) b.businessName = b.businessName.trim().toUpperCase();
+                    if (b.tradeName) b.tradeName = b.tradeName.trim().toUpperCase();
+                    if (b.addressOverride) b.addressOverride = b.addressOverride.trim().toUpperCase();
+                    if (b.cityOverride) b.cityOverride = b.cityOverride.trim().toUpperCase();
+
 
                     const existingBilling = await billingRepo.findOne({
                         where: { idNumber: c.idNumber, company: { id: data.user.companyId } },
