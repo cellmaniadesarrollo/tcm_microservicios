@@ -12,6 +12,7 @@ import { CreatePartRequestDto } from './dto/create-part-request.dto';
 import { ListPartRequestsDto } from './dto/list-part-requests.dto';
 import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/part-requests.helpers';
 import { GRUPOS_CON_ACCESO_ESPERA_PAGO } from './part-request.constants';
+import { PartRequestTravelItem } from './entities/part-request-travel-item.entity';
 
 /**
  * Dueño del ciclo de vida base de PartRequest: creación, listados, lectura
@@ -27,6 +28,7 @@ export class PartRequestService {
         @InjectRepository(PartRequest) private readonly partRequestRepo: Repository<PartRequest>,
         @InjectRepository(Attachment) private readonly attachmentRepo: Repository<Attachment>,
         @InjectRepository(Order) private readonly orderRepo: Repository<Order>,
+        @InjectRepository(PartRequestTravelItem) private readonly travelItemRepo: Repository<PartRequestTravelItem>,
         private readonly awsS3Service: AwsS3Service,
     ) { }
 
@@ -210,7 +212,6 @@ export class PartRequestService {
 
         return result;
     }
-
     async listPartRequests(
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
@@ -225,6 +226,9 @@ export class PartRequestService {
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
+            // FIX: falta este join — sin él, litigio_resuelto/fecha_resolucion/etc. nunca llegan
+            .leftJoinAndSelect('pr.arrival', 'arrival')
+            .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor')
             .where('pr.company_id = :companyId', { companyId: user.companyId });
 
         if (dto.soloMias) {
@@ -239,7 +243,6 @@ export class PartRequestService {
             qb.andWhere('pr.estado = :estado', { estado: dto.estado });
         }
 
-        // NUEVO: prioridad 0 para SOLICITADO, 1 para el resto — van primero sin importar su fecha
         qb.addSelect(
             `CASE WHEN pr.estado = :estadoPrioritario THEN 0 ELSE 1 END`,
             'estado_prioridad',
@@ -260,6 +263,10 @@ export class PartRequestService {
             technician: mapUser(pr.technician),
             responsableBusqueda: mapUser(pr.responsableBusqueda),
             responsableRecepcion: mapUser(pr.responsableRecepcion),
+            // FIX: se deriva desde arrival, no es columna propia de PartRequest
+            litigio_resuelto: pr.arrival?.resuelto ?? false,
+            fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
+            descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
         }));
 
         return {
@@ -289,9 +296,16 @@ export class PartRequestService {
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
             .leftJoinAndSelect('pr.sourcing', 'sourcing')
+            // ─── FIX: provider del sourcing (antes era texto libre, ahora FK) ───
+            .leftJoinAndSelect('sourcing.provider', 'sourcingProvider')
+            // ─── FIX: cuentas bancarias seleccionadas para el sourcing ───
+            .leftJoinAndSelect('sourcing.cuentasSeleccionadas', 'cuentasSel')
+            .leftJoinAndSelect('cuentasSel.providerAccount', 'providerAccount')
             .leftJoinAndSelect('pr.shipping', 'shipping')
             .leftJoinAndSelect('pr.arrival', 'arrival')
-            // ─── NUEVO: allocations → payment → provider ───
+            // ─── FIX: quién resolvió el rechazo/litigio de la llegada ───
+            .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor')
+            // ─── allocations → payment → provider ───
             .leftJoinAndSelect('pr.pagoAllocations', 'allocations')
             .leftJoinAndSelect('allocations.payment', 'payment')
             .leftJoinAndSelect('payment.provider', 'paymentProvider')
@@ -421,6 +435,13 @@ export class PartRequestService {
                 ['ORDER_AUDIT', 'LOGISTICA_REPUESTOS', 'COMPANY_ADMIN', 'ADMINS'].includes(g),
             ) ?? false;
 
+        // ─── Travel item (viajero asignado a esta solicitud) ───
+        const travelItem = await this.travelItemRepo.findOne({
+            where: { part_request_id: pr.id },
+            relations: ['traveler', 'suggestedProvider'],
+            order: { createdAt: 'DESC' },
+        });
+
         const result: any = {
             id: pr.id,
             fecha_solicitud: pr.createdAt,
@@ -434,15 +455,62 @@ export class PartRequestService {
                 ? {
                     ...pr.sourcing,
                     precio:
-                        pr.sourcing.precio !== null && pr.sourcing.precio !== undefined
+                        puedeVerPagos && pr.sourcing.precio != null
                             ? Number(pr.sourcing.precio)
                             : null,
-                    precio_transporte: Number(pr.sourcing.precio_transporte ?? 0),
+                    precio_transporte: puedeVerPagos
+                        ? Number(pr.sourcing.precio_transporte ?? 0)
+                        : null,
                     cantidad: Number(pr.sourcing.cantidad),
+                    provider: pr.sourcing.provider
+                        ? { id: pr.sourcing.provider.id, nombre: pr.sourcing.provider.nombre }
+                        : null,
+                    cuentasSeleccionadas: puedeVerPagos
+                        ? (pr.sourcing.cuentasSeleccionadas ?? []).map((c) => ({
+                            id: c.id,
+                            monto_sugerido: c.monto_sugerido != null ? Number(c.monto_sugerido) : null,
+                            providerAccount: c.providerAccount
+                                ? {
+                                    id: c.providerAccount.id,
+                                    alias: c.providerAccount.alias ?? null,
+                                    banco: c.providerAccount.banco,
+                                    numero_cuenta: c.providerAccount.numero_cuenta,
+                                    tipo_cuenta: c.providerAccount.tipo_cuenta,
+                                    titular_cuenta: c.providerAccount.titular_cuenta,
+                                }
+                                : null,
+                        }))
+                        : [],
                 }
                 : null,
             shipping,
-            arrival,
+            arrival: arrival
+                ? {
+                    ...arrival,
+                    // FIX: exponer explícitamente quién resolvió (rechazo/litigio)
+                    resueltoPor: arrival.resueltoPor ? mapUser(arrival.resueltoPor) : null,
+                }
+                : null,
+            // FIX: item de viaje asociado (si existe)
+            travelItem: travelItem
+                ? {
+                    id: travelItem.id,
+                    mode: travelItem.mode,
+                    status: travelItem.status,
+                    expected_quantity: travelItem.expected_quantity,
+                    collected_quantity: travelItem.collected_quantity ?? null,
+                    paid_cost: puedeVerPagos && travelItem.paid_cost != null
+                        ? Number(travelItem.paid_cost)
+                        : null,
+                    office_notes: travelItem.office_notes ?? null,
+                    traveler_notes: travelItem.traveler_notes ?? null,
+                    collected_at: travelItem.collected_at ?? null,
+                    traveler: travelItem.traveler ? mapUser(travelItem.traveler) : null,
+                    suggestedProvider: travelItem.suggestedProvider
+                        ? { id: travelItem.suggestedProvider.id, nombre: travelItem.suggestedProvider.nombre }
+                        : null,
+                }
+                : null,
             order: pr.order
                 ? {
                     id: pr.order.id,

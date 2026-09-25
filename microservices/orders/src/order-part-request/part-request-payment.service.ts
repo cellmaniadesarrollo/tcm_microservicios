@@ -291,7 +291,7 @@ export class PartRequestPaymentService {
         files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
         user: { userId: string; companyId: string },
     ) {
-        console.log(dto);
+
         return this.partRequestRepo.manager.transaction(async (manager) => {
             if (!dto.asignaciones?.length) {
                 throw new RpcException(new BadRequestException('Debes seleccionar al menos una solicitud a pagar'));

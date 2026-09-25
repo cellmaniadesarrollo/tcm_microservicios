@@ -20,6 +20,7 @@ import { PartRequestSourcingService } from './part-request-sourcing.service';
 import { PartRequestPaymentService } from './part-request-payment.service';
 import { PartRequestArrivalService } from './part-request-arrival.service';
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
+import { PartRequestTravelItem } from './entities/part-request-travel-item.entity';
 
 @Module({
   imports: [
@@ -36,7 +37,7 @@ import { OrderPendingProduct } from '../order-extras/entities/order-pending-prod
       ProviderAccount,
       SourcingProviderAccount,
       PartRequestPaymentAllocation,
-      OrderPendingProduct
+      OrderPendingProduct, PartRequestTravelItem
     ]),
     AwsS3Module
   ],

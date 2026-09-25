@@ -438,7 +438,6 @@ export class PartRequestsController {
     }
 
     // gateway controller
-
     @Groups('LOGISTICA_REPUESTOS', 'ORDER_AUDIT')
     @Get('litigios')
     async listLitigios(
@@ -447,6 +446,7 @@ export class PartRequestsController {
         @Query('search') search: string,
         @Query('providerId') providerId: string,
         @Query('motivoCategoria') motivoCategoria: string,
+        @Query('resuelto') resuelto: string,   // 👈 nuevo
         @User() user: any,
     ) {
         return this.partRequestsGatewayService.listLitigios(
@@ -456,6 +456,7 @@ export class PartRequestsController {
                 search: search || undefined,
                 providerId: providerId ? Number(providerId) : undefined,
                 motivoCategoria: motivoCategoria || undefined,
+                resuelto: resuelto === 'true' ? true : resuelto === 'false' ? false : undefined,  // 👈 nuevo
             },
             { userId: user.sub, companyId: user.companyId },
         );
