@@ -429,6 +429,8 @@ export class PartRequestArrivalService {
 
             // 1. Si existe registro de llegada, marcar su validación como litigio
             // (puede NO existir si viene desde EN_PROCESO_DE_PEDIDO, antes de registrar envío/llegada)
+            // 1. Si existe registro de llegada, marcar su validación como litigio
+            // Si NO existe (ej. viene desde EN_PROCESO_DE_PEDIDO), CREARLO con los datos del litigio
             if (partRequest.arrival) {
                 partRequest.arrival.resultado_validacion = 'LITIGIO';
                 partRequest.arrival.validado_por_id = user.userId;
@@ -436,6 +438,19 @@ export class PartRequestArrivalService {
                 partRequest.arrival.motivo_categoria = dto.motivoCategoria;
                 partRequest.arrival.motivo_rechazo = dto.motivo;
                 await manager.save(partRequest.arrival);
+            } else {
+                // Crear arrival mínimo para que el litigio quede registrado correctamente
+                const newArrival = manager.create(PartRequestArrival, {
+                    part_request_id: partRequest.id,
+                    resultado_validacion: 'LITIGIO',
+                    validado_por_id: user.userId,
+                    fecha_validacion: new Date(),
+                    motivo_categoria: dto.motivoCategoria,
+                    motivo_rechazo: dto.motivo,
+                    registrado_por_id: user.userId,
+                    cantidad: 0, // no llegó nada físicamente
+                });
+                partRequest.arrival = await manager.save(newArrival);
             }
 
             // 2. Eliminar (softDelete) la asignación a la orden si existe
@@ -500,7 +515,7 @@ export class PartRequestArrivalService {
         });
     }
     async listLitigios(
-        dto: { page?: number; limit?: number; search?: string; providerId?: number; motivoCategoria?: string },
+        dto: { page?: number; limit?: number; search?: string; providerId?: number; motivoCategoria?: string; resuelto?: boolean },
         user: { companyId: string },
     ) {
         const page = dto.page && dto.page > 0 ? dto.page : 1;
@@ -512,11 +527,21 @@ export class PartRequestArrivalService {
             .leftJoinAndSelect('sourcing.provider', 'provider')
             .leftJoinAndSelect('pr.order', 'order')
             .leftJoinAndSelect('pr.arrival', 'arrival')
-            .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor') // 👈 nuevo
+            .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor')
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .where('pr.company_id = :companyId', { companyId: user.companyId })
-            .andWhere('pr.estado = :estado', { estado: PartRequestStatus.LITIGIO });
+            .andWhere(
+                '(pr.estado = :estadoLitigio OR (pr.estado = :estadoCancelado AND arrival.resuelto = true))',
+                {
+                    estadoLitigio: PartRequestStatus.LITIGIO,
+                    estadoCancelado: PartRequestStatus.CANCELADO,
+                },
+            );
+
+        if (dto.resuelto !== undefined) {
+            qb.andWhere('arrival.resuelto = :resuelto', { resuelto: dto.resuelto });
+        }
 
         if (dto.providerId) {
             qb.andWhere('provider.id = :providerId', { providerId: dto.providerId });
@@ -525,12 +550,22 @@ export class PartRequestArrivalService {
         if (dto.motivoCategoria) {
             qb.andWhere('arrival.motivo_categoria = :motivoCategoria', { motivoCategoria: dto.motivoCategoria });
         }
-
         if (dto.search?.trim()) {
-            qb.andWhere(
-                '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { search: `%${dto.search.trim()}%` },
-            );
+            const searchTerm = dto.search.trim();
+            const orderNumberMatch = searchTerm.match(/^#(\d+)$/);
+
+            if (orderNumberMatch) {
+                // Búsqueda por número de orden exacto
+                qb.andWhere('order.order_number = :orderNumber', {
+                    orderNumber: parseInt(orderNumberMatch[1], 10),
+                });
+            } else {
+                // Búsqueda normal por descripción o proveedor
+                qb.andWhere(
+                    '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
+                    { search: `%${searchTerm}%` },
+                );
+            }
         }
 
         const [partRequests, total] = await qb
@@ -548,6 +583,7 @@ export class PartRequestArrivalService {
 
             return {
                 id: pr.id,
+                estado: pr.estado,
                 order_id: pr.order_id,
                 order_number: pr.order?.order_number ?? null,
                 descripcion: pr.descripcion,
@@ -566,9 +602,6 @@ export class PartRequestArrivalService {
                 fecha_resolucion: pr.arrival?.fecha_resolucion ?? null,
                 descripcion_resolucion: pr.arrival?.descripcion_resolucion ?? null,
                 resueltoPor: mapUser(pr.arrival?.resueltoPor),
-
-                // 👇 nuevo: bandera para que el frontend avise "dato inconsistente" en vez de
-                // dejar litigar/resolver algo que nunca se registró correctamente
                 dato_inconsistente: arrivalIncompleto,
             };
         });
@@ -645,7 +678,68 @@ export class PartRequestArrivalService {
                 throw new RpcException(new BadRequestException('La descripción de la resolución es requerida'));
             }
 
-            // ...resto del método sin cambios (marcar resuelto, adjuntos, etc.)
+
+
+            const estadoAnterior = partRequest.estado;
+
+            // 1. Marcar el litigio como resuelto
+            partRequest.arrival.resuelto = true;
+            partRequest.arrival.fecha_resolucion = new Date();
+            partRequest.arrival.resuelto_por_id = user.userId;
+            partRequest.arrival.descripcion_resolucion = dto.descripcionResolucion;
+            await manager.save(partRequest.arrival);
+
+            // 2. Adjuntos de la resolución (opcionales)
+            const attachments: Attachment[] = [];
+            for (const file of files) {
+                const buffer = Buffer.from(file.buffer, 'base64');
+                const prefix = `part-requests/${partRequest.id}/litigio-resolucion/`;
+                const url = await this.awsS3Service.uploadBuffer(buffer, file.originalname, file.mimetype, prefix);
+
+                attachments.push(
+                    await manager.save(
+                        manager.create(Attachment, {
+                            entity_type: AttachmentEntityType.PART_REQUEST_LITIGIO_RESOLUCION,
+                            entity_id: partRequest.arrival.id,
+                            file_name: file.originalname,
+                            file_url: url,
+                            file_type: file.mimetype,
+                            uploaded_by_id: user.userId,
+                            is_public: true,
+                        }),
+                    ),
+                );
+            }
+
+            // 3. Transición de estado según el resultado
+            const nuevoEstado = PartRequestStatus.LITIGIO;
+            partRequest.estado = nuevoEstado;
+            await manager.save(partRequest);
+
+            // 4. Historial
+            await manager.save(
+                manager.create(PartRequestStatusHistory, {
+                    part_request_id: partRequest.id,
+                    estado_anterior: estadoAnterior,
+                    estado_nuevo: nuevoEstado,
+                    actor_id: user.userId,
+                    notas: `Litigio resuelto (CERRAR): ${dto.descripcionResolucion}`,
+                }),
+            );
+
+            const result = {
+                id: partRequest.id,
+                estado_pedido: partRequest.estado,
+                resultado: dto.resultado,
+                descripcion_resolucion: dto.descripcionResolucion,
+                attachments,
+            };
+
+            if (attachments.length) {
+                await enrichPartRequestAttachmentsWithSignedUrls([{ id: result.id, attachments }], this.awsS3Service);
+            }
+
+            return result;
         });
     }
     // ─── Nuevo: litigar desde un OrderPendingProduct ──────────────────

@@ -44,6 +44,11 @@ export class PartRequestPaymentService {
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const filtro = dto.filtro ?? 'todos';
 
+        // Búsqueda: si viene como #123123 se interpreta como número de orden exacto
+        const searchTerm = dto.search?.trim();
+        const orderNumberMatch = searchTerm?.match(/^#(\d+)$/);
+        const orderNumberValue = orderNumberMatch ? parseInt(orderNumberMatch[1], 10) : null;
+
         // ═══════════════════════════════════════════════════════════
         // CASO 1: PAGADOS → listar por PAGO (no agrupar por proveedor)
         // ═══════════════════════════════════════════════════════════
@@ -54,9 +59,9 @@ export class PartRequestPaymentService {
                 .leftJoinAndSelect('pago.allocations', 'allocations')
                 .leftJoinAndSelect('allocations.partRequest', 'partRequest')
                 .leftJoinAndSelect('partRequest.order', 'prOrder')
-                .leftJoinAndSelect('partRequest.technician', 'prTechnician')           // 👈 nuevo
-                .leftJoinAndSelect('partRequest.responsableBusqueda', 'prResponsable') // 👈 nuevo
-                .leftJoinAndSelect('partRequest.arrival', 'prArrival')                 // 👈 nuevo, para litigio
+                .leftJoinAndSelect('partRequest.technician', 'prTechnician')
+                .leftJoinAndSelect('partRequest.responsableBusqueda', 'prResponsable')
+                .leftJoinAndSelect('partRequest.arrival', 'prArrival')
                 .innerJoinAndSelect('pago.provider', 'provider')
                 .where('provider.company_id = :companyId', { companyId: user.companyId });
 
@@ -64,13 +69,16 @@ export class PartRequestPaymentService {
                 qb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
 
-            if (dto.search?.trim()) {
+            if (orderNumberValue !== null) {
+                qb.andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
+            } else if (searchTerm) {
                 qb.andWhere(
                     '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                    { search: `%${dto.search.trim()}%` },
+                    { search: `%${searchTerm}%` },
                 );
             }
 
+            // totalQb necesita los mismos joins/condiciones para que el conteo coincida con los datos
             const totalQb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .innerJoin('pago.provider', 'provider')
@@ -79,10 +87,17 @@ export class PartRequestPaymentService {
             if (dto.providerId) {
                 totalQb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
-            if (dto.search?.trim()) {
+
+            if (orderNumberValue !== null) {
+                totalQb
+                    .leftJoin('pago.allocations', 'allocations')
+                    .leftJoin('allocations.partRequest', 'partRequest')
+                    .leftJoin('partRequest.order', 'prOrder')
+                    .andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
+            } else if (searchTerm) {
                 totalQb.andWhere(
                     '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                    { search: `%${dto.search.trim()}%` },
+                    { search: `%${searchTerm}%` },
                 );
             }
 
@@ -118,7 +133,6 @@ export class PartRequestPaymentService {
                     ? { id: p.provider.id, nombre: p.provider.nombre }
                     : null,
 
-                // 👇 nuevo: cada solicitud cubierta, con la data completa que necesita la tabla
                 solicitudes_cubiertas: (p.allocations ?? []).map((a) => ({
                     id: a.part_request_id,
                     order_id: a.partRequest?.order_id ?? null,
@@ -132,7 +146,6 @@ export class PartRequestPaymentService {
                     fecha_litigio: a.partRequest?.arrival?.fecha_validacion ?? null,
                     motivo_litigio: a.partRequest?.arrival?.motivo_rechazo ?? null,
 
-                    // 👇 nuevo
                     litigio_resuelto: a.partRequest?.arrival?.resuelto ?? false,
                     fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
                     descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
@@ -167,7 +180,7 @@ export class PartRequestPaymentService {
             .leftJoinAndSelect('pr.pagoAllocations', 'allocations')
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
-            .leftJoinAndSelect('pr.arrival', 'arrival') // 👈 nuevo: para datos del litigio
+            .leftJoinAndSelect('pr.arrival', 'arrival')
             .where('pr.company_id = :companyId', { companyId: user.companyId })
             .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO });
 
@@ -175,10 +188,12 @@ export class PartRequestPaymentService {
             qb.andWhere('provider.id = :providerId', { providerId: dto.providerId });
         }
 
-        if (dto.search?.trim()) {
+        if (orderNumberValue !== null) {
+            qb.andWhere('order.order_number = :orderNumber', { orderNumber: orderNumberValue });
+        } else if (searchTerm) {
             qb.andWhere(
                 '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { search: `%${dto.search.trim()}%` },
+                { search: `%${searchTerm}%` },
             );
         }
 
@@ -258,7 +273,6 @@ export class PartRequestPaymentService {
                     fecha_litigio: pr.arrival?.fecha_validacion ?? null,
                     motivo_litigio: pr.arrival?.motivo_rechazo ?? null,
 
-                    // 👇 nuevo
                     litigio_resuelto: pr.arrival?.resuelto ?? false,
                     fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
                     descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
@@ -291,7 +305,7 @@ export class PartRequestPaymentService {
         files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
         user: { userId: string; companyId: string },
     ) {
-        console.log(dto);
+
         return this.partRequestRepo.manager.transaction(async (manager) => {
             if (!dto.asignaciones?.length) {
                 throw new RpcException(new BadRequestException('Debes seleccionar al menos una solicitud a pagar'));
