@@ -216,6 +216,7 @@ export class PartRequestService {
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
     ) {
+
         const page = dto.page && dto.page > 0 ? dto.page : 1;
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const skip = (page - 1) * limit;
@@ -236,7 +237,18 @@ export class PartRequestService {
         }
 
         if (dto.search?.trim()) {
-            qb.andWhere('pr.descripcion ILIKE :search', { search: `%${dto.search.trim()}%` });
+            const searchTerm = dto.search.trim();
+            const orderNumberMatch = searchTerm.match(/^#(\d+)$/);
+
+            if (orderNumberMatch) {
+                // Búsqueda por número de orden exacto
+                qb.andWhere('order.order_number = :orderNumber', {
+                    orderNumber: parseInt(orderNumberMatch[1], 10),
+                });
+            } else {
+                // Búsqueda normal por descripción
+                qb.andWhere('pr.descripcion ILIKE :search', { search: `%${searchTerm}%` });
+            }
         }
 
         if (dto.estado) {
@@ -750,12 +762,23 @@ export class PartRequestService {
             .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO });
 
         if (dto.search?.trim()) {
-            qb.andWhere(
-                `(pr.descripcion ILIKE :search
-          OR provider.nombre ILIKE :search
-          OR CAST(order.order_number AS TEXT) ILIKE :search)`,
-                { search: `%${dto.search.trim()}%` },
-            );
+            const searchTerm = dto.search.trim();
+            const orderNumberMatch = searchTerm.match(/^#(\d+)$/);
+
+            if (orderNumberMatch) {
+                // Búsqueda por número de orden exacto
+                qb.andWhere('order.order_number = :orderNumber', {
+                    orderNumber: parseInt(orderNumberMatch[1], 10),
+                });
+            } else {
+                // Búsqueda normal: descripción, proveedor, o número de orden parcial
+                qb.andWhere(
+                    `(pr.descripcion ILIKE :search
+              OR provider.nombre ILIKE :search
+              OR CAST(order.order_number AS TEXT) ILIKE :search)`,
+                    { search: `%${searchTerm}%` },
+                );
+            }
         }
 
         const partRequests = await qb.orderBy('pr.updatedAt', 'DESC').getMany();

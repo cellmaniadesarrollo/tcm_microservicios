@@ -550,12 +550,22 @@ export class PartRequestArrivalService {
         if (dto.motivoCategoria) {
             qb.andWhere('arrival.motivo_categoria = :motivoCategoria', { motivoCategoria: dto.motivoCategoria });
         }
-
         if (dto.search?.trim()) {
-            qb.andWhere(
-                '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { search: `%${dto.search.trim()}%` },
-            );
+            const searchTerm = dto.search.trim();
+            const orderNumberMatch = searchTerm.match(/^#(\d+)$/);
+
+            if (orderNumberMatch) {
+                // Búsqueda por número de orden exacto
+                qb.andWhere('order.order_number = :orderNumber', {
+                    orderNumber: parseInt(orderNumberMatch[1], 10),
+                });
+            } else {
+                // Búsqueda normal por descripción o proveedor
+                qb.andWhere(
+                    '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
+                    { search: `%${searchTerm}%` },
+                );
+            }
         }
 
         const [partRequests, total] = await qb
