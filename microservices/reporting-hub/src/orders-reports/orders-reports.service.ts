@@ -28,7 +28,8 @@ import {
     _monthBoundaries,
 } from './helpers/date-time.helpers';
 import { DAY_NAMES, buildWeekDays } from './helpers/dashboard-data.helpers';
-import { PENDING_STATUS_IDS, DELIVERED_STATUS_ID } from './helpers/cashier-dashboard.constants';
+import { CASHIER_PENDING_STATUS_IDS, CASHIER_DELIVERED_STATUS_ID, SERVICE_TECNICO_TYPE_ID } from './helpers/cashier-dashboard.constants';
+// ── Constantes de este dashboard ──────────────────────────────────────
 
 type SortMode = 'entry_date' | 'finalized_at' | 'delivered_at' | 'last_paid_at';
 export const ORDER_STATUS = {
@@ -695,41 +696,98 @@ export class OrdersReportsService {
     // DASHBOARD CAJERO
     // ─────────────────────────────────────────────────────────────────────────
 
+
+
+    // ── Helper: ingresadas Y entregadas, ambas filtradas a Servicio Técnico ──
+    private async _cashierPeriodStats(companyId: string, userId: string, from: Date, to: Date) {
+        const [result] = await this.orderReplicaModel.aggregate([
+            { $match: { 'company.id': companyId, 'createdBy.id': userId, 'type.id': SERVICE_TECNICO_TYPE_ID } },
+            {
+                $facet: {
+                    ingresadas: [
+                        { $match: { entry_date: { $gte: from, $lt: to } } },
+                        { $count: 'n' },
+                    ],
+                    entregadas: [
+                        {
+                            $match: {
+                                statusHistory: {
+                                    $elemMatch: { 'toStatus.id': CASHIER_DELIVERED_STATUS_ID, changed_at: { $gte: from, $lt: to } },
+                                },
+                            },
+                        },
+                        { $count: 'n' },
+                    ],
+                },
+            },
+        ]);
+
+        return {
+            ingresadas: result?.ingresadas?.[0]?.n ?? 0,
+            entregadas: result?.entregadas?.[0]?.n ?? 0,
+        };
+    }
+    // ── Helper: pendientes actuales, solo Servicio Técnico ──────────────────
+    private async _cashierPendingNow(companyId: string, userId: string) {
+        const pendingNow = await this.orderReplicaModel.aggregate([
+            {
+                $match: {
+                    'company.id': companyId,
+                    'createdBy.id': userId,
+                    'type.id': SERVICE_TECNICO_TYPE_ID,
+                    'currentStatus.id': { $in: CASHIER_PENDING_STATUS_IDS },
+                },
+            },
+            { $group: { _id: '$currentStatus.id', count: { $sum: 1 }, statusName: { $first: '$currentStatus.name' } } },
+            { $sort: { _id: 1 } },
+        ]);
+
+        const total = pendingNow.reduce((s: number, g: any) => s + g.count, 0);
+        const byStatus = pendingNow.map((g: any) => ({ statusId: g._id, statusName: g.statusName, count: g.count }));
+
+        return { total, byStatus };
+    }
+
+    // ── Dashboard normal: Hoy / Semana / Mes ────────────────────────────────
     private async _getCashierDashboard(companyId: string, userId: string): Promise<any> {
         const { todayStart, todayEnd } = _dayBoundaries();
 
-        const [todayData, pendingNow] = await Promise.all([
-            // HOY (Solo Órdenes)
-            this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'createdBy.id': userId, entry_date: { $gte: todayStart, $lt: todayEnd } } },
-                {
-                    $facet: {
-                        orders: [{ $group: { _id: null, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', DELIVERED_STATUS_ID] }, 1, 0] } } } }]
-                    },
-                },
-            ]),
+        const weekStart = new Date(todayStart);
+        weekStart.setDate(weekStart.getDate() - 6);
 
-            // PENDIENTES ACTUALES
-            this.orderReplicaModel.aggregate([
-                { $match: { 'company.id': companyId, 'createdBy.id': userId, 'currentStatus.id': { $in: PENDING_STATUS_IDS } } },
-                { $group: { _id: '$currentStatus.id', count: { $sum: 1 }, statusName: { $first: '$currentStatus.name' } } },
-                { $sort: { _id: 1 } },
-            ]),
+        const GYE_OFFSET_MS = -5 * 60 * 60 * 1000;
+        const localNow = new Date(Date.now() + GYE_OFFSET_MS);
+        const monthStartLocal = new Date(localNow.getFullYear(), localNow.getMonth(), 1, 3, 0, 0, 0);
+        const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
+        const now = new Date();
+
+        const [today, week, month, pending] = await Promise.all([
+            this._cashierPeriodStats(companyId, userId, todayStart, todayEnd),
+            this._cashierPeriodStats(companyId, userId, weekStart, todayEnd),
+            this._cashierPeriodStats(companyId, userId, monthStart, now),
+            this._cashierPendingNow(companyId, userId),
         ]);
 
-        // ── Normalización ─────────────────────────────────────────────────────
-        const todayFacet = todayData[0] ?? { orders: [] };
-        const today = {
-            ingresadas: todayFacet.orders[0]?.ingresadas ?? 0,
-            entregadas: todayFacet.orders[0]?.entregadas ?? 0
+        return {
+            periods: { today, week, month },
+            pending,
         };
+    }
 
-        const pendingTotal = pendingNow.reduce((s: number, g: any) => s + g.count, 0);
-        const pendingByStatus = pendingNow.map((g: any) => ({ statusId: g._id, statusName: g.statusName, count: g.count }));
+    // ── Dashboard por rango de fechas (mismo patrón que admin) ──────────────
+    async getCashierDashboardRange(companyId: string, userId: string, from: string, to: string): Promise<any> {
+        const rangeStart = _gyeDayStart(from);
+        const rangeEnd = _gyeDayEnd(to);
+
+        const [range, pending] = await Promise.all([
+            this._cashierPeriodStats(companyId, userId, rangeStart, rangeEnd),
+            this._cashierPendingNow(companyId, userId),
+        ]);
 
         return {
-            today,
-            pending: { total: pendingTotal, byStatus: pendingByStatus }
+            periods: { range },
+            pending,
+            meta: { from, to, rangeStart: rangeStart.toISOString(), rangeEnd: rangeEnd.toISOString() },
         };
     }
 
@@ -779,10 +837,11 @@ export class OrdersReportsService {
         const now = new Date();
 
         const [
-            byStatus, financeData, byBranch, byTechnician, weeklyTrend,
+            byStatus, financeData, byBranch, byTechnician, weeklyTrendRaw,
             [statsDay, statsWeek, statsMonth],
-            hourlyToday, byDeviceBrand, byOrderType, paymentMethods,
+            hourlyTodayRaw, byDeviceBrand, byOrderType, paymentMethods,
             resolutionTime, drillCounts, validationCounts,
+            byTypeStatus, byTypeFinance, byTypeMoney,
         ] = await Promise.all([
 
             this.orderReplicaModel.aggregate([
@@ -814,10 +873,18 @@ export class OrdersReportsService {
                 { $sort: { total: -1 } }, { $limit: 10 },
             ]),
 
+            // ── weeklyTrend: ahora desglosado también por type.id ──────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, entry_date: { $gte: since4w } } },
-                { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' } }, ingresadas: { $sum: 1 }, entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
-                { $project: { _id: 0, date: '$_id', ingresadas: 1, entregadas: 1, revenue: 1 } },
+                {
+                    $group: {
+                        _id: { date: { $dateToString: { format: '%Y-%m-%d', date: '$entry_date', timezone: 'America/Guayaquil' } }, typeId: '$type.id' },
+                        ingresadas: { $sum: 1 },
+                        entregadas: { $sum: { $cond: [{ $eq: ['$currentStatus.id', 8] }, 1, 0] } },
+                        revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } },
+                    },
+                },
+                { $project: { _id: 0, date: '$_id.date', typeId: '$_id.typeId', ingresadas: 1, entregadas: 1, revenue: 1 } },
                 { $sort: { date: 1 } },
             ]),
 
@@ -827,10 +894,17 @@ export class OrdersReportsService {
                 this._periodStats(companyId, monthStart, now),
             ]),
 
+            // ── hourlyToday: ahora desglosado también por type.id ──────────────
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId, entry_date: { $gte: todayStart, $lt: todayEnd } } },
-                { $group: { _id: { $hour: { date: '$entry_date', timezone: 'America/Guayaquil' } }, count: { $sum: 1 }, revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } } } },
-                { $project: { _id: 0, hour: '$_id', count: 1, revenue: 1 } },
+                {
+                    $group: {
+                        _id: { hour: { $hour: { date: '$entry_date', timezone: 'America/Guayaquil' } }, typeId: '$type.id' },
+                        count: { $sum: 1 },
+                        revenue: { $sum: { $reduce: { input: '$payments', initialValue: 0, in: { $add: ['$$value', { $cond: [{ $eq: ['$$this.flow_type', 'INGRESO'] }, '$$this.amount', 0] }] } } } },
+                    },
+                },
+                { $project: { _id: 0, hour: '$_id.hour', typeId: '$_id.typeId', count: 1, revenue: 1 } },
                 { $sort: { hour: 1 } },
             ]),
 
@@ -867,51 +941,23 @@ export class OrdersReportsService {
                 { $project: { _id: 0, avgDays: { $round: ['$avgDays', 1] }, minDays: { $round: ['$minDays', 1] }, maxDays: { $round: ['$maxDays', 1] } } },
             ]),
 
-            // ── drillCounts: ahora received/finished/delivered vienen desglosados por type.id ──
             this.orderReplicaModel.aggregate([
                 { $match: { 'company.id': companyId } },
                 {
                     $facet: {
-                        today_received: [
-                            { $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
-                        today_finished: [
-                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
-                        today_delivered: [
-                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
+                        today_received: [{ $match: { entry_date: { $gte: todayStart, $lte: todayEnd } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
+                        today_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
+                        today_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
                         today_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: todayStart, $lte: todayEnd } } } } }, { $count: 'n' }],
 
-                        week_received: [
-                            { $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
-                        week_finished: [
-                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
-                        week_delivered: [
-                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
+                        week_received: [{ $match: { entry_date: { $gte: weekStart, $lte: todayEnd } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
+                        week_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
+                        week_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
                         week_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: weekStart, $lte: todayEnd } } } } }, { $count: 'n' }],
 
-                        month_received: [
-                            { $match: { entry_date: { $gte: monthStart, $lte: now } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
-                        month_finished: [
-                            { $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
-                        month_delivered: [
-                            { $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } } } },
-                            { $group: { _id: '$type.id', n: { $sum: 1 } } },
-                        ],
+                        month_received: [{ $match: { entry_date: { $gte: monthStart, $lte: now } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
+                        month_finished: [{ $match: { 'currentStatus.id': { $in: [7, 8] }, statusHistory: { $elemMatch: { 'toStatus.id': 7, changed_at: { $gte: monthStart, $lte: now } } } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
+                        month_delivered: [{ $match: { statusHistory: { $elemMatch: { 'toStatus.id': 8, changed_at: { $gte: monthStart, $lte: now } } } } }, { $group: { _id: '$type.id', n: { $sum: 1 } } }],
                         month_collected: [{ $match: { payments: { $elemMatch: { flow_type: 'INGRESO', paid_at: { $gte: monthStart, $lte: now } } } } }, { $count: 'n' }],
                     },
                 },
@@ -924,20 +970,47 @@ export class OrdersReportsService {
                 { $group: { _id: null, checked: { $sum: { $cond: [{ $eq: ['$validation.is_checked', true] }, 1, 0] } }, unchecked: { $sum: { $cond: [{ $or: [{ $eq: ['$validation', null] }, { $eq: ['$validation.is_checked', false] }] }, 1, 0] } } } },
                 { $project: { _id: 0, checked: 1, unchecked: 1 } },
             ]),
+
+            // ── NUEVO: estado actual por tipo (histórico completo, sin filtro de fecha) ──
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $group: { _id: { typeId: '$type.id', statusId: '$currentStatus.id' }, count: { $sum: 1 } } },
+                { $project: { _id: 0, typeId: '$_id.typeId', statusId: '$_id.statusId', count: 1 } },
+            ]),
+
+            // ── NUEVO: costo de procedimientos por tipo (histórico completo) ──
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $unwind: { path: '$findings', preserveNullAndEmptyArrays: true } },
+                { $unwind: { path: '$findings.procedures', preserveNullAndEmptyArrays: true } },
+                { $group: { _id: '$type.id', totalProceduresCost: { $sum: { $cond: [{ $eq: ['$findings.procedures.is_active', true] }, { $ifNull: ['$findings.procedures.procedure_cost', 0] }, 0] } } } },
+            ]),
+
+            // ── NUEVO: dinero cobrado por tipo, faceteado hoy/semana/mes/histórico ──
+            this.orderReplicaModel.aggregate([
+                { $match: { 'company.id': companyId } },
+                { $unwind: '$payments' },
+                { $match: { 'payments.flow_type': 'INGRESO' } },
+                {
+                    $facet: {
+                        today: [{ $match: { 'payments.paid_at': { $gte: todayStart, $lte: todayEnd } } }, { $group: { _id: '$type.id', collected: { $sum: '$payments.amount' }, paymentsCount: { $sum: 1 } } }],
+                        week: [{ $match: { 'payments.paid_at': { $gte: weekStart, $lte: todayEnd } } }, { $group: { _id: '$type.id', collected: { $sum: '$payments.amount' }, paymentsCount: { $sum: 1 } } }],
+                        month: [{ $match: { 'payments.paid_at': { $gte: monthStart, $lte: now } } }, { $group: { _id: '$type.id', collected: { $sum: '$payments.amount' }, paymentsCount: { $sum: 1 } } }],
+                        all: [{ $group: { _id: '$type.id', collected: { $sum: '$payments.amount' }, paymentsCount: { $sum: 1 } } }],
+                    },
+                },
+            ]),
         ]);
 
-        // ── Helpers ────────────────────────────────────────────────────────────────
+        // ── Helpers de drillCounts (igual que antes) ────────────────────────────────
         const c = (key: string): number => drillCounts[0]?.[key]?.[0]?.n ?? 0;
 
-        /** Convierte [{ _id: typeId, n }] en { total, byType: { '1': n, '2': n, '3': n } } */
         const cByType = (key: string) => {
             const rows: { _id: number | null; n: number }[] = drillCounts[0]?.[key] ?? [];
             const byType: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
             let total = 0;
             for (const r of rows) {
-                if (r._id != null && byType[String(r._id)] !== undefined) {
-                    byType[String(r._id)] = r.n;
-                }
+                if (r._id != null && byType[String(r._id)] !== undefined) byType[String(r._id)] = r.n;
                 total += r.n;
             }
             return { total, byType };
@@ -946,24 +1019,9 @@ export class OrdersReportsService {
         const statusMap: Record<number, number> = Object.fromEntries(byStatus.map((s: any) => [s.id, s.count]));
 
         const counts = {
-            today: {
-                received: cByType('today_received'),
-                finished: cByType('today_finished'),
-                delivered: cByType('today_delivered'),
-                collected: c('today_collected'),
-            },
-            week: {
-                received: cByType('week_received'),
-                finished: cByType('week_finished'),
-                delivered: cByType('week_delivered'),
-                collected: c('week_collected'),
-            },
-            month: {
-                received: cByType('month_received'),
-                finished: cByType('month_finished'),
-                delivered: cByType('month_delivered'),
-                collected: c('month_collected'),
-            },
+            today: { received: cByType('today_received'), finished: cByType('today_finished'), delivered: cByType('today_delivered'), collected: c('today_collected') },
+            week: { received: cByType('week_received'), finished: cByType('week_finished'), delivered: cByType('week_delivered'), collected: c('week_collected') },
+            month: { received: cByType('month_received'), finished: cByType('month_finished'), delivered: cByType('month_delivered'), collected: c('month_collected') },
             global: {
                 all: byStatus.reduce((s: number, r: any) => s + r.count, 0),
                 pending: statusMap[1] ?? 0,
@@ -976,10 +1034,110 @@ export class OrdersReportsService {
             validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
         };
 
-        // ── Cálculos derivados ────────────────────────────────────────────────────
+        // ── Cálculos derivados (igual que antes) ────────────────────────────────
         const totalPaid = byBranch.reduce((s: number, b: any) => s + b.revenue, 0);
         const totalCost = financeData[0]?.totalProceduresCost ?? 0;
         const avgTicket = counts.global.delivered > 0 ? +(totalPaid / counts.global.delivered).toFixed(2) : 0;
+
+        // ── weeklyTrend: reshape con byType para stacked bar ────────────────────
+        const TYPE_IDS = ['1', '2', '3'] as const;
+        const emptyTypeCounters = () => ({ '1': { ingresadas: 0, entregadas: 0, revenue: 0 }, '2': { ingresadas: 0, entregadas: 0, revenue: 0 }, '3': { ingresadas: 0, entregadas: 0, revenue: 0 } });
+
+        const weeklyTrendMap = new Map<string, any>();
+        for (const row of weeklyTrendRaw) {
+            if (!weeklyTrendMap.has(row.date)) {
+                weeklyTrendMap.set(row.date, { date: row.date, ingresadas: 0, entregadas: 0, revenue: 0, byType: emptyTypeCounters() });
+            }
+            const entry = weeklyTrendMap.get(row.date);
+            entry.ingresadas += row.ingresadas;
+            entry.entregadas += row.entregadas;
+            entry.revenue += row.revenue;
+            const tId = String(row.typeId);
+            if (entry.byType[tId]) entry.byType[tId] = { ingresadas: row.ingresadas, entregadas: row.entregadas, revenue: row.revenue };
+        }
+        const weeklyTrend = Array.from(weeklyTrendMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+
+        // ── hourlyToday: reshape con byType para stacked bar ────────────────────
+        const hourlyToday = Array.from({ length: 24 }, (_, h) => {
+            const rowsForHour = hourlyTodayRaw.filter((r: any) => r.hour === h);
+            const byType = emptyTypeCounters() as any;
+            let count = 0, revenue = 0;
+            for (const r of rowsForHour) {
+                count += r.count; revenue += r.revenue;
+                const tId = String(r.typeId);
+                if (byType[tId]) byType[tId] = { count: r.count, revenue: r.revenue };
+            }
+            return { hour: h, count, revenue, byType };
+        });
+
+        // ── NUEVO: secciones completas por tipo de orden ─────────────────────────
+        const TYPE_NAMES: Record<string, string> = { '1': 'Servicio Técnico', '2': 'Personalizado', '3': 'Para Repuestos' };
+
+        const typeStatusMap: Record<string, Record<number, number>> = { '1': {}, '2': {}, '3': {} };
+        for (const row of byTypeStatus) {
+            const tId = String(row.typeId);
+            if (typeStatusMap[tId]) typeStatusMap[tId][row.statusId] = row.count;
+        }
+
+        const typeFinanceCostMap: Record<string, number> = { '1': 0, '2': 0, '3': 0 };
+        for (const row of byTypeFinance) {
+            const tId = String(row._id);
+            if (typeFinanceCostMap[tId] !== undefined) typeFinanceCostMap[tId] = row.totalProceduresCost ?? 0;
+        }
+
+        const moneyByType = (bucket: 'today' | 'week' | 'month' | 'all') => {
+            const rows: { _id: number; collected: number; paymentsCount: number }[] = byTypeMoney[0]?.[bucket] ?? [];
+            const map: Record<string, { collected: number; paymentsCount: number }> = {
+                '1': { collected: 0, paymentsCount: 0 }, '2': { collected: 0, paymentsCount: 0 }, '3': { collected: 0, paymentsCount: 0 },
+            };
+            for (const r of rows) {
+                const tId = String(r._id);
+                if (map[tId]) map[tId] = { collected: r.collected ?? 0, paymentsCount: r.paymentsCount ?? 0 };
+            }
+            return map;
+        };
+
+        const moneyToday = moneyByType('today');
+        const moneyWeek = moneyByType('week');
+        const moneyMonth = moneyByType('month');
+        const moneyAll = moneyByType('all');
+
+        const receivedByType = { today: cByType('today_received'), week: cByType('week_received'), month: cByType('month_received') };
+        const finishedByType = { today: cByType('today_finished'), week: cByType('week_finished'), month: cByType('month_finished') };
+        const deliveredByType = { today: cByType('today_delivered'), week: cByType('week_delivered'), month: cByType('month_delivered') };
+
+        const sections: Record<string, any> = {};
+        for (const tId of TYPE_IDS) {
+            const sMap = typeStatusMap[tId] ?? {};
+            const all = Object.values(sMap).reduce((s, n) => s + n, 0);
+            const delivered = sMap[8] ?? 0;
+            const typeTotalPaid = moneyAll[tId].collected;
+            const typeTotalCost = typeFinanceCostMap[tId] ?? 0;
+
+            sections[tId] = {
+                typeName: TYPE_NAMES[tId],
+                counts: {
+                    today: { received: receivedByType.today.byType[tId] ?? 0, finished: finishedByType.today.byType[tId] ?? 0, delivered: deliveredByType.today.byType[tId] ?? 0, collected: moneyToday[tId].collected, paymentsCount: moneyToday[tId].paymentsCount },
+                    week: { received: receivedByType.week.byType[tId] ?? 0, finished: finishedByType.week.byType[tId] ?? 0, delivered: deliveredByType.week.byType[tId] ?? 0, collected: moneyWeek[tId].collected, paymentsCount: moneyWeek[tId].paymentsCount },
+                    month: { received: receivedByType.month.byType[tId] ?? 0, finished: finishedByType.month.byType[tId] ?? 0, delivered: deliveredByType.month.byType[tId] ?? 0, collected: moneyMonth[tId].collected, paymentsCount: moneyMonth[tId].paymentsCount },
+                },
+                global: {
+                    all,
+                    pending: sMap[1] ?? 0,
+                    in_progress: sMap[6] ?? 0,
+                    waiting_approval: sMap[4] ?? 0,
+                    waiting_parts: sMap[5] ?? 0,
+                    finished: sMap[7] ?? 0,
+                    delivered,
+                },
+                finance: {
+                    totalProceduresCost: typeTotalCost,
+                    totalPaid: typeTotalPaid,
+                    totalPending: typeTotalCost - typeTotalPaid,
+                    avgTicket: delivered > 0 ? +(typeTotalPaid / delivered).toFixed(2) : 0,
+                },
+            };
+        }
 
         return {
             periods: { today: statsDay, week: statsWeek, month: statsMonth },
@@ -990,6 +1148,7 @@ export class OrdersReportsService {
             weeklyTrend, hourlyToday,
             resolutionTime: resolutionTime[0] ?? { avgDays: 0, minDays: 0, maxDays: 0 },
             validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
+            sections, // ← NUEVO: { '1': {...ST}, '2': {...Personalizado}, '3': {...Repuestos} }
         };
     }
 
@@ -1165,4 +1324,6 @@ export class OrdersReportsService {
             validations: { checked: validationCounts[0]?.checked ?? 0, unchecked: validationCounts[0]?.unchecked ?? 0 },
         };
     }
+
+
 }
