@@ -102,5 +102,21 @@ export class OrdersReportsController {
       data.to
     );
   }
+  @MessagePattern({ cmd: 'get_cashier_dashboard_range' })
+  async getCashierDashboardRange(data: {
+    user: {
+      userId: string;
+      companyId: string;
+    };
+    from: string;
+    to: string;
+  }) {
+    return this.ordersReportsService.getCashierDashboardRange(
+      data.user.companyId,
+      data.user.userId,
+      data.from,
+      data.to,
+    );
+  }
 
 }
