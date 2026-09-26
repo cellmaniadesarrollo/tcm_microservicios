@@ -11,6 +11,7 @@ import { RegisterPrintCopyDto } from './dto/register-print-copy.dto.gateway';
 import { UpdateFineStatusDto } from './dto/update-fine-status.dto';
 import { GetEmployeesFinesDto } from './dto/get-employees-fines.dto';
 import { GetFinesListDto } from './dto/get-fines-list.dto';
+import { GetCashierDashboardRangeDto } from './dto/get-cashier-dashboard.dto.gateway ';
 // Importa tu DTO correctamente
 // import { FindCustomerDto } from './dto/find-customer.dto'; 
 
@@ -129,5 +130,12 @@ export class ReportsController {
   @Get('fines/:fineId')
   async getFineDetail(@Param('fineId') fineId: string, @User() user: any) {
     return this.reportsService.getFineDetail(user, fineId);
+  }
+  @Get('cashier-dashboard')
+  async getCashierDashboardRange(
+    @Query() dto: GetCashierDashboardRangeDto,
+    @User() user: any,
+  ) {
+    return this.reportsService.getCashierDashboardRange(user, dto);
   }
 }

@@ -8,6 +8,7 @@ import { RegisterPrintCopyDto } from './dto/register-print-copy.dto.gateway';
 import { GetEmployeesFinesDto } from './dto/get-employees-fines.dto';
 import { UpdateFineStatusDto } from './dto/update-fine-status.dto';
 import { GetFinesListDto } from './dto/get-fines-list.dto';
+import { GetCashierDashboardRangeDto } from './dto/get-cashier-dashboard.dto.gateway ';
 
 @Injectable()
 export class ReportsService {
@@ -241,6 +242,23 @@ export class ReportsService {
                     internalToken: process.env.INTERNAL_SECRET,
                     data: { fineId },
                     user: { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+                },
+            ),
+        );
+    }
+
+    async getCashierDashboardRange(user: any, dto: GetCashierDashboardRangeDto) {
+        return await firstValueFrom(
+            this.client.send(
+                { cmd: 'get_cashier_dashboard_range' },
+                {
+                    internalToken: process.env.INTERNAL_SECRET,
+                    user: {
+                        userId: user.sub,
+                        companyId: user.companyId,
+                    },
+                    from: dto.from,
+                    to: dto.to,
                 },
             ),
         );

@@ -103,7 +103,7 @@ export class PartRequestsGatewayService {
 
     // gateway service
 
-    async listLitigios(dto: { page?: number; limit?: number; search?: string; providerId?: number; motivoCategoria?: string }, user: any) {
+    async listLitigios(dto: { page?: number; limit?: number; search?: string; providerId?: number; motivoCategoria?: string, resuelto: any }, user: any) {
         return this.orderServiceClient.send('list_part_requests_litigios', { dto, user });
     }
     async resolverLitigio(dto: ResolverLitigioGatewayDto, files: any[], user: any) {
