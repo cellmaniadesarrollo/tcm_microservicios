@@ -89,9 +89,17 @@ export class OrdersReportsService {
         const monthStart = new Date(monthStartLocal.getTime() - GYE_OFFSET_MS);
         const now = new Date();
 
-        const rangeMatch = card.match(/^(range_\w+)\((\d{4}-\d{2}-\d{2})\|(\d{4}-\d{2}-\d{2})\)$/);
+        // ── NUEVO: extrae el sufijo [type:N] ANTES de parsear el resto ──────────
+        // La key puede venir como:
+        //   today_finished[type:1]
+        //   range_delivered(2024-01-01|2024-01-31)[type:2]
+        const typeMatch = card.match(/\[type:(\d+)\]$/);
+        const typeId: number | null = typeMatch ? Number(typeMatch[1]) : null;
+        const cardWithoutType = typeMatch ? card.slice(0, typeMatch.index) : card;
 
-        let resolvedCard: string = card;
+        const rangeMatch = cardWithoutType.match(/^(range_\w+)\((\d{4}-\d{2}-\d{2})\|(\d{4}-\d{2}-\d{2})\)$/);
+
+        let resolvedCard: string = cardWithoutType;
         let rangeFrom: Date | null = null;
         let rangeTo: Date | null = null;
 
@@ -200,6 +208,7 @@ export class OrdersReportsService {
 
         const matchStage: Record<string, any> = {
             'company.id': companyId,
+            ...(typeId !== null ? { 'type.id': typeId } : {}),   // ← NUEVO: filtro por tipo de orden
             ...strategies[resolvedCard],
         };
 

@@ -539,8 +539,10 @@ export class PartRequestArrivalService {
                 },
             );
 
-        if (dto.resuelto !== undefined) {
-            qb.andWhere('arrival.resuelto = :resuelto', { resuelto: dto.resuelto });
+        if (dto.resuelto === true) {
+            qb.andWhere('arrival.resuelto = true');
+        } else if (dto.resuelto === false) {
+            qb.andWhere('(arrival.resuelto = false OR arrival.resuelto IS NULL)');
         }
 
         if (dto.providerId) {
