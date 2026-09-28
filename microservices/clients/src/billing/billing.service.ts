@@ -16,6 +16,7 @@ import { PersonType } from '../catalogs/entities/person-type.entity';
 import { Gender } from '../catalogs/entities/gender.entity';
 import { backfillMissingCustomerPersonalData } from './helpers/customer-personal-data.helper';
 import { Contact } from '../customers/entities/contact.entity';
+import { City } from '../catalogs/entities/city.entity';
 
 interface BillingUpsertInput {
     companyId: string;
@@ -33,6 +34,7 @@ interface BillingUpsertInput {
     birthdate?: string; // 'YYYY-MM-DD'
     address: string;
     city?: string;
+    cityId?: number;
     isCompanyClient?: boolean;
 }
 @Injectable()
@@ -51,6 +53,8 @@ export class BillingService {
         @InjectRepository(ContactType)
         private readonly contactTypeRepo: Repository<ContactType>,
 
+        @InjectRepository(City)
+        private readonly cityRepo: Repository<City>,
 
         @InjectRepository(PersonType)
         private readonly personTypeRepo: Repository<PersonType>,
@@ -120,6 +124,7 @@ export class BillingService {
                     birthdate: data.birthdate,
                     address,
                     city,
+                    cityId: data.cityId,
                     isCompanyClient: data.isCompanyClient ?? false,
                 },
                 logger,
@@ -140,7 +145,6 @@ export class BillingService {
     async update(data: any) {
         const logger = new Logger('BillingUpdate');
         try {
-
             if (!data?.id)
                 throw new RpcException(new BadRequestException('id es requerido'));
 
@@ -154,28 +158,61 @@ export class BillingService {
             if (!billing)
                 throw new RpcException(new BadRequestException('Dato de facturación no encontrado'));
 
-            // 👇 Debe reflejar los campos del UpdateBillingDto.
-            // Si en el futuro el DTO agrega más campos (ej: genderId, birthdate),
-            // basta con sumarlos acá — no afecta a los customers vinculados (replicas),
-            // billing es la única entidad que se toca en este método.
-            const allowed = [
-                'idTypeId',
-                'idNumber',
-                'businessName',
-                'tradeName',
-                'mainEmail',
-                'phone',
-                'address',
-                'city',
-                'isActive',
-            ];
+            // ── Resolver cityId (si viene) — estricto, igual que en create ────
+            let cityEntity: City | null = null;
+            if (data.updates?.cityId !== undefined && data.updates.cityId !== null) {
+                cityEntity = await this.cityRepo.findOne({ where: { id: data.updates.cityId } });
+                if (!cityEntity) {
+                    throw new RpcException(new BadRequestException('cityId inválido: la ciudad no existe'));
+                }
+            }
 
-            for (const key of allowed) {
+            // ── Resolver genderId (si viene) ──────────────────────────────────
+            if (data.updates?.genderId !== undefined && data.updates.genderId !== null) {
+                const gender = await this.genderRepo.findOne({ where: { id: data.updates.genderId } });
+                if (!gender)
+                    throw new RpcException(new BadRequestException('genderId inválido'));
+                billing.gender = gender;
+            }
+
+            // ── Resolver personTypeId (si viene) ──────────────────────────────
+            if (data.updates?.personTypeId !== undefined && data.updates.personTypeId !== null) {
+                const personType = await this.personTypeRepo.findOne({ where: { id: data.updates.personTypeId } });
+                if (!personType)
+                    throw new RpcException(new BadRequestException('personTypeId inválido'));
+                billing.personType = personType;
+            }
+
+            // ── idTypeId sí es editable, independiente de idNumber ─────────────
+            if (data.updates?.idTypeId !== undefined) {
+                billing.idType = { id: data.updates.idTypeId } as any;
+            }
+
+            // ── idNumber NUNCA se edita — se ignora aunque venga en el payload ──
+
+            // ── Nombre: businessName (jurídica) mapea a firstName/lastName ─────
+            if (data.updates?.businessName !== undefined && data.updates.businessName !== null) {
+                billing.firstName = String(data.updates.businessName).trim().toUpperCase();
+                billing.lastName = '';
+            } else {
+                if (data.updates?.firstName !== undefined) {
+                    billing.firstName = String(data.updates.firstName).trim().toUpperCase();
+                }
+                if (data.updates?.lastName !== undefined) {
+                    billing.lastName = String(data.updates.lastName).trim().toUpperCase();
+                }
+            }
+
+            // ── birthdate ────────────────────────────────────────────────────
+            if (data.updates?.birthdate !== undefined) {
+                billing.birthdate = data.updates.birthdate;
+            }
+
+            // ── Resto de campos simples ─────────────────────────────────────────
+            const simpleAllowed = ['tradeName', 'mainEmail', 'cellphone', 'phone', 'address', 'city', 'isActive', 'isCompanyClient'];
+            for (const key of simpleAllowed) {
                 if (data.updates?.[key] !== undefined) {
-                    if (key === 'idTypeId') {
-                        billing.idType = { id: data.updates.idTypeId } as any;
-                    } else if (typeof data.updates[key] === 'string') {
-                        // email en minúsculas, el resto en mayúsculas
+                    if (typeof data.updates[key] === 'string') {
                         (billing as any)[key] = key === 'mainEmail'
                             ? data.updates[key].trim().toLowerCase()
                             : data.updates[key].trim().toUpperCase();
@@ -185,15 +222,60 @@ export class BillingService {
                 }
             }
 
+            if (cityEntity) {
+                billing.cityRef = cityEntity;
+                billing.city = cityEntity.name.toUpperCase();
+            }
+
             await this.billingRepo.save(billing);
 
-            // ── Retornar resultado actualizado con relations (igual que legacy) ──
-            const result = await this.billingRepo.findOne({
-                where: { id: billing.id },
-                relations: { idType: true, personType: true, customerLinks: { customer: true } },
+            // ── Sincronizar datos personales al Customer vinculado ──────────
+            // Relación billing↔customer es 1:1 a nivel de código (la tabla
+            // pivote customer_billing_data no lo restringe a nivel de BD por
+            // datos legacy). Se toma el primer vínculo encontrado.
+            const pivot = await this.pivotRepo.findOne({
+                where: { billingData: { id: billing.id } },
+                relations: { customer: true },
             });
 
-            // ── Emitir evento Kafka ───────────────────────────────────────
+            if (pivot?.customer) {
+                const customer = pivot.customer;
+                let customerChanged = false;
+
+                if (customer.firstName !== billing.firstName) {
+                    customer.firstName = billing.firstName;
+                    customerChanged = true;
+                }
+                if (customer.lastName !== billing.lastName) {
+                    customer.lastName = billing.lastName;
+                    customerChanged = true;
+                }
+                if (billing.gender && customer.gender?.id !== billing.gender.id) {
+                    customer.gender = billing.gender;
+                    customerChanged = true;
+                }
+                if (billing.birthdate) {
+                    const parsed = new Date(billing.birthdate);
+                    if (!isNaN(parsed.getTime())) {
+                        const currentTime = customer.birthDate ? new Date(customer.birthDate).getTime() : null;
+                        if (currentTime !== parsed.getTime()) {
+                            customer.birthDate = parsed;
+                            customerChanged = true;
+                        }
+                    }
+                }
+
+                if (customerChanged) {
+                    await this.customerRepo.save(customer);
+                    logger.log(`Customer ${customer.id} sincronizado desde BillingData ${billing.id}`);
+                }
+            }
+
+            const result = await this.billingRepo.findOne({
+                where: { id: billing.id },
+                relations: { idType: true, personType: true, gender: true, cityRef: true, customerLinks: { customer: true } },
+            });
+
             try {
                 await this.broadcast.publishClientBillingUpdated(result);
             } catch (eventError) {
@@ -296,7 +378,8 @@ export class BillingService {
                     idType: true,
                     personType: true,
                     gender: true,
-                    customerLinks: { customer: true },   // 👈 nuevo
+                    cityRef: true,
+                    customerLinks: { customer: true },
                 },
                 order: { firstName: 'ASC' },
                 take: 10,
@@ -795,7 +878,17 @@ export class BillingService {
     private async upsertCustomerAndBillingData(input: BillingUpsertInput, logger: Logger) {
         let somethingWasCreated = false;
 
-        // ── Buscar o crear BillingData ──────────────────────────
+        // ── Resolver cityId (si viene) ANTES de crear nada ───────
+        // Estricto: si mandan cityId y no existe, es dato corrupto → falla.
+        let cityEntity: City | null = null;
+        if (input.cityId) {
+            cityEntity = await this.cityRepo.findOne({ where: { id: input.cityId } });
+            if (!cityEntity) {
+                throw new RpcException(new BadRequestException('cityId inválido: la ciudad no existe'));
+            }
+        }
+
+        // ── Buscar BillingData existente ─────────────────────────
         let billingSaved = await this.billingRepo
             .createQueryBuilder('b')
             .where('b.idNumber = :idNumber', { idNumber: input.idNumber })
@@ -803,29 +896,38 @@ export class BillingService {
             .getOne();
 
         if (billingSaved) {
-            logger.log(`BillingData ya existe id: ${billingSaved.id}`);
-        } else {
-            const billing = this.billingRepo.create({
-                company: { id: input.companyId },
-                idType: { id: input.idTypeId },
-                personType: { id: input.personTypeId },
-                gender: input.genderId ? { id: input.genderId } : undefined,
-                idNumber: input.idNumber,
-                tradeName: input.tradeName,
-                firstName: input.firstName,      // 👈 sin businessName aquí, igual que el legacy original
-                lastName: input.lastName,
-                mainEmail: input.mainEmail,
-                cellphone: input.cellphone,
-                phone: input.phone,
-                birthdate: input.birthdate,
-                address: input.address,
-                city: input.city,
-                isCompanyClient: input.isCompanyClient ?? false,
-            });
-            billingSaved = await this.billingRepo.save(billing);
-            somethingWasCreated = true;
-            logger.log(`BillingData creado id: ${billingSaved.id}`);
+            // Ya no seguimos de largo: create() es solo para crear.
+            // La migración legacy→id se hará en el flujo de update, aparte.
+            logger.warn(`BillingData ya existe id: ${billingSaved.id}, se rechaza creación duplicada`);
+            throw new RpcException(
+                new ForbiddenException('Ya existe un dato de facturación con este documento en la empresa'),
+            );
         }
+
+        const billing = this.billingRepo.create({
+            company: { id: input.companyId },
+            idType: { id: input.idTypeId },
+            personType: { id: input.personTypeId },
+            gender: input.genderId ? { id: input.genderId } : undefined,
+            idNumber: input.idNumber,
+            tradeName: input.tradeName,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            mainEmail: input.mainEmail,
+            cellphone: input.cellphone,
+            phone: input.phone,
+            birthdate: input.birthdate,
+            address: input.address,
+            // Si vino cityId, la fuente de verdad es la ciudad normalizada:
+            // el string legacy se sincroniza con el name de esa ciudad
+            // para que el evento hacia el legacy siga funcionando igual.
+            city: cityEntity ? cityEntity.name.toUpperCase() : input.city,
+            cityRef: cityEntity ?? undefined,
+            isCompanyClient: input.isCompanyClient ?? false,
+        });
+        billingSaved = await this.billingRepo.save(billing);
+        somethingWasCreated = true;
+        logger.log(`BillingData creado id: ${billingSaved.id}`);
 
         // ── Resolver ContactTypes una sola vez ───────────────────
         const emailContactType = await this.contactTypeRepo.findOne({ where: { name: 'EMAIL' } });
@@ -941,7 +1043,7 @@ export class BillingService {
 
         const result = await this.billingRepo.findOne({
             where: { id: billingSaved.id },
-            relations: { idType: true, personType: true, gender: true, customerLinks: { customer: true } },
+            relations: { idType: true, personType: true, gender: true, cityRef: true, customerLinks: { customer: true } },
         });
 
         if (somethingWasCreated) {

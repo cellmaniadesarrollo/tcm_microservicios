@@ -1,7 +1,7 @@
 // microservices\clients\src\billing\entities\billing-data.entity.ts
 import {
   Entity,
-  PrimaryColumn,           // ← Cambiado
+  PrimaryColumn,
   Column,
   ManyToOne,
   OneToMany,
@@ -11,11 +11,12 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import { ObjectId } from 'mongodb';   // ← NUEVO (para generar ObjectId)
+import { ObjectId } from 'mongodb';
 
 import { IdType } from '../../catalogs/entities/id-type.entity';
 import { Gender } from '../../catalogs/entities/gender.entity';
 import { PersonType } from '../../catalogs/entities/person-type.entity';
+import { City } from '../../catalogs/entities/city.entity';
 import { CustomerBillingData } from './customer-billing-data.entity';
 import { Customer } from '../../customers/entities/customer.entity';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
@@ -24,8 +25,8 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 @Entity('billing_data')
 export class BillingData {
 
-  @PrimaryColumn({ type: 'varchar', length: 24 })   // ← Cambiado a varchar(24)
-  id: string;                                       // ← Ahora es string (ObjectId)
+  @PrimaryColumn({ type: 'varchar', length: 24 })
+  id: string;
 
   @ManyToOne(() => CompanyReplica, { eager: true, nullable: false })
   company: CompanyReplica;
@@ -66,8 +67,13 @@ export class BillingData {
   @Column({ type: 'varchar', length: 300 })
   address: string;
 
+  // ===== Legacy: texto libre (se mantiene por compatibilidad) =====
   @Column({ type: 'varchar', length: 100, nullable: true })
   city: string;
+
+  // ===== Nuevo: ciudad normalizada (opcional, coexiste con la legacy) =====
+  @ManyToOne(() => City, { eager: true, nullable: true })
+  cityRef: City;
 
   @Column({ type: 'boolean', default: false })
   isCompanyClient: boolean;
@@ -81,7 +87,6 @@ export class BillingData {
   @ManyToOne(() => Customer, (customer) => customer.billings, { nullable: true })
   customer: Customer;
 
-  // ← NUEVO: Genera ObjectId automáticamente al insertar
   @BeforeInsert()
   generateObjectId() {
     if (!this.id) {
@@ -89,7 +94,6 @@ export class BillingData {
     }
   }
 
-  // ← Método original (se mantiene igual)
   @BeforeInsert()
   @BeforeUpdate()
   normalizeFields() {
