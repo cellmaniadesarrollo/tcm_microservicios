@@ -62,6 +62,11 @@ export class CreateBillingDto {
   city?: string;
 
   @IsOptional()
+  @IsNumber()
+  cityId?: number;
+
+
+  @IsOptional()
   @IsBoolean()
   isCompanyClient?: boolean;
 }
