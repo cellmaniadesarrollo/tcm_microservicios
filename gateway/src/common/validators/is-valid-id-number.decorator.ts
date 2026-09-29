@@ -19,8 +19,8 @@ export function IsValidIdNumber(validationOptions?: ValidationOptions) {
                     // 🟢 ESTE LOG SE EJECUTARÁ EN CADA PETICIÓN
                     // console.log('>>> EJECUTANDO VALIDACIÓN:', { cleanValue, typeId });
 
-                    if (typeId === 1) return /^\d{10}$/.test(cleanValue);  // Cédula
-                    if (typeId === 2) return /^\d{13}$/.test(cleanValue);  // RUC
+                    if (typeId === 1) return /^\d{10}$/.test(cleanValue);  // "Cédula"  ← en realidad es RUC
+                    if (typeId === 2) return /^\d{13}$/.test(cleanValue);  // "RUC"     ← en realidad es Cédula
                     if (typeId === 4) return /^\d{10,13}$/.test(cleanValue); // Consumidor Final
                     if (typeId === 3 || typeId === 5) return cleanValue.length >= 3;
 

@@ -27,6 +27,8 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 
 @Entity('part_requests')
 export class PartRequest {
+    @Index(['company_id', 'numero'], { unique: true })
+
     @PrimaryGeneratedColumn()
     id!: number;
 
@@ -125,7 +127,8 @@ export class PartRequest {
     @OneToMany(() => OrderPendingProduct, (p) => p.partRequest)
     pendingProducts?: OrderPendingProduct[];
 
-
+    @Column({ type: 'int', nullable: true }) // NOT NULL después del backfill
+    numero!: number;
 
     attachments?: Attachment[];
 
