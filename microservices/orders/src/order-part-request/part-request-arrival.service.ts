@@ -17,6 +17,7 @@ import { NoAprobarLlegadaDto } from './dto/no-aprobar-llegada.dto';
 import { enrichPartRequestAttachmentsWithSignedUrls, mapUser } from './helpers/part-requests.helpers';
 import { LitigioLlegadaDto } from './dto/litigio-llegada.dto';
 import { ResolverLitigioDto } from './dto/resolver-litigio.dto';
+import { PartRequestPaymentAllocation } from './entities/part-request-payment-allocation.entity';
 
 /**
  * Dueño de la máquina de estados post-pago: registrar envío, registrar
@@ -280,7 +281,18 @@ export class PartRequestArrivalService {
             if (!partRequest) {
                 throw new RpcException(new NotFoundException('Solicitud de repuesto no encontrada'));
             }
+            // No se puede cancelar si ya tiene pagos registrados (totales o parciales)
+            const pagosRegistrados = await manager.count(PartRequestPaymentAllocation, {
+                where: { part_request_id: partRequest.id },
+            });
 
+            if (pagosRegistrados > 0) {
+                throw new RpcException(
+                    new BadRequestException(
+                        'No se puede cancelar: la solicitud ya tiene pagos registrados',
+                    ),
+                );
+            }
             // CAMBIO: disponible en cualquier estado, salvo si ya está cancelada
             if (partRequest.estado === PartRequestStatus.CANCELADO) {
                 throw new RpcException(new BadRequestException('La solicitud ya está cancelada'));
@@ -539,8 +551,10 @@ export class PartRequestArrivalService {
                 },
             );
 
-        if (dto.resuelto !== undefined) {
-            qb.andWhere('arrival.resuelto = :resuelto', { resuelto: dto.resuelto });
+        if (dto.resuelto === true) {
+            qb.andWhere('arrival.resuelto = true');
+        } else if (dto.resuelto === false) {
+            qb.andWhere('(arrival.resuelto = false OR arrival.resuelto IS NULL)');
         }
 
         if (dto.providerId) {

@@ -230,6 +230,20 @@ export class PartRequestsController {
         const { files, formData } = await parseMultipartRequest(request);
         const processedFiles = await processAndValidateFiles(files);
 
+        // 1. Validar que exista al menos un archivo
+        if (!processedFiles || processedFiles.length === 0) {
+            throw new BadRequestException('Es obligatorio adjuntar una imagen del comprobante de pago.');
+        }
+
+        // 2. (Opcional) Validar explícitamente que sea una imagen
+        const hasImage = processedFiles.some((file: any) =>
+            file.mimetype && file.mimetype.startsWith('image/')
+        );
+
+        if (!hasImage) {
+            throw new BadRequestException('El archivo adjunto debe ser un formato de imagen válido (JPG, PNG, etc.).');
+        }
+
         const asignaciones = formData.asignaciones
             ? (Array.isArray(formData.asignaciones) ? formData.asignaciones : JSON.parse(formData.asignaciones))
             : [];
