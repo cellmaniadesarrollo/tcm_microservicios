@@ -79,12 +79,7 @@ export class BillingService {
     }
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
     async create(data: any) {
-        const idTypeDb = await this.idTypeRepo.findOne({ where: { id: data?.idTypeId } });
-        this.logger.debug(
-            `[NORMAL] llega idTypeId=${data?.idTypeId} (${typeof data?.idTypeId}) ` +
-            `=> catálogo lo resuelve como: ${idTypeDb ? `${idTypeDb.name} (code ${idTypeDb.code})` : 'NO EXISTE'} ` +
-            `| idNumber=${data?.idNumber}`,
-        );
+        //  console.log(data)
         const logger = new Logger('RetailBilling');
         try {
             if (!data?.user?.companyId)
@@ -581,7 +576,6 @@ export class BillingService {
 
     // ── Adaptador: convierte el payload legacy al contrato de createFromLegacy ────
     async normalizeLegacyPayload(raw: any, user: { companyId: string }) {
-
         const logger = new Logger('LegacyAdapter');
 
         // 1. Resolver IdType
@@ -592,12 +586,6 @@ export class BillingService {
             );
 
         const idType = await this.idTypeRepo.findOne({ where: { name: idTypeName } });
-        this.logger.debug(
-            `[LEGACY] llega identification_type="${raw.identification_type}" ` +
-            `=> nombre mapeado="${idTypeName}" ` +
-            `=> resuelve idTypeId=${idType?.id} (${idType?.name}, code ${idType?.code}) ` +
-            `| identification=${raw.identification}`,
-        );
         if (!idType)
             throw new RpcException(
                 new BadRequestException(`IdType no encontrado en BD: ${idTypeName}`),
@@ -658,6 +646,7 @@ export class BillingService {
             isCompanyClient: raw.person_type === 'juridica',
         };
     }
+
 
 
     private async publishMinimalCustomerCreated(customerId: number): Promise<void> {
@@ -883,6 +872,8 @@ export class BillingService {
             throw new RpcException(new InternalServerErrorException('Error creando cliente con facturación'));
         }
     }
+
+
 
     private async upsertCustomerAndBillingData(input: BillingUpsertInput, logger: Logger) {
         let somethingWasCreated = false;
