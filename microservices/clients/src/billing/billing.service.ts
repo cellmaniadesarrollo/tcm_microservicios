@@ -79,7 +79,9 @@ export class BillingService {
     }
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
     async create(data: any) {
-        //  console.log(data)
+        const types = await this.idTypeRepo.find();
+        this.logger.debug(`id_types vistos por el servicio: ${JSON.stringify(types.map(t => ({ id: t.id, code: t.code, name: t.name })))}`);
+        this.logger.debug(`create -> idTypeId=${data.idTypeId} (${typeof data.idTypeId}) idNumber=${data.idNumber}`);
         const logger = new Logger('RetailBilling');
         try {
             if (!data?.user?.companyId)
