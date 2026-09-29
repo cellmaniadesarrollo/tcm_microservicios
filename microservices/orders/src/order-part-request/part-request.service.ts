@@ -13,6 +13,7 @@ import { ListPartRequestsDto } from './dto/list-part-requests.dto';
 import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/part-requests.helpers';
 import { GRUPOS_CON_ACCESO_ESPERA_PAGO } from './part-request.constants';
 import { PartRequestTravelItem } from './entities/part-request-travel-item.entity';
+import { formatPartRequestNumber, nextCompanyNumber } from './helpers/company-numbering.helper';
 
 /**
  * Dueño del ciclo de vida base de PartRequest: creación, listados, lectura
@@ -82,9 +83,13 @@ export class PartRequestService {
                 );
             }
 
+            // 0. Número secuencial por empresa (se revierte si la transacción falla)
+            const numero = await nextCompanyNumber(manager, user.companyId, 'part_request');
+
             // 1. Crear el pedido
             const partRequest = manager.create(PartRequest, {
                 company_id: user.companyId,
+                numero,
                 order_id: order?.id,
                 technician_id: user.userId,
                 descripcion: dto.descripcion,
@@ -159,6 +164,7 @@ export class PartRequestService {
 
             const result = {
                 ...partRequestWithRelations,
+                numero_formateado: formatPartRequestNumber(partRequestWithRelations!.numero),
                 technician: mapUser(partRequestWithRelations!.technician),
                 responsableBusqueda: mapUser(partRequestWithRelations!.responsableBusqueda),
                 responsableRecepcion: mapUser(partRequestWithRelations!.responsableRecepcion),
@@ -216,7 +222,6 @@ export class PartRequestService {
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
     ) {
-
         const page = dto.page && dto.page > 0 ? dto.page : 1;
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const skip = (page - 1) * limit;
@@ -227,7 +232,6 @@ export class PartRequestService {
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
-            // FIX: falta este join — sin él, litigio_resuelto/fecha_resolucion/etc. nunca llegan
             .leftJoinAndSelect('pr.arrival', 'arrival')
             .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor')
             .where('pr.company_id = :companyId', { companyId: user.companyId });
@@ -236,15 +240,33 @@ export class PartRequestService {
             qb.andWhere('pr.responsable_busqueda_id = :userId', { userId: user.userId });
         }
 
+        let numeroBuscado: number | null = null;
+
         if (dto.search?.trim()) {
             const searchTerm = dto.search.trim();
             const orderNumberMatch = searchTerm.match(/^#(\d+)$/);
+            // Acepta: 42, 00042, SR-42, sr42
+            const requestNumberMatch = searchTerm.match(/^(?:SR-?)?(\d{1,9})$/i);
 
             if (orderNumberMatch) {
-                // Búsqueda por número de orden exacto
+                // #123 → número de orden exacto
                 qb.andWhere('order.order_number = :orderNumber', {
                     orderNumber: parseInt(orderNumberMatch[1], 10),
                 });
+            } else if (requestNumberMatch) {
+                // 42 / SR-42 → número de solicitud exacto
+                numeroBuscado = parseInt(requestNumberMatch[1], 10);
+
+                if (/^SR/i.test(searchTerm)) {
+                    // Con prefijo SR: solo por número
+                    qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
+                } else {
+                    // Solo dígitos: por número, o por descripción (ej. "iPhone 13")
+                    qb.andWhere(
+                        '(pr.numero = :numeroBuscado OR pr.descripcion ILIKE :search)',
+                        { numeroBuscado, search: `%${searchTerm}%` },
+                    );
+                }
             } else {
                 // Búsqueda normal por descripción
                 qb.andWhere('pr.descripcion ILIKE :search', { search: `%${searchTerm}%` });
@@ -255,13 +277,25 @@ export class PartRequestService {
             qb.andWhere('pr.estado = :estado', { estado: dto.estado });
         }
 
+        // Prioridad: coincidencia exacta por número primero (si se buscó por número)
+        if (numeroBuscado !== null) {
+            qb.addSelect(
+                'CASE WHEN pr.numero = :numeroBuscado THEN 0 ELSE 1 END',
+                'numero_prioridad',
+            );
+        }
+
         qb.addSelect(
             `CASE WHEN pr.estado = :estadoPrioritario THEN 0 ELSE 1 END`,
             'estado_prioridad',
         ).setParameter('estadoPrioritario', PartRequestStatus.SOLICITADO);
 
-        qb.orderBy('estado_prioridad', 'ASC')
-            .addOrderBy(dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt', 'DESC');
+        if (numeroBuscado !== null) {
+            qb.orderBy('numero_prioridad', 'ASC').addOrderBy('estado_prioridad', 'ASC');
+        } else {
+            qb.orderBy('estado_prioridad', 'ASC');
+        }
+        qb.addOrderBy(dto.soloMias ? 'pr.updatedAt' : 'pr.createdAt', 'DESC');
 
         const [partRequests, total] = await qb
             .skip(skip)
@@ -270,12 +304,12 @@ export class PartRequestService {
 
         const data = partRequests.map((pr) => ({
             ...pr,
+            numero_formateado: formatPartRequestNumber(pr.numero),
             fecha_solicitud: pr.createdAt,
             order_number: pr.order?.order_number ?? null,
             technician: mapUser(pr.technician),
             responsableBusqueda: mapUser(pr.responsableBusqueda),
             responsableRecepcion: mapUser(pr.responsableRecepcion),
-            // FIX: se deriva desde arrival, no es columna propia de PartRequest
             litigio_resuelto: pr.arrival?.resuelto ?? false,
             fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
             descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
@@ -308,16 +342,12 @@ export class PartRequestService {
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
             .leftJoinAndSelect('pr.sourcing', 'sourcing')
-            // ─── FIX: provider del sourcing (antes era texto libre, ahora FK) ───
             .leftJoinAndSelect('sourcing.provider', 'sourcingProvider')
-            // ─── FIX: cuentas bancarias seleccionadas para el sourcing ───
             .leftJoinAndSelect('sourcing.cuentasSeleccionadas', 'cuentasSel')
             .leftJoinAndSelect('cuentasSel.providerAccount', 'providerAccount')
             .leftJoinAndSelect('pr.shipping', 'shipping')
             .leftJoinAndSelect('pr.arrival', 'arrival')
-            // ─── FIX: quién resolvió el rechazo/litigio de la llegada ───
             .leftJoinAndSelect('arrival.resueltoPor', 'resueltoPor')
-            // ─── allocations → payment → provider ───
             .leftJoinAndSelect('pr.pagoAllocations', 'allocations')
             .leftJoinAndSelect('allocations.payment', 'payment')
             .leftJoinAndSelect('payment.provider', 'paymentProvider')
@@ -369,8 +399,8 @@ export class PartRequestService {
             return {
                 allocation_id: a.id,
                 payment_id: a.payment_id,
-                monto_asignado: Number(a.monto_asignado), // lo que cubrió de esta solicitud
-                monto_pago_total: p ? Number(p.monto) : null, // monto global del pago
+                monto_asignado: Number(a.monto_asignado),
+                monto_pago_total: p ? Number(p.monto) : null,
                 fecha_pago: p?.fecha_pago ?? null,
                 notas: p?.notas ?? null,
                 registrado_por_id: p?.registrado_por_id ?? null,
@@ -456,6 +486,8 @@ export class PartRequestService {
 
         const result: any = {
             id: pr.id,
+            numero: pr.numero ?? null,                                  // <-- nuevo
+            numero_formateado: formatPartRequestNumber(pr.numero),      // <-- nuevo
             fecha_solicitud: pr.createdAt,
             descripcion: pr.descripcion,
             tipo: pr.tipo,
@@ -499,11 +531,9 @@ export class PartRequestService {
             arrival: arrival
                 ? {
                     ...arrival,
-                    // FIX: exponer explícitamente quién resolvió (rechazo/litigio)
                     resueltoPor: arrival.resueltoPor ? mapUser(arrival.resueltoPor) : null,
                 }
                 : null,
-            // FIX: item de viaje asociado (si existe)
             travelItem: travelItem
                 ? {
                     id: travelItem.id,
@@ -584,7 +614,6 @@ export class PartRequestService {
 
         return result;
     }
-
     async getPartRequestCounts(user: { companyId: string; groups?: string[] }) {
         const puedeVerEsperaPago = (user.groups || []).some(g =>
             GRUPOS_CON_ACCESO_ESPERA_PAGO.includes(g)
@@ -616,9 +645,9 @@ export class PartRequestService {
             .leftJoin('pr.order', 'order')
             .addSelect(['order.id'])
             .leftJoinAndSelect('pr.sourcing', 'sourcing')
-            .leftJoinAndSelect('sourcing.provider', 'provider')                     // ← necesario
-            .leftJoinAndSelect('sourcing.cuentasSeleccionadas', 'cuenta')           // ← necesario
-            .leftJoinAndSelect('cuenta.providerAccount', 'providerAccount')         // ← si existe esta relación
+            .leftJoinAndSelect('sourcing.provider', 'provider')
+            .leftJoinAndSelect('sourcing.cuentasSeleccionadas', 'cuenta')
+            .leftJoinAndSelect('cuenta.providerAccount', 'providerAccount')
             .where('pr.id = :id', { id })
             .andWhere('pr.company_id = :companyId', { companyId: user.companyId })
             .getOne();
@@ -636,6 +665,8 @@ export class PartRequestService {
 
         return {
             id: partRequest.id,
+            numero: partRequest.numero ?? null,                                // <-- nuevo
+            numeroFormateado: formatPartRequestNumber(partRequest.numero),     // <-- nuevo
             estado: partRequest.estado,
             marca: partRequest.marca,
             modelo: partRequest.modelo,
@@ -647,11 +678,10 @@ export class PartRequestService {
             precioVenta: partRequest.precio_venta,
             sourcing: partRequest.sourcing
                 ? {
-                    // Antes era "proveedor" (string), ahora es el objeto Provider
                     provider: partRequest.sourcing.provider
                         ? {
                             id: partRequest.sourcing.provider.id,
-                            nombre: partRequest.sourcing.provider.nombre, // ajusta según el campo real
+                            nombre: partRequest.sourcing.provider.nombre,
                         }
                         : null,
 
@@ -662,9 +692,7 @@ export class PartRequestService {
                     notas: partRequest.sourcing.notas,
                     precioTransporte: partRequest.sourcing.precio_transporte,
 
-                    // Cuentas bancarias ahora vienen por la relación
                     cuentas: partRequest.sourcing.cuentasSeleccionadas?.map((c) => ({
-                        // Ajusta estos campos según la entidad SourcingProviderAccount / ProviderAccount
                         banco: c.providerAccount?.banco,
                         numeroCuenta: c.providerAccount?.numero_cuenta,
                         tipoCuenta: c.providerAccount?.tipo_cuenta,
