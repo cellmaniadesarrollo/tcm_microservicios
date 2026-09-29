@@ -576,6 +576,9 @@ export class BillingService {
 
     // ── Adaptador: convierte el payload legacy al contrato de createFromLegacy ────
     async normalizeLegacyPayload(raw: any, user: { companyId: string }) {
+        const types = await this.idTypeRepo.find();
+        this.logger.debug(`id_types vistos por el servicio: ${JSON.stringify(types.map(t => ({ id: t.id, code: t.code, name: t.name })))}`);
+
         const logger = new Logger('LegacyAdapter');
 
         // 1. Resolver IdType
@@ -646,7 +649,6 @@ export class BillingService {
             isCompanyClient: raw.person_type === 'juridica',
         };
     }
-
 
 
     private async publishMinimalCustomerCreated(customerId: number): Promise<void> {
@@ -872,8 +874,6 @@ export class BillingService {
             throw new RpcException(new InternalServerErrorException('Error creando cliente con facturación'));
         }
     }
-
-
 
     private async upsertCustomerAndBillingData(input: BillingUpsertInput, logger: Logger) {
         let somethingWasCreated = false;
