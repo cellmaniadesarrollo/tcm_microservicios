@@ -1,4 +1,5 @@
 import { IsEmail, IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { IsValidIdNumber } from '../../common/validators/is-valid-id-number.decorator';
 
 export class CreateBillingDto {
   // ❌ customerId ya no aplica: ahora se resuelve/crea por idNumber+companyId,
@@ -10,6 +11,7 @@ export class CreateBillingDto {
 
   @IsString()
   @IsNotEmpty()
+  @IsValidIdNumber()
   idNumber: string;
 
   @IsNumber()
