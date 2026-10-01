@@ -54,6 +54,9 @@ import { OrderExtraService } from '../order-extras/entities/order-extra-service.
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
 import { DiscountStatus, DiscountType, OrderDiscount } from '../order-discounts/entities/order-discount.entity';
 import { FindingProcedure } from '../order-findings/entities/finding-procedure.entity';
+import { formatPartRequestNumber } from '../order-part-request/helpers/company-numbering.helper';
+import { PartRequestStatus } from '../order-part-request/entities/enums/part-request-status.enum';
+import { PartRequest } from '../order-part-request/entities/part-request.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -101,6 +104,10 @@ export class OrderWorkflowService {
     private readonly orderExtraServiceRepo: Repository<OrderExtraService>,
     @InjectRepository(OrderPendingProduct)
     private readonly orderPendingProductRepo: Repository<OrderPendingProduct>,
+
+    @InjectRepository(PartRequest)
+    private readonly partRequestRepo: Repository<PartRequest>,
+
   ) { }
   private async getPublicExtraCharges(orderId: number): Promise<{ name: string; price: number }[]> {
     const [spares, extraServices, pendingProducts] = await Promise.all([
@@ -404,6 +411,77 @@ export class OrderWorkflowService {
   }
 
 
+  // ═══════════════════════════════════════════════════════════════════
+  // REQUISITOS (una sola vez en el servicio de órdenes):
+  //
+  //   import { PartRequest } from '.../part-request.entity';
+  //   import { PartRequestStatus } from '.../enums/part-request-status.enum';
+  //   import { formatPartRequestNumber } from '.../tu-helper-de-numeracion';
+  //
+  //   constructor(
+  //     ...
+  //     @InjectRepository(PartRequest)
+  //     private readonly partRequestRepo: Repository<PartRequest>,
+  //   ) {}
+  //
+  // Y registrar PartRequest en TypeOrmModule.forFeature([...]) del módulo.
+  // ═══════════════════════════════════════════════════════════════════
+
+
+  // ── NUEVO: helper hermano de appendPaymentAttachmentFlag ──────────
+  private async appendPartRequestsSummary<T extends { id: number }>(
+    orders: T[],
+    orderIds: number[],
+  ) {
+    if (!orderIds.length) {
+      return orders.map((o) => ({ ...o, part_requests: [] as any[] }));
+    }
+
+    const rows = await this.partRequestRepo
+      .createQueryBuilder('pr')
+      .select([
+        'pr.id',
+        'pr.order_id',
+        'pr.numero',
+        'pr.descripcion',
+        'pr.marca',
+        'pr.modelo',
+        'pr.tipo',
+        'pr.color',
+        'pr.calidad',
+        'pr.precio_venta',
+        'pr.estado',
+        'pr.createdAt',
+      ])
+      .where('pr.order_id IN (:...orderIds)', { orderIds })
+      .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO })
+      .orderBy('pr.createdAt', 'ASC')
+      .getMany();
+
+    const porOrden = new Map<number, any[]>();
+    for (const pr of rows) {
+      const lista = porOrden.get(pr.order_id) ?? [];
+      lista.push({
+        id: pr.id,
+        numero: pr.numero ?? null,
+        numero_formateado: formatPartRequestNumber(pr.numero),
+        descripcion: pr.descripcion,
+        marca: pr.marca,
+        modelo: pr.modelo,
+        tipo: pr.tipo,
+        color: pr.color ?? null,
+        calidad: pr.calidad ?? null,
+        // decimal de Postgres llega como string
+        precio_venta: pr.precio_venta != null ? Number(pr.precio_venta) : null,
+        estado: pr.estado,
+      });
+      porOrden.set(pr.order_id, lista);
+    }
+
+    return orders.map((o) => ({ ...o, part_requests: porOrden.get(o.id) ?? [] }));
+  }
+
+
   async listOrders(
     user: { companyId: string; branchId: string; userId: string },
     dto: any,
@@ -567,8 +645,11 @@ export class OrderWorkflowService {
       })),
     }));
 
+    // ==================== QUERY 4: resumen de solicitudes de repuesto ====================
+    const dataWithParts = await this.appendPartRequestsSummary(mappedData, ids); // 👈 nuevo
+
     return {
-      data: mappedData,
+      data: dataWithParts, // 👈 antes: mappedData
       total,
       page,
       limit,
@@ -875,7 +956,10 @@ export class OrderWorkflowService {
       // ── has_attachments para 'ejecutadas' ──────────────────────────────────
       const mappedData = await this.appendPaymentAttachmentFlag(data, pagedIds);
 
-      return { data: mappedData, total, page, limit, totalPages: Math.ceil(total / limit) };
+      // ── resumen de solicitudes de repuesto ─────────────────────────────────
+      const dataWithParts = await this.appendPartRequestsSummary(mappedData, pagedIds); // 👈 nuevo
+
+      return { data: dataWithParts, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
     // ── Paginación estándar ────────────────────────────────────────────────────
@@ -887,7 +971,10 @@ export class OrderWorkflowService {
     const orderIds = data.map((o) => o.id);
     const mappedData = await this.appendPaymentAttachmentFlag(data, orderIds);
 
-    return { data: mappedData, total, page, limit, totalPages: Math.ceil(total / limit) };
+    // ── resumen de solicitudes de repuesto ─────────────────────────────────────
+    const dataWithParts = await this.appendPartRequestsSummary(mappedData, orderIds); // 👈 nuevo
+
+    return { data: dataWithParts, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async getOrderFullData(
