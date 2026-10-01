@@ -13,6 +13,7 @@ import { OrderPendingProduct } from '../order-extras/entities/order-pending-prod
 import { Provider } from './entities/provider.entity';
 import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/part-requests.helpers';
 import { PartRequestPaymentAllocation } from './entities/part-request-payment-allocation.entity';
+import { formatPartRequestNumber } from './helpers/company-numbering.helper';
 
 /**
  * Dueño de la etapa de pago: listado agrupado por proveedor (cola de pago),
@@ -35,25 +36,29 @@ export class PartRequestPaymentService {
             limit?: number;
             search?: string;
             filtro?: 'pendientes' | 'pagados' | 'todos';
-            providerId?: number; // opcional: filtrar por un proveedor
+            providerId?: number;
         },
         user: { companyId: string },
     ) {
-
         const page = dto.page && dto.page > 0 ? dto.page : 1;
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const filtro = dto.filtro ?? 'todos';
 
-        // Búsqueda: si viene como #123123 se interpreta como número de orden exacto
+        // Búsqueda:
+        //   #123        → número de orden exacto
+        //   SR-42 / 42  → número de solicitud exacto (solo dígitos también busca por texto)
         const searchTerm = dto.search?.trim();
         const orderNumberMatch = searchTerm?.match(/^#(\d+)$/);
         const orderNumberValue = orderNumberMatch ? parseInt(orderNumberMatch[1], 10) : null;
+
+        const requestNumberMatch = !orderNumberMatch ? searchTerm?.match(/^(?:SR-?)?(\d{1,9})$/i) : null;
+        const numeroBuscado = requestNumberMatch ? parseInt(requestNumberMatch[1], 10) : null;
+        const numeroConPrefijo = !!searchTerm && /^SR/i.test(searchTerm);
 
         // ═══════════════════════════════════════════════════════════
         // CASO 1: PAGADOS → listar por PAGO (no agrupar por proveedor)
         // ═══════════════════════════════════════════════════════════
         if (filtro === 'pagados') {
-
             const qb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .leftJoinAndSelect('pago.allocations', 'allocations')
@@ -69,14 +74,24 @@ export class PartRequestPaymentService {
                 qb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
 
-            if (orderNumberValue !== null) {
-                qb.andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
-            } else if (searchTerm) {
-                qb.andWhere(
-                    '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                    { search: `%${searchTerm}%` },
-                );
-            }
+            const aplicarBusquedaPagados = (q: typeof qb) => {
+                if (orderNumberValue !== null) {
+                    q.andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
+                } else if (numeroBuscado !== null && numeroConPrefijo) {
+                    q.andWhere('partRequest.numero = :numeroBuscado', { numeroBuscado });
+                } else if (numeroBuscado !== null) {
+                    q.andWhere(
+                        '(partRequest.numero = :numeroBuscado OR provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
+                        { numeroBuscado, search: `%${searchTerm}%` },
+                    );
+                } else if (searchTerm) {
+                    q.andWhere(
+                        '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
+                        { search: `%${searchTerm}%` },
+                    );
+                }
+            };
+            aplicarBusquedaPagados(qb);
 
             // totalQb necesita los mismos joins/condiciones para que el conteo coincida con los datos
             const totalQb = this.paymentRepo
@@ -88,18 +103,15 @@ export class PartRequestPaymentService {
                 totalQb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
 
-            if (orderNumberValue !== null) {
+            if (orderNumberValue !== null || numeroBuscado !== null) {
                 totalQb
                     .leftJoin('pago.allocations', 'allocations')
-                    .leftJoin('allocations.partRequest', 'partRequest')
-                    .leftJoin('partRequest.order', 'prOrder')
-                    .andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
-            } else if (searchTerm) {
-                totalQb.andWhere(
-                    '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                    { search: `%${searchTerm}%` },
-                );
+                    .leftJoin('allocations.partRequest', 'partRequest');
+                if (orderNumberValue !== null) {
+                    totalQb.leftJoin('partRequest.order', 'prOrder');
+                }
             }
+            aplicarBusquedaPagados(totalQb);
 
             const totalRaw = await totalQb.select('COUNT(DISTINCT pago.id)', 'cnt').getRawOne();
             const total = Number(totalRaw?.cnt ?? 0);
@@ -135,6 +147,8 @@ export class PartRequestPaymentService {
 
                 solicitudes_cubiertas: (p.allocations ?? []).map((a) => ({
                     id: a.part_request_id,
+                    numero: a.partRequest?.numero ?? null,                                   // <-- nuevo
+                    numero_formateado: formatPartRequestNumber(a.partRequest?.numero),       // <-- nuevo
                     order_id: a.partRequest?.order_id ?? null,
                     order_number: a.partRequest?.order?.order_number ?? null,
                     descripcion: a.partRequest?.descripcion ?? null,
@@ -169,6 +183,7 @@ export class PartRequestPaymentService {
                 },
             };
         }
+
         // ═══════════════════════════════════════════════════════════
         // CASO 2: PENDIENTES / TODOS → agrupar por PROVEEDOR
         // ═══════════════════════════════════════════════════════════
@@ -190,6 +205,13 @@ export class PartRequestPaymentService {
 
         if (orderNumberValue !== null) {
             qb.andWhere('order.order_number = :orderNumber', { orderNumber: orderNumberValue });
+        } else if (numeroBuscado !== null && numeroConPrefijo) {
+            qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
+        } else if (numeroBuscado !== null) {
+            qb.andWhere(
+                '(pr.numero = :numeroBuscado OR pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
+                { numeroBuscado, search: `%${searchTerm}%` },
+            );
         } else if (searchTerm) {
             qb.andWhere(
                 '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
@@ -217,7 +239,7 @@ export class PartRequestPaymentService {
         // pendientes = no PAGADO; todos = todo
         const filtered = enriched.filter((e) => {
             if (filtro === 'pendientes') return e.estadoPago !== 'PAGADO';
-            return true; // 'todos'
+            return true;
         });
 
         // Agrupar por proveedor
@@ -257,6 +279,8 @@ export class PartRequestPaymentService {
             solicitudes: g.solicitudes.map(
                 ({ pr, montoProducto, montoTransporte, totalPagado, saldoPendiente, estadoPago }) => ({
                     id: pr.id,
+                    numero: pr.numero ?? null,                                  // <-- nuevo
+                    numero_formateado: formatPartRequestNumber(pr.numero),      // <-- nuevo
                     order_id: pr.order_id,
                     order_number: pr.order?.order_number ?? null,
                     fecha_solicitud: pr.createdAt,
@@ -556,6 +580,7 @@ export class PartRequestPaymentService {
     }
 
     async getDatosPago(id: number, user: { companyId: string }) {
+        console.log('ddddddd')
         const partRequest = await this.partRequestRepo
             .createQueryBuilder('pr')
             .leftJoin('pr.order', 'order')
@@ -596,13 +621,14 @@ export class PartRequestPaymentService {
 
         return {
             id: partRequest.id,
+            numero: partRequest.numero ?? null,                                // <-- nuevo
+            numero_formateado: formatPartRequestNumber(partRequest.numero),    // <-- nuevo
             estado: partRequest.estado,
             tipo: partRequest.tipo,
             marca: partRequest.marca,
             modelo: partRequest.modelo,
             descripcion: partRequest.descripcion,
 
-            // Ahora es el objeto Provider
             proveedor: partRequest.sourcing.provider
                 ? {
                     id: partRequest.sourcing.provider.id,
@@ -621,7 +647,6 @@ export class PartRequestPaymentService {
             linkCompra: partRequest.sourcing.link_compra,
             notas: partRequest.sourcing.notas,
 
-            // Datos bancarios desde ProviderAccount
             datosBancarios: cuentaSeleccionada
                 ? {
                     id: cuentaSeleccionada.id,
@@ -733,6 +758,10 @@ export class PartRequestPaymentService {
             return {
                 allocation_id: a.id,
                 part_request_id: a.part_request_id,
+                numero: pr?.numero ?? null,                                   // 👈 nuevo
+                numero_formateado: pr?.numero != null                         // 👈 nuevo
+                    ? `SR-${String(pr.numero).padStart(5, '0')}`
+                    : null,
                 monto_asignado: Number(a.monto_asignado),
                 descripcion: pr?.descripcion ?? null,
                 estado: pr?.estado ?? null,
@@ -782,4 +811,5 @@ export class PartRequestPaymentService {
             createdAt: payment.createdAt,
         };
     }
+
 }
