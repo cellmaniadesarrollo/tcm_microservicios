@@ -3242,10 +3242,30 @@ export class OrderWorkflowService {
   private readonly ESTADO_BODEGA = 9;
 
   async pasarABodega(
-    dto: { orderId: number; observation?: string },
+    dto: { orderId: number; observation?: string; cedulaCount: number },
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
     user: { userId: string; companyId: string; branchId: string },
   ) {
+    const MIN_FOTOS = 2;
+
+    // ── Validación de mínimos (antes de abrir la transacción) ──
+    const cedulaCount = Number(dto.cedulaCount ?? 0);
+    if (!Number.isInteger(cedulaCount) || cedulaCount < 0 || cedulaCount > files.length) {
+      throw new RpcException(new BadRequestException('cedulaCount inválido'));
+    }
+    const deviceCount = files.length - cedulaCount;
+
+    if (cedulaCount < MIN_FOTOS) {
+      throw new RpcException(
+        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos de la cédula del cliente`),
+      );
+    }
+    if (deviceCount < MIN_FOTOS) {
+      throw new RpcException(
+        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del dispositivo`),
+      );
+    }
+
     return this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
@@ -3264,18 +3284,26 @@ export class OrderWorkflowService {
       const { toStatus, history, fromStatusId, fromStatusName } =
         await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);
 
-      // 📎 Adjuntos opcionales (se sugiere incluir foto de la cédula del cliente)
+      // 📎 Adjuntos obligatorios:
+      //   - Los primeros `cedulaCount` archivos → cédula del cliente (WAREHOUSE_HANDOVER)
+      //   - El resto → fotos del dispositivo (WAREHOUSE_HANDOVER_DEVICE)
       const attachments: Attachment[] = [];
 
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const isCedula = i < cedulaCount;
+        const folder = isCedula ? 'cedula' : 'dispositivo';
+
         const buffer = Buffer.from(file.buffer, 'base64');
-        const prefix = `order/${order.id}/bodega/`;
+        const prefix = `order/${order.id}/bodega/${folder}/`;
         const url = await this.awsS3Service.uploadBuffer(
           buffer, file.originalname, file.mimetype, prefix,
         );
 
         const attachment = manager.create(Attachment, {
-          entity_type: AttachmentEntityType.WAREHOUSE_HANDOVER,
+          entity_type: isCedula
+            ? AttachmentEntityType.WAREHOUSE_HANDOVER
+            : AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE,
           entity_id: order.id,
           file_name: file.originalname,
           file_url: url,
@@ -3304,7 +3332,12 @@ export class OrderWorkflowService {
           observation,
           changed_at: history.changed_at,
         },
-        attachments: attachments.map(a => ({ id: a.id, file_url: a.file_url, file_name: a.file_name })),
+        attachments: attachments.map(a => ({
+          id: a.id,
+          file_url: a.file_url,
+          file_name: a.file_name,
+          entity_type: a.entity_type,
+        })),
       });
 
       return {
@@ -3368,6 +3401,8 @@ export class OrderWorkflowService {
 
     return { toStatus, history, fromStatusId, fromStatusName };
   }
+
+
   async getWarehouseAttachments(
     orderId: number,
     user: { companyId: string },
@@ -3383,7 +3418,10 @@ export class OrderWorkflowService {
 
     const attachments = await this.attachmentRepository.find({
       where: {
-        entity_type: AttachmentEntityType.WAREHOUSE_HANDOVER,
+        entity_type: In([
+          AttachmentEntityType.WAREHOUSE_HANDOVER,        // cédula (incluye registros históricos)
+          AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE, // fotos del dispositivo
+        ]),
         entity_id: orderId,
         is_active: true,
       },
@@ -3395,10 +3433,15 @@ export class OrderWorkflowService {
     const wrapper: any = { attachments };
     await this.enrichAttachmentsWithSignedUrls(wrapper);
 
+    const signed: any[] = wrapper.attachments;
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
-      attachments: wrapper.attachments,
+      attachments: signed,
+      // Agrupados para que el front no tenga que filtrar (opcional)
+      cedula: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER),
+      dispositivo: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE),
     };
   }
   async createWarehousePayment(

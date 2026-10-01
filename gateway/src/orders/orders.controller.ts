@@ -689,11 +689,25 @@ export class OrdersController {
   @Post('pasar-a-bodega')
   async pasarABodega(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
+
+    const cedulaCount = Number(formData.cedulaCount);
+    if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
+      throw new BadRequestException('cedulaCount inválido');
+    }
+    const deviceCount = files.length - cedulaCount;
+    if (cedulaCount < 2) {
+      throw new BadRequestException('Debes adjuntar mínimo 2 fotos de la cédula');
+    }
+    if (deviceCount < 2) {
+      throw new BadRequestException('Debes adjuntar mínimo 2 fotos del dispositivo');
+    }
+
     const processedFiles = await processAndValidateFiles(files);
 
-    const dto: PasarABodegaGatewayDto = {
+    const dto = {
       orderId: Number(formData.orderId),
       observation: formData.observation || undefined,
+      cedulaCount,
     };
 
     return this.ordersGatewayService.pasarABodega(
