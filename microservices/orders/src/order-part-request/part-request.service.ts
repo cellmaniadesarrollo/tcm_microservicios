@@ -792,14 +792,25 @@ export class PartRequestService {
         if (dto.search?.trim()) {
             const searchTerm = dto.search.trim();
             const orderNumberMatch = searchTerm.match(/^#(\d+)$/);
+            const requestNumberMatch = !orderNumberMatch ? searchTerm.match(/^(?:SR-?)?(\d{1,9})$/i) : null;
+            const numeroBuscado = requestNumberMatch ? parseInt(requestNumberMatch[1], 10) : null;
+            const numeroConPrefijo = /^SR/i.test(searchTerm);
 
             if (orderNumberMatch) {
-                // Búsqueda por número de orden exacto
                 qb.andWhere('order.order_number = :orderNumber', {
                     orderNumber: parseInt(orderNumberMatch[1], 10),
                 });
+            } else if (numeroBuscado !== null && numeroConPrefijo) {
+                qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
+            } else if (numeroBuscado !== null) {
+                qb.andWhere(
+                    `(pr.numero = :numeroBuscado
+              OR pr.descripcion ILIKE :search
+              OR provider.nombre ILIKE :search
+              OR CAST(order.order_number AS TEXT) ILIKE :search)`,
+                    { numeroBuscado, search: `%${searchTerm}%` },
+                );
             } else {
-                // Búsqueda normal: descripción, proveedor, o número de orden parcial
                 qb.andWhere(
                     `(pr.descripcion ILIKE :search
               OR provider.nombre ILIKE :search
@@ -881,6 +892,8 @@ export class PartRequestService {
                 diasDesdePago,
             }) => ({
                 id: pr.id,
+                numero: pr.numero ?? null,                              // 👈 nuevo
+                numero_formateado: formatPartRequestNumber(pr.numero),  // 👈 nuevo
                 descripcion: pr.descripcion,
                 tipo: pr.tipo,
                 estado: pr.estado, // 👈 nuevo: el frontend lo usa para saber si está en LITIGIO

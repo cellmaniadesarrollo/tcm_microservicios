@@ -31,6 +31,7 @@ import { InvoicesModule } from '../invoices/invoices.module';
 import { WarehousePayment } from './entities/warehouse-payment.entity';
 import { OrderExtraService } from '../order-extras/entities/order-extra-service.entity';
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
+import { PartRequest } from '../order-part-request/entities/part-request.entity';
 
 @Module({
   imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module,
@@ -38,7 +39,7 @@ import { OrderPendingProduct } from '../order-extras/entities/order-pending-prod
       OrderStatusHistory, OrderDelivery, PaymentMethod, PaymentType, OrderPayment,
       Attachment, OrderNote, OrderNoteLog, OrderShipping, OrderPotentialPurchase,
       SpareAssignment, OrderPriceAgreement, WarehousePayment, OrderExtraService,
-      OrderPendingProduct
+      OrderPendingProduct, PartRequest
     ]),
     BroadcastModule, SearchHistoryModule, DevicesModule, OrderValidationLockModule, InvoicesModule],
   controllers: [OrderWorkflowController],
