@@ -54,6 +54,9 @@ import { OrderExtraService } from '../order-extras/entities/order-extra-service.
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
 import { DiscountStatus, DiscountType, OrderDiscount } from '../order-discounts/entities/order-discount.entity';
 import { FindingProcedure } from '../order-findings/entities/finding-procedure.entity';
+import { formatPartRequestNumber } from '../order-part-request/helpers/company-numbering.helper';
+import { PartRequestStatus } from '../order-part-request/entities/enums/part-request-status.enum';
+import { PartRequest } from '../order-part-request/entities/part-request.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -101,6 +104,10 @@ export class OrderWorkflowService {
     private readonly orderExtraServiceRepo: Repository<OrderExtraService>,
     @InjectRepository(OrderPendingProduct)
     private readonly orderPendingProductRepo: Repository<OrderPendingProduct>,
+
+    @InjectRepository(PartRequest)
+    private readonly partRequestRepo: Repository<PartRequest>,
+
   ) { }
   private async getPublicExtraCharges(orderId: number): Promise<{ name: string; price: number }[]> {
     const [spares, extraServices, pendingProducts] = await Promise.all([
@@ -404,6 +411,77 @@ export class OrderWorkflowService {
   }
 
 
+  // ═══════════════════════════════════════════════════════════════════
+  // REQUISITOS (una sola vez en el servicio de órdenes):
+  //
+  //   import { PartRequest } from '.../part-request.entity';
+  //   import { PartRequestStatus } from '.../enums/part-request-status.enum';
+  //   import { formatPartRequestNumber } from '.../tu-helper-de-numeracion';
+  //
+  //   constructor(
+  //     ...
+  //     @InjectRepository(PartRequest)
+  //     private readonly partRequestRepo: Repository<PartRequest>,
+  //   ) {}
+  //
+  // Y registrar PartRequest en TypeOrmModule.forFeature([...]) del módulo.
+  // ═══════════════════════════════════════════════════════════════════
+
+
+  // ── NUEVO: helper hermano de appendPaymentAttachmentFlag ──────────
+  private async appendPartRequestsSummary<T extends { id: number }>(
+    orders: T[],
+    orderIds: number[],
+  ) {
+    if (!orderIds.length) {
+      return orders.map((o) => ({ ...o, part_requests: [] as any[] }));
+    }
+
+    const rows = await this.partRequestRepo
+      .createQueryBuilder('pr')
+      .select([
+        'pr.id',
+        'pr.order_id',
+        'pr.numero',
+        'pr.descripcion',
+        'pr.marca',
+        'pr.modelo',
+        'pr.tipo',
+        'pr.color',
+        'pr.calidad',
+        'pr.precio_venta',
+        'pr.estado',
+        'pr.createdAt',
+      ])
+      .where('pr.order_id IN (:...orderIds)', { orderIds })
+      .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO })
+      .orderBy('pr.createdAt', 'ASC')
+      .getMany();
+
+    const porOrden = new Map<number, any[]>();
+    for (const pr of rows) {
+      const lista = porOrden.get(pr.order_id) ?? [];
+      lista.push({
+        id: pr.id,
+        numero: pr.numero ?? null,
+        numero_formateado: formatPartRequestNumber(pr.numero),
+        descripcion: pr.descripcion,
+        marca: pr.marca,
+        modelo: pr.modelo,
+        tipo: pr.tipo,
+        color: pr.color ?? null,
+        calidad: pr.calidad ?? null,
+        // decimal de Postgres llega como string
+        precio_venta: pr.precio_venta != null ? Number(pr.precio_venta) : null,
+        estado: pr.estado,
+      });
+      porOrden.set(pr.order_id, lista);
+    }
+
+    return orders.map((o) => ({ ...o, part_requests: porOrden.get(o.id) ?? [] }));
+  }
+
+
   async listOrders(
     user: { companyId: string; branchId: string; userId: string },
     dto: any,
@@ -567,8 +645,11 @@ export class OrderWorkflowService {
       })),
     }));
 
+    // ==================== QUERY 4: resumen de solicitudes de repuesto ====================
+    const dataWithParts = await this.appendPartRequestsSummary(mappedData, ids); // 👈 nuevo
+
     return {
-      data: mappedData,
+      data: dataWithParts, // 👈 antes: mappedData
       total,
       page,
       limit,
@@ -875,7 +956,10 @@ export class OrderWorkflowService {
       // ── has_attachments para 'ejecutadas' ──────────────────────────────────
       const mappedData = await this.appendPaymentAttachmentFlag(data, pagedIds);
 
-      return { data: mappedData, total, page, limit, totalPages: Math.ceil(total / limit) };
+      // ── resumen de solicitudes de repuesto ─────────────────────────────────
+      const dataWithParts = await this.appendPartRequestsSummary(mappedData, pagedIds); // 👈 nuevo
+
+      return { data: dataWithParts, total, page, limit, totalPages: Math.ceil(total / limit) };
     }
 
     // ── Paginación estándar ────────────────────────────────────────────────────
@@ -887,7 +971,10 @@ export class OrderWorkflowService {
     const orderIds = data.map((o) => o.id);
     const mappedData = await this.appendPaymentAttachmentFlag(data, orderIds);
 
-    return { data: mappedData, total, page, limit, totalPages: Math.ceil(total / limit) };
+    // ── resumen de solicitudes de repuesto ─────────────────────────────────────
+    const dataWithParts = await this.appendPartRequestsSummary(mappedData, orderIds); // 👈 nuevo
+
+    return { data: dataWithParts, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async getOrderFullData(
@@ -3155,10 +3242,30 @@ export class OrderWorkflowService {
   private readonly ESTADO_BODEGA = 9;
 
   async pasarABodega(
-    dto: { orderId: number; observation?: string },
+    dto: { orderId: number; observation?: string; cedulaCount: number },
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
     user: { userId: string; companyId: string; branchId: string },
   ) {
+    const MIN_FOTOS = 2;
+
+    // ── Validación de mínimos (antes de abrir la transacción) ──
+    const cedulaCount = Number(dto.cedulaCount ?? 0);
+    if (!Number.isInteger(cedulaCount) || cedulaCount < 0 || cedulaCount > files.length) {
+      throw new RpcException(new BadRequestException('cedulaCount inválido'));
+    }
+    const deviceCount = files.length - cedulaCount;
+
+    if (cedulaCount < MIN_FOTOS) {
+      throw new RpcException(
+        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos de la cédula del cliente`),
+      );
+    }
+    if (deviceCount < MIN_FOTOS) {
+      throw new RpcException(
+        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del dispositivo`),
+      );
+    }
+
     return this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
@@ -3177,18 +3284,26 @@ export class OrderWorkflowService {
       const { toStatus, history, fromStatusId, fromStatusName } =
         await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);
 
-      // 📎 Adjuntos opcionales (se sugiere incluir foto de la cédula del cliente)
+      // 📎 Adjuntos obligatorios:
+      //   - Los primeros `cedulaCount` archivos → cédula del cliente (WAREHOUSE_HANDOVER)
+      //   - El resto → fotos del dispositivo (WAREHOUSE_HANDOVER_DEVICE)
       const attachments: Attachment[] = [];
 
-      for (const file of files) {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const isCedula = i < cedulaCount;
+        const folder = isCedula ? 'cedula' : 'dispositivo';
+
         const buffer = Buffer.from(file.buffer, 'base64');
-        const prefix = `order/${order.id}/bodega/`;
+        const prefix = `order/${order.id}/bodega/${folder}/`;
         const url = await this.awsS3Service.uploadBuffer(
           buffer, file.originalname, file.mimetype, prefix,
         );
 
         const attachment = manager.create(Attachment, {
-          entity_type: AttachmentEntityType.WAREHOUSE_HANDOVER,
+          entity_type: isCedula
+            ? AttachmentEntityType.WAREHOUSE_HANDOVER
+            : AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE,
           entity_id: order.id,
           file_name: file.originalname,
           file_url: url,
@@ -3217,7 +3332,12 @@ export class OrderWorkflowService {
           observation,
           changed_at: history.changed_at,
         },
-        attachments: attachments.map(a => ({ id: a.id, file_url: a.file_url, file_name: a.file_name })),
+        attachments: attachments.map(a => ({
+          id: a.id,
+          file_url: a.file_url,
+          file_name: a.file_name,
+          entity_type: a.entity_type,
+        })),
       });
 
       return {
@@ -3281,6 +3401,8 @@ export class OrderWorkflowService {
 
     return { toStatus, history, fromStatusId, fromStatusName };
   }
+
+
   async getWarehouseAttachments(
     orderId: number,
     user: { companyId: string },
@@ -3296,7 +3418,10 @@ export class OrderWorkflowService {
 
     const attachments = await this.attachmentRepository.find({
       where: {
-        entity_type: AttachmentEntityType.WAREHOUSE_HANDOVER,
+        entity_type: In([
+          AttachmentEntityType.WAREHOUSE_HANDOVER,        // cédula (incluye registros históricos)
+          AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE, // fotos del dispositivo
+        ]),
         entity_id: orderId,
         is_active: true,
       },
@@ -3308,10 +3433,15 @@ export class OrderWorkflowService {
     const wrapper: any = { attachments };
     await this.enrichAttachmentsWithSignedUrls(wrapper);
 
+    const signed: any[] = wrapper.attachments;
+
     return {
       orderId: order.id,
       orderNumber: order.order_number,
-      attachments: wrapper.attachments,
+      attachments: signed,
+      // Agrupados para que el front no tenga que filtrar (opcional)
+      cedula: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER),
+      dispositivo: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE),
     };
   }
   async createWarehousePayment(
