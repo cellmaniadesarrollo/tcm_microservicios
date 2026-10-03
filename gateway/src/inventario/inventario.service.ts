@@ -732,4 +732,20 @@ export class InventarioService {
       };
     }
   }
+
+  async getLabelData(batchId: string): Promise<any> {
+  this.logger.log(`📤 [Gateway] getLabelData: ${batchId}`);
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(`${this.inventarioUrl}/api/income-backend/labels/${batchId}`)
+      );
+      return response.data;
+    } catch (error: any) {
+      this.logger.error(`❌ [Gateway] Error getLabelData: ${error.message}`);
+      throw {
+        statusCode: error.response?.status || 500,
+        message: error.response?.data?.message || error.message || 'Error al obtener datos de etiqueta',
+      };
+    }
+  }
 }
