@@ -351,4 +351,11 @@ export class InventarioController {
   async createProductFromInventoryFlow(@Body() payload: any) {
     return this.inventarioService.createProductFromInventoryFlow(payload);
   }
+
+  @Get('income-backend/labels/:batchId')
+  @ApiOperation({ summary: 'Obtener datos de etiqueta por batchId' })
+  @ApiResponse({ status: HttpStatus.OK })
+  async getLabelData(@Param('batchId') batchId: string) {
+    return this.inventarioService.getLabelData(batchId);
+  }
 }
