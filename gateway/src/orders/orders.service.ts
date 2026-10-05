@@ -397,4 +397,15 @@ export class OrdersGatewayService {
             );
         }
     }
+
+    async activatePremium(orderId: number, user: any) {
+        try {
+            return await this.send('activate_order_premium', { orderId, user });
+        } catch (error: any) {
+            throw new HttpException(
+                error.message || 'Error interno en la comunicación con el microservicio',
+                error.status || HttpStatus.INTERNAL_SERVER_ERROR,
+            );
+        }
+    }
 }
