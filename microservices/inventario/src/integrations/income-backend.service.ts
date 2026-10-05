@@ -1344,4 +1344,74 @@ export class IncomeBackendService {
       };
     }
   }
+
+  async getLabelData(batchId: string): Promise<any> {
+    try {
+      if (!Types.ObjectId.isValid(batchId)) {
+        throw new Error('ID de batch inválido');
+      }
+
+      const batch = await this.batchModel.findById(batchId)
+        .select('incomes_id sku batchNumber productName unitPrice hasTax item orderPublicId')
+        .lean() as any;
+
+      if (!batch) return null;
+
+      // Obtener datos del inventoryFlow para name_model, name_nameitems, name_quality
+      const inventoryFlow = batch.item
+        ? await this.inventoryFlowModel.findById(batch.item)
+            .select('name_model name_nameitems name_quality name_color')
+            .lean() as any
+        : null;
+
+      const income = await this.incomeModel.findById(batch.incomes_id)
+        .select('id_supplier user_create date_income inventory_snapshot')
+        .lean() as any;
+
+      let supplierInitials = '';
+      if (income?.id_supplier) {
+        const supplier = await this.supplierModel.findById(income.id_supplier)
+          .select('razon_social')
+          .lean() as any;
+        if (supplier?.razon_social) {
+          supplierInitials = supplier.razon_social
+            .split(' ')
+            .map((w: string) => w[0])
+            .join('')
+            .toUpperCase()
+            .slice(0, 3);
+        }
+      }
+
+      const dateOnly = income?.date_income
+        ? new Date(income.date_income).toISOString().slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+
+      const fa = income?.inventory_snapshot?.isComplete ? 'C' : 'T';
+      const username = income?.user_create || '';
+
+      // Campos del inventoryFlow con fallback al inventory_snapshot
+      const nameModel = inventoryFlow?.name_model || income?.inventory_snapshot?.name_model || '';
+      const nameItems = inventoryFlow?.name_nameitems || income?.inventory_snapshot?.name_item || '';
+      const nameQuality = inventoryFlow?.name_quality || income?.inventory_snapshot?.name_quality || '';
+      const nameColor = inventoryFlow?.name_color || income?.inventory_snapshot?.name_color || '';
+
+      return {
+        success: true,
+        data: {
+          topText1: nameModel,
+          topText2: `${nameItems} ${nameQuality}`.trim(),
+          bottomText1: `${batch.sku} - ${batch.batchNumber} `,
+          qrText: `S:${batch.sku},BT: ${batch.batchNumber}, F: ${dateOnly} ,P:${supplierInitials} B:true,U:${username},FA:${fa},O:${batch.orderPublicId ?? ''}`,
+          price: batch.unitPrice || 0,
+          f: fa,
+          iva: !batch.hasTax
+        }
+      };
+
+    } catch (error: any) {
+      this.logger.error(`❌ Error en getLabelData: ${error.message}`);
+      throw error;
+    }
+  }
 }

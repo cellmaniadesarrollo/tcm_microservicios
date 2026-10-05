@@ -523,45 +523,41 @@ export class ProductsService {
       this.logger.log(`📦 sku recibido: ${data.sku}`);
       this.logger.log(`📦 upc recibido: ${data.upc}`);
       this.logger.log(`📱 IMEIS recibidos en createFromOrder: ${data.imeis?.length || 0} - ${JSON.stringify(data.imeis || [])}`);
-      
-      // ✅ LOG DE VERIFICACIÓN DE PARTES
       this.logger.log(`🔍 partsStatus recibido en createFromOrder: ${JSON.stringify(data.partsStatus || 'NO ENVIADO')}`);
       this.logger.log(`🔍 verificationEnabled recibido en createFromOrder: ${data.verificationEnabled !== undefined ? data.verificationEnabled : 'NO ENVIADO'}`);
       this.logger.log(`🔍 deviceSerial recibido en createFromOrder: ${data.deviceSerial || 'NO ENVIADO'}`);
-          this.logger.log(`🔍 data.public_id: ${data.public_id} | data.orderPublicId: ${data.orderPublicId}`);
-    this.logger.log(`🔍 KEYS del payload recibido: ${Object.keys(data).join(', ')}`);
-      
+      this.logger.log(`🔍 data.public_id: ${data.public_id} | data.orderPublicId: ${data.orderPublicId}`);
+      this.logger.log(`🔍 KEYS del payload recibido: ${Object.keys(data).join(', ')}`);
+
       const results = [];
-      
+
       for (const component of data.components) {
         const quality = component.quality;
         const isFromInventoryFlow = Boolean(data.inventoryFlowId);
         const isSerializedDevice = (component.type || data.type) === 'COMPLETO';
-        
+
         let product;
-        
+
         if (isFromInventoryFlow) {
-          // ✅ OBTENER EL INVENTORYFLOW SELECCIONADO
           const existingInventoryFlow = await this.incomeBackendService.getInventoryFlowById(data.inventoryFlowId);
-          
+
           if (!existingInventoryFlow) {
             throw new Error(`Inventory flow ${data.inventoryFlowId} no encontrado`);
           }
 
           this.logger.log(`✅ InventoryFlow encontrado: ${existingInventoryFlow.sku} - ${existingInventoryFlow.name_nameitems}`);
-          
+
           const skuToUse = data.sku || existingInventoryFlow.sku;
           const upcToUse = data.upc || existingInventoryFlow.upc || '';
-          
+
           this.logger.log(`📦 SKU a usar: ${skuToUse}`);
           this.logger.log(`📦 UPC a usar: ${upcToUse}`);
-          
-          // ✅ Buscar producto existente por SKU
+
           const existingProduct = await this.productModel.findOne({
             sku: skuToUse,
             isDeleted: false,
           });
-          
+
           if (existingProduct && !isSerializedDevice) {
             const quantity = component.quantity || 1;
             existingProduct.stockQuantity = (existingProduct.stockQuantity || 0) + quantity;
@@ -570,7 +566,6 @@ export class ProductsService {
             product = existingProduct;
             this.logger.log(`📦 Stock actualizado en producto existente: ${product.code}`);
           } else {
-            // ✅ Crear producto CON los datos de verificación en metadata
             const productData: CreateProductDto = {
               name: component.name || existingInventoryFlow.name_nameitems || 'Dispositivo',
               brand: component.brand || 'Genérico',
@@ -601,7 +596,6 @@ export class ProductsService {
                 componentName: component.name,
                 fromInventoryFlow: true,
                 inventoryFlowId: data.inventoryFlowId,
-                // ✅ INCLUIR VERIFICACIÓN DE PARTES EN METADATA DEL PRODUCTO
                 partsVerificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
                 partsVerification: data.partsStatus || null,
                 deviceSerial: data.deviceSerial || '',
@@ -615,8 +609,7 @@ export class ProductsService {
             product = await this.create(productData);
             this.logger.log(`📦 Nuevo producto creado: ${product.code} - SKU: ${product.sku}`);
           }
-          
-          // ✅ CONSTRUIR syncData CON TODOS LOS DATOS - SIN DUPLICADOS
+
           const syncData = {
             orderId: data.orderId,
             orderNumber: data.orderNumber,
@@ -629,7 +622,6 @@ export class ProductsService {
             color: component.color || data.deviceColor,
             sku: skuToUse,
             upc: upcToUse,
-            // ✅ PASAR IMEIS EXPLÍCITAMENTE
             imeis: data.imeis || [],
             orderPublicId: data.orderPublicId || data.public_id || null,
             inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
@@ -638,7 +630,6 @@ export class ProductsService {
             porcentaje: data.porcentaje || '65d7a93e81594c12686310aa',
             createdByName: data.createdByName,
             createdById: data.createdById,
-            // ✅ PASAR VERIFICACIÓN DE PARTES - (NO DUPLICAR deviceSerial, deviceColor)
             partsStatus: data.partsStatus || null,
             partsDestino: data.partsDestino || null,
             verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
@@ -648,22 +639,30 @@ export class ProductsService {
             verifiedByName: data.verifiedByName || data.createdByName,
             metadata: data.metadata || {},
           };
-          
+
           this.logger.log(`📱 syncData.imeis: ${syncData.imeis.length} - ${JSON.stringify(syncData.imeis)}`);
           this.logger.log(`🔍 syncData.partsStatus ENVIADO: ${JSON.stringify(syncData.partsStatus || 'NO ENVIADO')}`);
           this.logger.log(`🔍 syncData.verificationEnabled ENVIADO: ${syncData.verificationEnabled}`);
           this.logger.log(`🔍 syncData.isComplete ENVIADO: ${syncData.isComplete}`);
-          
-          // ✅ Sincronizar con el InventoryFlow PASANDO TODOS LOS DATOS
-          await this.incomeBackendService.syncProductWithExistingInventoryFlow(
+
+          // ✅ CAPTURAR batchId del resultado
+          const syncResult = await this.incomeBackendService.syncProductWithExistingInventoryFlow(
             product,
             syncData,
             component,
             existingInventoryFlow
           );
-          
+
+          results.push({
+            component: component.name,
+            productId: product._id,
+            code: product.code,
+            sku: product.sku,
+            upc: product.upc,
+            batchId: syncResult?.batchId || null,  // ← NUEVO
+          });
+
         } else {
-          // ✅ CREACIÓN NORMAL (sin InventoryFlow seleccionado)
           const productData: CreateProductDto = {
             name: component.name,
             brand: component.brand || data.deviceName?.split(' ')[0] || 'Genérico',
@@ -690,7 +689,6 @@ export class ProductsService {
               customerName: data.customerName,
               customerId: data.customerId,
               componentName: component.name,
-              // ✅ INCLUIR VERIFICACIÓN DE PARTES EN METADATA
               partsVerificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
               partsVerification: data.partsStatus || null,
               deviceSerial: data.deviceSerial || '',
@@ -703,8 +701,7 @@ export class ProductsService {
 
           product = await this.create(productData);
           this.logger.log(`📦 Nuevo producto creado: ${product.code}`);
-          
-          // ✅ Sincronizar con syncProduct normal PASANDO TODOS LOS DATOS (SIN DUPLICADOS)
+
           const syncDataNormal = {
             orderId: data.orderId,
             orderNumber: data.orderNumber,
@@ -717,7 +714,6 @@ export class ProductsService {
             type: data.type,
             imeis: data.imeis || [],
             orderPublicId: data.orderPublicId || data.public_id || null,
-            // ✅ PASAR VERIFICACIÓN DE PARTES
             partsStatus: data.partsStatus || null,
             partsDestino: data.partsDestino || null,
             verificationEnabled: data.verificationEnabled !== undefined ? data.verificationEnabled : true,
@@ -727,7 +723,6 @@ export class ProductsService {
             metadata: data.metadata || {},
             createdById: data.createdById,
             createdByName: data.createdByName,
-            // ✅ DATOS ADICIONALES
             brand: component.brand || data.brand,
             color: component.color || data.deviceColor,
             inventory_id: data.inventory_id || new Types.ObjectId('67b3bc26b850b543c94ca47d'),
@@ -735,20 +730,26 @@ export class ProductsService {
             tipo_documento: data.tipo_documento || '65ae74b9f978d87a5c41fd2b',
             porcentaje: data.porcentaje || '65d7a93e81594c12686310aa',
           };
-          
+
           this.logger.log(`🔍 syncDataNormal.partsStatus ENVIADO: ${JSON.stringify(syncDataNormal.partsStatus || 'NO ENVIADO')}`);
           this.logger.log(`🔍 syncDataNormal.isComplete ENVIADO: ${syncDataNormal.isComplete}`);
-          
-          await this.incomeBackendService.syncProductNormal(product, syncDataNormal, component);
+
+          // ✅ CAPTURAR batchId del resultado
+          const syncResultNormal = await this.incomeBackendService.syncProductNormal(
+            product,
+            syncDataNormal,
+            component
+          );
+
+          results.push({
+            component: component.name,
+            productId: product._id,
+            code: product.code,
+            sku: product.sku,
+            upc: product.upc,
+            batchId: syncResultNormal?.batchId || null,  // ← NUEVO
+          });
         }
-        
-        results.push({
-          component: component.name,
-          productId: product._id,
-          code: product.code,
-          sku: product.sku,
-          upc: product.upc,
-        });
       }
 
       return {
