@@ -83,7 +83,7 @@ export class GoogleCalendarService {
         expiryDate: tokens.expiry_date,
       };
       
-      console.log(`📤 [GoogleCalendar] Enviando evento a Kafka:`, message);
+      console.log(`📤 [GoogleCalendar] Enviando SAVE_TOKEN a Kafka para userId: ${userId}`);
       
       await this.kafkaProducer.request(
         'users.requests',

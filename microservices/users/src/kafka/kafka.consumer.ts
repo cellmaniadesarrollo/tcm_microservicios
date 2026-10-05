@@ -1,15 +1,18 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Kafka, Consumer, EachMessagePayload, logLevel } from 'kafkajs';
 
-// ✅ CAMBIADO: solo recibe un parámetro (data)
 type TopicHandler = (data: any) => Promise<void>;
 
 @Injectable()
-export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
+export class KafkaConsumerService implements OnModuleDestroy {
     private consumer: Consumer;
     private readonly kafka: Kafka;
     private readonly handlers = new Map<string, TopicHandler>();
+
     private started = false;
+    private starting = false;
+    private connected = false;
+    private subscribed = false;
 
     constructor() {
         this.kafka = new Kafka({
@@ -39,48 +42,59 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
         console.log(`📌 Handler registrado para topic: ${topic}`);
     }
 
-    async onModuleInit() {
-        try {
-            await this.consumer.connect();
-            console.log('✅ Kafka Consumer conectado - ms-users');
-        } catch (error: any) {
-            console.error('❌ Error conectando Kafka Consumer:', error.message);
-        }
-    }
-
+    /**
+     * Conecta, se suscribe y arranca el consumer con reintentos.
+     * No bloquea el arranque de Nest.
+     */
     async start() {
-        if (this.started) {
-            console.warn('⚠️ KafkaConsumer ya iniciado');
+        if (this.started || this.starting) {
+            console.warn('⚠️ KafkaConsumer ya iniciado o iniciándose');
             return;
         }
 
-        try {
-            const topics = Array.from(this.handlers.keys());
+        const topics = Array.from(this.handlers.keys());
+        if (topics.length === 0) {
+            console.warn('⚠️ No hay handlers registrados, consumer inactivo');
+            return;
+        }
 
-            if (topics.length === 0) {
-                console.warn('⚠️ No hay handlers registrados, consumer inactivo');
-                return;
+        this.starting = true;
+
+        void (async () => {
+            const maxAttempts = 10;
+            for (let i = 1; i <= maxAttempts; i++) {
+                try {
+                    if (!this.connected) {
+                        await this.consumer.connect();
+                        this.connected = true;
+                        console.log('✅ Kafka Consumer conectado - ms-users');
+                    }
+
+                    if (!this.subscribed) {
+                        await this.consumer.subscribe({ topics, fromBeginning: false });
+                        this.subscribed = true;
+                    }
+
+                    await this.consumer.run({
+                        autoCommit: false,
+                        eachMessage: async (payload: EachMessagePayload) => {
+                            await this.processMessage(payload);
+                        },
+                    });
+
+                    this.started = true;
+                    this.starting = false;
+                    console.log(`📥 Suscrito a topics: ${topics.join(', ')}`);
+                    return;
+                } catch (error: any) {
+                    console.error(`❌ Consumer users intento ${i}/${maxAttempts}: ${error.message}`);
+                    await new Promise((r) => setTimeout(r, 3000 * i));
+                }
             }
 
-            await this.consumer.subscribe({
-                topics,
-                fromBeginning: false,
-            });
-
-            console.log(`📥 Suscrito a topics: ${topics.join(', ')}`);
-
-            await this.consumer.run({
-                autoCommit: false,
-                eachMessage: async (payload: EachMessagePayload) => {
-                    await this.processMessage(payload);
-                },
-            });
-
-            this.started = true;
-
-        } catch (error: any) {
-            console.error('❌ Error iniciando suscripción Kafka:', error.message);
-        }
+            this.starting = false;
+            console.error('❌ Consumer users NO pudo suscribirse tras 10 intentos');
+        })();
     }
 
     private async processMessage({ topic, partition, message }: EachMessagePayload) {
@@ -102,23 +116,16 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
             console.log(`\n📨 [Kafka Consumer] Evento recibido`);
             console.log(`   Topic     : ${topic}`);
 
-            // Determinar si es un evento con 'eventType' o un mensaje directo
             let dataToSend: any;
-            let eventType = 'N/A';
-            let source = 'N/A';
             let dataId = 'N/A';
 
             if (event.eventType && event.data !== undefined) {
-                // Formato de evento (con eventType y data)
-                eventType = event.eventType;
-                source = event.source || 'N/A';
                 dataId = event.data?.userId || event.data?.id || 'N/A';
                 dataToSend = event.data;
-                console.log(`   EventType : ${eventType}`);
-                console.log(`   Source    : ${source}`);
+                console.log(`   EventType : ${event.eventType}`);
+                console.log(`   Source    : ${event.source || 'N/A'}`);
                 console.log(`   Data ID   : ${dataId}`);
             } else {
-                // Formato directo (objeto plano sin eventType)
                 dataToSend = event;
                 dataId = event?.userId || event?.id || 'N/A';
                 console.log(`   EventType : (directo)`);
@@ -126,19 +133,13 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
             }
 
             const handler = this.handlers.get(topic);
-
             if (!handler) {
                 console.warn(`⚠️ [Kafka] Sin handler para topic: ${topic}`);
                 return;
             }
 
-            // Mostrar datos (solo si existen)
-            if (dataToSend) {
-                const dataStr = JSON.stringify(dataToSend);
-                console.log(`   Datos     : ${dataStr.substring(0, 250)}${dataStr.length > 250 ? '...' : ''}`);
-            } else {
-                console.log(`   Datos     : (vacíos)`);
-            }
+            // Ojo: no registrar datos completos, pueden contener tokens
+            console.log(`   Datos     : (omitidos por seguridad)`);
 
             await handler(dataToSend);
 
@@ -147,7 +148,6 @@ export class KafkaConsumerService implements OnModuleInit, OnModuleDestroy {
                 partition,
                 offset: (BigInt(message.offset) + 1n).toString(),
             }]);
-
         } catch (error: any) {
             console.error(`❌ [Kafka Consumer] Error procesando mensaje de ${topic}:`, error.message);
             console.error(`   Stack:`, error.stack);
