@@ -57,6 +57,7 @@ import { FindingProcedure } from '../order-findings/entities/finding-procedure.e
 import { formatPartRequestNumber } from '../order-part-request/helpers/company-numbering.helper';
 import { PartRequestStatus } from '../order-part-request/entities/enums/part-request-status.enum';
 import { PartRequest } from '../order-part-request/entities/part-request.entity';
+import { OrderPriority } from '../catalogs/entities/order-priority.entity';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -109,6 +110,7 @@ export class OrderWorkflowService {
     private readonly partRequestRepo: Repository<PartRequest>,
 
   ) { }
+
   private async getPublicExtraCharges(orderId: number): Promise<{ name: string; price: number }[]> {
     const [spares, extraServices, pendingProducts] = await Promise.all([
       this.spareAssignmentRepository.find({
@@ -148,6 +150,7 @@ export class OrderWorkflowService {
 
     return charges;
   }
+
   async createOrder(
     dto: CreateOrderDto,
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
@@ -200,6 +203,14 @@ export class OrderWorkflowService {
 
       const nextOrderNumber = (result?.max ?? 0) + 1;
 
+      // 🏷️ Resolver prioridad y congelar su recargo
+      const priority = await manager.findOne(OrderPriority, {
+        where: { id: dto.order_priority_id },
+      });
+      if (!priority) {
+        throw new RpcException(new BadRequestException('Prioridad no válida'));
+      }
+
       // ── Preparar detalleIngreso con fallback para personalizados ─────────────
       const detalleIngresoFinal = dto.detalleIngreso?.trim()
         ? dto.detalleIngreso.trim()
@@ -212,7 +223,8 @@ export class OrderWorkflowService {
         public_id: uuidv4(),
         order_number: nextOrderNumber,
         order_type_id: dto.order_type_id,
-        order_priority_id: dto.order_priority_id,
+        order_priority_id: priority.id, // 👈 usa el id validado
+        priority_surcharge_percentage: Number(priority.surcharge_percentage ?? 0), // 👈 SNAPSHOT
         customer_id: dto.customer_id,
 
         // Campos forzados/limpiados según tipo
@@ -410,7 +422,6 @@ export class OrderWorkflowService {
     })) as any;
   }
 
-
   // ═══════════════════════════════════════════════════════════════════
   // REQUISITOS (una sola vez en el servicio de órdenes):
   //
@@ -480,7 +491,6 @@ export class OrderWorkflowService {
 
     return orders.map((o) => ({ ...o, part_requests: porOrden.get(o.id) ?? [] }));
   }
-
 
   async listOrders(
     user: { companyId: string; branchId: string; userId: string },
@@ -656,8 +666,6 @@ export class OrderWorkflowService {
       totalPages: Math.ceil(total / limit),
     };
   }
-
-
 
   async listMyOrders(
     user: { companyId: string; branchId: string; userId: string },
@@ -1319,11 +1327,6 @@ export class OrderWorkflowService {
     await Promise.allSettled(promises);
   }
 
-
-
-
-
-
   async changeOrderStatus(
     dto: ChangeOrderStatusDto,
     user: { userId: string; companyId: string; branchId: string },
@@ -1554,8 +1557,6 @@ export class OrderWorkflowService {
     });
   }
 
-
-
   async closeOrder(
     dto: CloseOrderDto,
     user: { userId: string; companyId: string; branchId: string },
@@ -1614,8 +1615,13 @@ export class OrderWorkflowService {
         },
       });
 
-      // ── NUEVO: calcular subtotal y congelar descuentos pendientes ───────────
+      // ── Calcular subtotal y congelar descuentos pendientes ───────────
       const subtotal = await this.calculateOrderSubtotal(manager, dto.orderId, spareAssignments);
+
+      // 💎 Recargo por prioridad (usa el % congelado en la orden, no el del catálogo)
+      const surchargePercentage = Number(order.priority_surcharge_percentage ?? 0);
+      const surchargeAmount = Math.round(subtotal * surchargePercentage) / 100;
+
       const { discountTotal, hadDiscounts } = await this.freezeOrderDiscounts(
         manager,
         dto.orderId,
@@ -1631,6 +1637,8 @@ export class OrderWorkflowService {
       //   - Con repuestos y TODOS son facturables                → SÍ, salvo que...
       //   - La orden tenga descuentos aplicados                  → NO se emite automático
       //     (el monto facturado no coincidiría con el cobrado; se factura manual).
+      //   - La orden tenga recargo por prioridad                 → NO se emite automático
+      //     (la factura se arma solo con repuestos; se factura manual).
       const nonBillableSpares = spareAssignments.filter(
         (sa) => !sa.is_billable_in_repair_orders,
       );
@@ -1638,7 +1646,8 @@ export class OrderWorkflowService {
       const shouldEmitInvoice =
         spareAssignments.length > 0 &&
         nonBillableSpares.length === 0 &&
-        !hadDiscounts; // 👈 NUEVO: bloquea emisión automática si hubo descuento
+        !hadDiscounts &&
+        surchargeAmount === 0; // 👈 NUEVO
 
       if (spareAssignments.length === 0) {
         console.log(`ℹ️ Orden ${dto.orderId} sin repuestos asignados, no aplica emisión automática de factura`);
@@ -1650,6 +1659,10 @@ export class OrderWorkflowService {
       } else if (hadDiscounts) {
         console.log(
           `⏭️ Orden ${dto.orderId} tiene descuento(s) aplicado(s) (total: ${discountTotal}), no se emitirá factura automática (queda pendiente de facturación manual)`,
+        );
+      } else if (surchargeAmount > 0) { // 👈 NUEVO
+        console.log(
+          `⏭️ Orden ${dto.orderId} tiene recargo por prioridad (${surchargePercentage}% = ${surchargeAmount}), no se emitirá factura automática (queda pendiente de facturación manual)`,
         );
       } else {
         console.log(`✅ Orden ${dto.orderId}: ${spareAssignments.length} repuesto(s), todos facturables, sin descuentos → se emitirá factura automática`);
@@ -1675,6 +1688,7 @@ export class OrderWorkflowService {
         is_outgoing_payment: isOutgoing,
         amount: dto.amount,
         subtotal_before_discount: subtotal,
+        priority_surcharge_amount: surchargeAmount, // 👈 NUEVO
         discount_total: discountTotal,
         payment_method_id: dto.paymentMethodId ?? null,
         closure_observation: dto.closureObservation ?? null,
@@ -1772,6 +1786,7 @@ export class OrderWorkflowService {
         is_outgoing_payment: isOutgoing,
         amount: dto.amount,
         subtotal_before_discount: subtotal,
+        priority_surcharge_amount: surchargeAmount, // 👈 NUEVO
         discount_total: discountTotal,
         payment_method_id: dto.paymentMethodId ?? null,
         closure_observation: dto.closureObservation ?? null,
@@ -1947,6 +1962,7 @@ export class OrderWorkflowService {
       deviceHasActiveWarranty: mappedOrders.some((o) => o.hasActiveWarranty),
     };
   }
+
   async getOrderPublicData(publicId: string) {
     try {
       const order = await this.orderRepo
@@ -2142,7 +2158,6 @@ export class OrderWorkflowService {
     }
   }
 
-
   async createOrderNote(
     dto: CreateOrderNoteDto,
     user: { userId: string; companyId: string; branchId: string },
@@ -2323,6 +2338,7 @@ export class OrderWorkflowService {
 
     return updatedNote;
   }
+
   async getOrderNotificationData(orderId: number, companyId: string, manager?: EntityManager) {
     // Si recibimos el manager de la transacción lo usamos, si no, usamos el repositorio por defecto.
     const queryBuilder = manager
@@ -2355,8 +2371,6 @@ export class OrderWorkflowService {
       branch: data.branch.name,
     };
   }
-
-
 
   async getOrderPayment(
     dto: GetOrderPaymentDto,
@@ -2401,6 +2415,7 @@ export class OrderWorkflowService {
 
     return payment;
   }
+
   private async getFullOrderForBroadcast(orderId: number) {
     const order = await this.orderRepo
       .createQueryBuilder('order')
@@ -2738,8 +2753,6 @@ export class OrderWorkflowService {
     }));
   }
 
-
-
   private mapOrderToReplicaShape(order: any) {
     return {
       id: order.id,
@@ -2863,10 +2876,6 @@ export class OrderWorkflowService {
       updatedAt: order.updatedAt,
     };
   }
-
-
-
-  // En OrderWorkflowService
 
   async autoAdvanceStatus(
     orderId: number,
@@ -3049,7 +3058,7 @@ export class OrderWorkflowService {
       return { success: true, device: newDevice };
     });
   }
-  // order-workflow.service.ts
+
   async verifyOrderPayment(dto: VerifyOrderPaymentDto) {
     const payment = await this.paymentRepository.findOne({
       where: { id: dto.paymentId, company_id: dto.companyId },
@@ -3081,7 +3090,6 @@ export class OrderWorkflowService {
     };
   }
 
-  // order-workflow.service.ts
   async getPaymentSignedUrls(paymentId: number, companyId: string): Promise<{ id: number; file_url: string }[]> {
     const payment = await this.paymentRepository.findOne({
       where: { id: paymentId, company_id: companyId },
@@ -3191,6 +3199,7 @@ export class OrderWorkflowService {
       return { success: true, orderId };
     });
   }
+
   async createOrderPriceAgreement(
     orderId: number,
     dto: CreateOrderPriceAgreementDto,
@@ -3350,6 +3359,7 @@ export class OrderWorkflowService {
       };
     });
   }
+
   private async applyStatusChange(
     manager: EntityManager,
     order: Order,
@@ -3402,7 +3412,6 @@ export class OrderWorkflowService {
     return { toStatus, history, fromStatusId, fromStatusName };
   }
 
-
   async getWarehouseAttachments(
     orderId: number,
     user: { companyId: string },
@@ -3444,6 +3453,7 @@ export class OrderWorkflowService {
       dispositivo: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE),
     };
   }
+
   async createWarehousePayment(
     dto: CreateWarehousePaymentDto,
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
@@ -3519,6 +3529,7 @@ export class OrderWorkflowService {
       return { ...savedPayment, attachments };
     });
   }
+
   async getWarehousePayments(
     orderId: number,
     user: { companyId: string },
@@ -3574,10 +3585,6 @@ export class OrderWorkflowService {
       payments: result,
     };
   }
-
-
-
-
 
   private async calculateOrderSubtotal(
     manager: EntityManager,
@@ -3660,6 +3667,92 @@ export class OrderWorkflowService {
     await manager.save(OrderDiscount, pendingDiscounts);
 
     return { discountTotal, hadDiscounts: true };
+  }
+
+  async activatePremium(
+    orderId: number,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    const PREMIUM_NAME = 'PREMIUM';
+
+    const result = await this.orderRepo.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+        relations: ['priority', 'currentStatus'],
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      await this.orderValidationLockService.assertEditable(order.id);
+
+      // No permitir si ya fue entregada (el recargo se calcula al cerrar)
+      const deliveryExists = await manager.exists(OrderDelivery, {
+        where: { order_id: orderId },
+      });
+      if (deliveryExists) {
+        throw new RpcException(
+          new BadRequestException('No se puede activar Premium en una orden ya cerrada'),
+        );
+      }
+
+      if (order.priority?.name?.toUpperCase() === PREMIUM_NAME) {
+        throw new RpcException(new BadRequestException('La orden ya es Premium'));
+      }
+
+      const premium = await manager.findOne(OrderPriority, {
+        where: { name: PREMIUM_NAME },
+      });
+      if (!premium) {
+        throw new RpcException(new NotFoundException('Prioridad PREMIUM no configurada'));
+      }
+
+      const previousPriorityName = order.priority?.name ?? 'N/A';
+
+      await manager.update(
+        Order,
+        { id: order.id, company_id: user.companyId },
+        {
+          order_priority_id: premium.id,
+          priority_surcharge_percentage: Number(premium.surcharge_percentage ?? 0), // 👈 snapshot
+          updatedAt: new Date(),
+        },
+      );
+
+      // Dejar rastro en el historial de estados (sin cambiar el estado)
+      await manager.save(OrderStatusHistory, {
+        order_id: order.id,
+        from_status_id: order.current_status_id,
+        to_status_id: order.current_status_id,
+        changed_by_id: user.userId,
+        company_id: user.companyId,
+        branch_id: user.branchId,
+        observation: `Prioridad cambiada de ${previousPriorityName} a PREMIUM (recargo ${premium.surcharge_percentage}%)`,
+      });
+
+      return {
+        premium,
+        orderNumber: order.order_number,
+      };
+    });
+
+    // Fuera de la transacción
+    await this.emitNotification(
+      orderId, user.companyId, user.userId,
+      'priority_changed', 'La orden fue marcada como Premium',
+    );
+
+    await this.broadcastService.publishOrderUpdated(orderId, 'priority_changed', {
+      priority: { id: result.premium.id, name: result.premium.name },
+    });
+
+    return {
+      success: true,
+      orderId,
+      priority: { id: result.premium.id, name: result.premium.name },
+      surcharge_percentage: Number(result.premium.surcharge_percentage ?? 0),
+    };
   }
 }
 
