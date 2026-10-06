@@ -155,6 +155,7 @@ export class OrdersController {
   async updateDevice(@Body() body: UpdateDeviceGatewayDto, @User() user: any) {
     return this.ordersGatewayService.updateDevice(body.deviceId, body, user);
   }
+
   @Post('device/update-imei')
   async updateDeviceImei(@Body() body: UpdateDeviceImeiGatewayDto, @User() user: any) {
     //  console.log(body)
@@ -165,6 +166,7 @@ export class OrdersController {
       user,
     );
   }
+
   @Get('initialdata')
   async initialData() {
     return this.ordersGatewayService.getInitialData();
@@ -179,10 +181,16 @@ export class OrdersController {
   async listMyOrders(@Body() dto: ListOrdersGatewayDto, @User() user: any) {
     return this.ordersGatewayService.listMyOrders(dto, toUserPayload(user));
   }
+
   @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Post('find-one-order')
   async getOrderFullData(@Body() dto: GetOrderFullDataGatewayDto, @User() user: any) {
     return this.ordersGatewayService.getOrderFullData(dto, toUserPayload(user));
+  }
+
+  @Post('find-one-order-basic')
+  async getOrderBasicData(@Body() dto: GetOrderFullDataGatewayDto, @User() user: any) {
+    return this.ordersGatewayService.getOrderBasicData(dto, toUserPayload(user));
   }
 
   @Post('change-order-status')
@@ -538,6 +546,7 @@ export class OrdersController {
       toUserPayload(user),
     );
   }
+
   @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Patch('pending-products/:id')
   async updatePendingProduct(
@@ -574,7 +583,6 @@ export class OrdersController {
     );
   }
 
-
   @Delete('pending-products/:id')
   async deletePendingProduct(@Param('id', ParseIntPipe) id: number, @User() user: any) {
     return this.ordersGatewayService.deletePendingProduct(id, toUserPayload(user));
@@ -602,6 +610,7 @@ export class OrdersController {
       toUserPayload(user),
     );
   }
+
   @UseInterceptors(SanitizePurchasePriceInterceptor)
   @Patch('extra-services/:id')
   async updateExtraService(
@@ -668,6 +677,7 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+
   @Post(':orderId/price-agreement')
   @Groups('CASHIERS')
   async createOrderPriceAgreement(
@@ -681,6 +691,7 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+
   @Get('employees-basic')
   async getEmployeesBasic(@User() user: any) {
     return this.ordersGatewayService.getEmployeesBasic(user);
@@ -716,6 +727,7 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+
   @Get(':orderId/warehouse-attachments')
   async getWarehouseAttachments(@Param('orderId') orderId: string, @User() user: any) {
     return this.ordersGatewayService.getWarehouseAttachments(
@@ -723,6 +735,7 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+
   @Post('warehouse-payments')
   async createWarehousePayment(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
@@ -743,6 +756,7 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+
   @Get(':orderId/warehouse-payments')
   async getWarehousePayments(@Param('orderId') orderId: string, @User() user: any) {
     return this.ordersGatewayService.getWarehousePayments(

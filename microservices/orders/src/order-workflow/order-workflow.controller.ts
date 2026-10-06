@@ -107,6 +107,21 @@ export class OrderWorkflowController {
     return datas
   }
 
+  @MessagePattern({ cmd: 'get_order_basic_data' })
+  async getOrderBasicData(data: {
+    dto: GetOrderFullDataDto;
+    user: {
+      userId: string;
+      companyId: string;
+      branchId: string;
+    };
+  }) {
+    return this.orderWorkflowService.getOrderBasicData(
+      data.dto.orderId,
+      data.user,
+    );
+  }
+
   @MessagePattern({ cmd: 'change_order_status' })
   async changeOrderStatus(@Payload() data: any) {
     try {
@@ -440,4 +455,3 @@ export class OrderWorkflowController {
     }
   }
 }
-

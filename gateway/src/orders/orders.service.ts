@@ -79,6 +79,7 @@ export class OrdersGatewayService {
             user: { userId: user.userId, companyId: user.companyId },
         });
     }
+
     updateDeviceImei(deviceId: number, orderId: number, dto: any, user: any) {
         return this.send('update_device_imei', {
             deviceId,
@@ -87,6 +88,7 @@ export class OrdersGatewayService {
             user: { userId: user.userId, companyId: user.companyId },
         });
     }
+
     getInitialData() {
         return this.send('get_newdata_catalog_orders');
     }
@@ -101,6 +103,10 @@ export class OrdersGatewayService {
 
     getOrderFullData(dto: any, user: any) {
         return this.send('get_order_full_data', { dto, user });
+    }
+
+    getOrderBasicData(dto: any, user: any) {
+        return this.send('get_order_basic_data', { dto, user });
     }
 
     async changeOrderStatus(dto: any, user: any) {
@@ -351,12 +357,15 @@ export class OrdersGatewayService {
     deleteOrderPriceAgreement(orderId: number, user: any) {
         return this.send('delete_order_price_agreement', { orderId, user });
     }
+    
     createOrderPriceAgreement(orderId: number, dto: any, user: any) {
         return this.send('create_order_price_agreement', { orderId, dto, user });
     }
+
     getEmployeesBasic(user: any) {
         return this.send('get_employees_basic', { user });
     }
+
     async pasarABodega(dto: any, files: any[], user: any) {
         try {
             return await this.send('pasar_a_bodega', { dto, files, user });
@@ -367,6 +376,7 @@ export class OrdersGatewayService {
             );
         }
     }
+
     async getWarehouseAttachments(orderId: number, user: any) {
         try {
             return await this.send('get_warehouse_attachments', { orderId, user });
@@ -377,6 +387,7 @@ export class OrdersGatewayService {
             );
         }
     }
+    
     async createWarehousePayment(dto: any, files: any[], user: any) {
         try {
             return await this.send('create_warehouse_payment', { dto, files, user });
@@ -387,6 +398,7 @@ export class OrdersGatewayService {
             );
         }
     }
+
     async getWarehousePayments(orderId: number, user: any) {
         try {
             return await this.send('get_warehouse_payments', { orderId, user });
