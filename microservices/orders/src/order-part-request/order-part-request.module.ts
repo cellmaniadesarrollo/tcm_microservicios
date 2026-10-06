@@ -22,6 +22,9 @@ import { PartRequestArrivalService } from './part-request-arrival.service';
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
 import { PartRequestTravelItem } from './entities/part-request-travel-item.entity';
 import { CompanyCounter } from './entities/company-counter.entity';
+import { PartRequestTravelItemsController } from './part-request-travel-items.controller';
+import { PartRequestTravelItemsService } from './part-request-travel-items.service';
+import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 
 @Module({
   imports: [
@@ -38,14 +41,14 @@ import { CompanyCounter } from './entities/company-counter.entity';
       ProviderAccount,
       SourcingProviderAccount,
       PartRequestPaymentAllocation,
-      OrderPendingProduct, PartRequestTravelItem, CompanyCounter
+      OrderPendingProduct, PartRequestTravelItem, CompanyCounter, UserEmployeeCache
     ]),
     AwsS3Module
   ],
-  controllers: [OrderPartRequestController],
+  controllers: [OrderPartRequestController, PartRequestTravelItemsController],
   providers: [PartRequestService,
     PartRequestSourcingService,
     PartRequestPaymentService,
-    PartRequestArrivalService,],
+    PartRequestArrivalService, PartRequestTravelItemsService],
 })
 export class OrderPartRequestModule { }

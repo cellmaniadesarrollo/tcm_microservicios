@@ -536,4 +536,8 @@ export class OrderPartRequestController {
       throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
     }
   }
+
+
+
+
 }

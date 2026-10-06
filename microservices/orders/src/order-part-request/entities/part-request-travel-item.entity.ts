@@ -9,15 +9,19 @@ import {
     CreateDateColumn,
     UpdateDateColumn,
     Index,
+    Check,
 } from 'typeorm';
 import { PartRequest } from './part-request.entity';
 import { Provider } from './provider.entity';
-import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
 import { TravelItemMode, TravelItemStatus } from './enums/travel-item.enum';
+import { UserEmployeeCache } from '../../users-employees-events/entities/user_employee_cache.entity';
 
 @Entity('part_request_travel_items')
-@Index(['traveler_id', 'status'])
 @Index(['part_request_id'], { unique: true, where: `"status" = 'PENDIENTE'` })
+@Check(
+    'CHK_travel_item_has_source',
+    `"part_request_id" IS NOT NULL OR "descripcion" IS NOT NULL`,
+)
 export class PartRequestTravelItem {
     @PrimaryGeneratedColumn()
     id!: number;
@@ -27,21 +31,36 @@ export class PartRequestTravelItem {
     @Column({ type: 'uuid' })
     company_id!: string;
 
-    // ─── Solicitud ───────────────────────────────────────────────
-    @Column()
-    part_request_id!: number;
+    // ─── Solicitud (null en ítems standalone) ────────────────────
+    @Column({ type: 'int', nullable: true })
+    part_request_id?: number | null;
 
-    @ManyToOne(() => PartRequest, { onDelete: 'CASCADE' })
+    @ManyToOne(() => PartRequest, { onDelete: 'CASCADE', nullable: true })
     @JoinColumn({ name: 'part_request_id' })
-    partRequest!: PartRequest;
+    partRequest?: PartRequest | null;
 
-    // ─── Viajero asignado ────────────────────────────────────────
-    @Column({ type: 'uuid' })
-    traveler_id!: string;
+    // ─── Datos propios (solo para ítems SIN solicitud) ───────────
+    // Cuando part_request_id existe, los datos salen de la solicitud y estos quedan en null.
+    @Column({ type: 'varchar', length: 500, nullable: true })
+    descripcion?: string | null;
 
-    @ManyToOne(() => UserEmployeeCache)
-    @JoinColumn({ name: 'traveler_id' })
-    traveler!: UserEmployeeCache;
+    @Column({ type: 'varchar', nullable: true })
+    marca?: string | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    modelo?: string | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    modelo_tecnico?: string | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    tipo?: string | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    color?: string | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    calidad?: string | null;
 
     // ─── Datos que llena la oficina ──────────────────────────────
     @Column({ type: 'enum', enum: TravelItemMode })
@@ -53,7 +72,7 @@ export class PartRequestTravelItem {
     @Column({ type: 'int', default: 1 })
     expected_quantity!: number;
 
-    @Column({ nullable: true })
+    @Column({ type: 'int', nullable: true })
     suggested_provider_id?: number | null;
 
     @ManyToOne(() => Provider, { nullable: true })
@@ -87,4 +106,10 @@ export class PartRequestTravelItem {
 
     @UpdateDateColumn()
     updatedAt!: Date;
+
+
+
+    @ManyToOne(() => UserEmployeeCache, { nullable: true })
+    @JoinColumn({ name: 'collected_by_id' })
+    traveler?: UserEmployeeCache | null;
 }

@@ -1,6 +1,6 @@
 // gateway/src/orders/dto/create-part-request-travel-item-gateway.dto.ts
-import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Min } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsBoolean, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
 
 export class CreatePartRequestTravelItemGatewayDto {
     @Type(() => Number)
@@ -9,10 +9,7 @@ export class CreatePartRequestTravelItemGatewayDto {
     @IsNotEmpty({ message: 'El ID de la solicitud es obligatorio' })
     partRequestId!: number;
 
-    @IsString({ message: 'El ID del viajero debe ser una cadena de texto' })
-    @IsUUID('4', { message: 'El ID del viajero debe ser un UUID válido' })
-    @IsNotEmpty({ message: 'El viajero es obligatorio' })
-    travelerId!: string;
+
 
     @IsString({ message: 'El modo debe ser una cadena de texto' })
     @IsIn(['BUY_CASH', 'PICKUP_PAID'], { message: 'El modo debe ser BUY_CASH o PICKUP_PAID' })
@@ -34,4 +31,9 @@ export class CreatePartRequestTravelItemGatewayDto {
     @IsOptional()
     @IsString({ message: 'Las notas deben ser una cadena de texto' })
     officeNotes?: string;
+
+    @IsOptional()
+    @Transform(({ value }) => value === true || value === 'true')
+    @IsBoolean({ message: 'useRequestImages debe ser booleano' })
+    useRequestImages?: boolean;
 }

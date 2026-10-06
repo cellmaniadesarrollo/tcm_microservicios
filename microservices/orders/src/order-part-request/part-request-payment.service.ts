@@ -14,6 +14,7 @@ import { Provider } from './entities/provider.entity';
 import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/part-requests.helpers';
 import { PartRequestPaymentAllocation } from './entities/part-request-payment-allocation.entity';
 import { formatPartRequestNumber } from './helpers/company-numbering.helper';
+import { precioParaOrden, resolverPrecioOrden } from './helpers/pricing.helper';
 
 /**
  * Dueño de la etapa de pago: listado agrupado por proveedor (cola de pago),
@@ -30,306 +31,11 @@ export class PartRequestPaymentService {
         private readonly awsS3Service: AwsS3Service,
     ) { }
 
-    async listParaPago(
-        dto: {
-            page?: number;
-            limit?: number;
-            search?: string;
-            filtro?: 'pendientes' | 'pagados' | 'todos';
-            providerId?: number;
-        },
-        user: { companyId: string },
-    ) {
-        const page = dto.page && dto.page > 0 ? dto.page : 1;
-        const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
-        const filtro = dto.filtro ?? 'todos';
-
-        // Búsqueda:
-        //   #123        → número de orden exacto
-        //   SR-42 / 42  → número de solicitud exacto (solo dígitos también busca por texto)
-        const searchTerm = dto.search?.trim();
-        const orderNumberMatch = searchTerm?.match(/^#(\d+)$/);
-        const orderNumberValue = orderNumberMatch ? parseInt(orderNumberMatch[1], 10) : null;
-
-        const requestNumberMatch = !orderNumberMatch ? searchTerm?.match(/^(?:SR-?)?(\d{1,9})$/i) : null;
-        const numeroBuscado = requestNumberMatch ? parseInt(requestNumberMatch[1], 10) : null;
-        const numeroConPrefijo = !!searchTerm && /^SR/i.test(searchTerm);
-
-        // ═══════════════════════════════════════════════════════════
-        // CASO 1: PAGADOS → listar por PAGO (no agrupar por proveedor)
-        // ═══════════════════════════════════════════════════════════
-        if (filtro === 'pagados') {
-            const qb = this.paymentRepo
-                .createQueryBuilder('pago')
-                .leftJoinAndSelect('pago.allocations', 'allocations')
-                .leftJoinAndSelect('allocations.partRequest', 'partRequest')
-                .leftJoinAndSelect('partRequest.order', 'prOrder')
-                .leftJoinAndSelect('partRequest.technician', 'prTechnician')
-                .leftJoinAndSelect('partRequest.responsableBusqueda', 'prResponsable')
-                .leftJoinAndSelect('partRequest.arrival', 'prArrival')
-                .innerJoinAndSelect('pago.provider', 'provider')
-                .where('provider.company_id = :companyId', { companyId: user.companyId });
-
-            if (dto.providerId) {
-                qb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
-            }
-
-            const aplicarBusquedaPagados = (q: typeof qb) => {
-                if (orderNumberValue !== null) {
-                    q.andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
-                } else if (numeroBuscado !== null && numeroConPrefijo) {
-                    q.andWhere('partRequest.numero = :numeroBuscado', { numeroBuscado });
-                } else if (numeroBuscado !== null) {
-                    q.andWhere(
-                        '(partRequest.numero = :numeroBuscado OR provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                        { numeroBuscado, search: `%${searchTerm}%` },
-                    );
-                } else if (searchTerm) {
-                    q.andWhere(
-                        '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                        { search: `%${searchTerm}%` },
-                    );
-                }
-            };
-            aplicarBusquedaPagados(qb);
-
-            // totalQb necesita los mismos joins/condiciones para que el conteo coincida con los datos
-            const totalQb = this.paymentRepo
-                .createQueryBuilder('pago')
-                .innerJoin('pago.provider', 'provider')
-                .where('provider.company_id = :companyId', { companyId: user.companyId });
-
-            if (dto.providerId) {
-                totalQb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
-            }
-
-            if (orderNumberValue !== null || numeroBuscado !== null) {
-                totalQb
-                    .leftJoin('pago.allocations', 'allocations')
-                    .leftJoin('allocations.partRequest', 'partRequest');
-                if (orderNumberValue !== null) {
-                    totalQb.leftJoin('partRequest.order', 'prOrder');
-                }
-            }
-            aplicarBusquedaPagados(totalQb);
-
-            const totalRaw = await totalQb.select('COUNT(DISTINCT pago.id)', 'cnt').getRawOne();
-            const total = Number(totalRaw?.cnt ?? 0);
-
-            const payments = await qb
-                .orderBy('pago.fecha_pago', 'DESC')
-                .skip((page - 1) * limit)
-                .take(limit)
-                .getMany();
-
-            const paymentIds = payments.map((p) => p.id);
-            const attachments = paymentIds.length
-                ? await this.attachmentRepo.find({
-                    where: {
-                        entity_type: AttachmentEntityType.PART_REQUEST_PAYMENT,
-                        entity_id: In(paymentIds),
-                        is_active: true,
-                    },
-                })
-                : [];
-            const tieneComprobante = new Set(attachments.map((a) => a.entity_id));
-
-            const data = payments.map((p) => ({
-                id: p.id,
-                monto: Number(p.monto),
-                fecha_pago: p.fecha_pago,
-                notas: p.notas ?? null,
-                cantidad_solicitudes_cubiertas: (p.allocations ?? []).length,
-                tiene_comprobante: tieneComprobante.has(p.id),
-                provider: p.provider
-                    ? { id: p.provider.id, nombre: p.provider.nombre }
-                    : null,
-
-                solicitudes_cubiertas: (p.allocations ?? []).map((a) => ({
-                    id: a.part_request_id,
-                    numero: a.partRequest?.numero ?? null,                                   // <-- nuevo
-                    numero_formateado: formatPartRequestNumber(a.partRequest?.numero),       // <-- nuevo
-                    order_id: a.partRequest?.order_id ?? null,
-                    order_number: a.partRequest?.order?.order_number ?? null,
-                    descripcion: a.partRequest?.descripcion ?? null,
-                    fecha_solicitud: a.partRequest?.createdAt ?? null,
-                    estado: a.partRequest?.estado ?? null,
-                    technician: mapUser(a.partRequest?.technician),
-                    responsableBusqueda: mapUser(a.partRequest?.responsableBusqueda),
-                    monto_asignado: Number(a.monto_asignado),
-                    fecha_litigio: a.partRequest?.arrival?.fecha_validacion ?? null,
-                    motivo_litigio: a.partRequest?.arrival?.motivo_rechazo ?? null,
-
-                    litigio_resuelto: a.partRequest?.arrival?.resuelto ?? false,
-                    fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
-                    descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
-                })),
-            }));
-
-            return {
-                data,
-                meta: {
-                    page,
-                    limit,
-                    total,
-                    totalPages: Math.ceil(total / limit) || 0,
-                },
-                filtros: {
-                    opciones: [
-                        { value: 'todos', label: 'Todos' },
-                        { value: 'pendientes', label: 'Pendientes de pago' },
-                        { value: 'pagados', label: 'Pagados' },
-                    ],
-                },
-            };
-        }
-
-        // ═══════════════════════════════════════════════════════════
-        // CASO 2: PENDIENTES / TODOS → agrupar por PROVEEDOR
-        // ═══════════════════════════════════════════════════════════
-        const qb = this.partRequestRepo
-            .createQueryBuilder('pr')
-            .innerJoinAndSelect('pr.sourcing', 'sourcing')
-            .innerJoinAndSelect('sourcing.provider', 'provider')
-            .leftJoinAndSelect('pr.order', 'order')
-            .leftJoinAndSelect('pr.pagoAllocations', 'allocations')
-            .leftJoinAndSelect('pr.technician', 'technician')
-            .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
-            .leftJoinAndSelect('pr.arrival', 'arrival')
-            .where('pr.company_id = :companyId', { companyId: user.companyId })
-            .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO });
-
-        if (dto.providerId) {
-            qb.andWhere('provider.id = :providerId', { providerId: dto.providerId });
-        }
-
-        if (orderNumberValue !== null) {
-            qb.andWhere('order.order_number = :orderNumber', { orderNumber: orderNumberValue });
-        } else if (numeroBuscado !== null && numeroConPrefijo) {
-            qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
-        } else if (numeroBuscado !== null) {
-            qb.andWhere(
-                '(pr.numero = :numeroBuscado OR pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { numeroBuscado, search: `%${searchTerm}%` },
-            );
-        } else if (searchTerm) {
-            qb.andWhere(
-                '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { search: `%${searchTerm}%` },
-            );
-        }
-
-        const partRequests = await qb.orderBy('pr.updatedAt', 'DESC').getMany();
-
-        const enriched = partRequests.map((pr) => {
-            const montoProducto = Number(pr.sourcing?.precio ?? 0) * Number(pr.sourcing?.cantidad ?? 1);
-            const montoTransporte = Number(pr.sourcing?.precio_transporte ?? 0);
-            const precio = montoProducto + montoTransporte;
-            const totalPagado = (pr.pagoAllocations ?? []).reduce(
-                (sum, a) => sum + Number(a.monto_asignado),
-                0,
-            );
-            const saldoPendiente = Number((precio - totalPagado).toFixed(2));
-            const estadoPago =
-                saldoPendiente <= 0 ? 'PAGADO' : totalPagado > 0 ? 'PARCIAL' : 'PENDIENTE';
-
-            return { pr, montoProducto, montoTransporte, precio, totalPagado, saldoPendiente, estadoPago };
-        });
-
-        // pendientes = no PAGADO; todos = todo
-        const filtered = enriched.filter((e) => {
-            if (filtro === 'pendientes') return e.estadoPago !== 'PAGADO';
-            return true;
-        });
-
-        // Agrupar por proveedor
-        const porProveedor = new Map<
-            number,
-            {
-                provider: { id: number; nombre: string };
-                solicitudes: typeof filtered;
-                montoTotalPendiente: number;
-            }
-        >();
-
-        for (const item of filtered) {
-            const provider = item.pr.sourcing!.provider!;
-            const grupo = porProveedor.get(provider.id) ?? {
-                provider: { id: provider.id, nombre: provider.nombre },
-                solicitudes: [],
-                montoTotalPendiente: 0,
-            };
-            grupo.solicitudes.push(item);
-            grupo.montoTotalPendiente += Math.max(item.saldoPendiente, 0);
-            porProveedor.set(provider.id, grupo);
-        }
-
-        const grupos = Array.from(porProveedor.values()).sort(
-            (a, b) => b.montoTotalPendiente - a.montoTotalPendiente,
-        );
-
-        const total = grupos.length;
-        const skip = (page - 1) * limit;
-        const pageItems = grupos.slice(skip, skip + limit);
-
-        const data = pageItems.map((g) => ({
-            provider: g.provider,
-            cantidadSolicitudes: g.solicitudes.length,
-            montoTotalPendiente: Number(g.montoTotalPendiente.toFixed(2)),
-            solicitudes: g.solicitudes.map(
-                ({ pr, montoProducto, montoTransporte, totalPagado, saldoPendiente, estadoPago }) => ({
-                    id: pr.id,
-                    numero: pr.numero ?? null,                                  // <-- nuevo
-                    numero_formateado: formatPartRequestNumber(pr.numero),      // <-- nuevo
-                    order_id: pr.order_id,
-                    order_number: pr.order?.order_number ?? null,
-                    fecha_solicitud: pr.createdAt,
-                    descripcion: pr.descripcion,
-                    tipo: pr.tipo,
-                    estado: pr.estado,
-                    technician: mapUser(pr.technician),
-                    responsableBusqueda: mapUser(pr.responsableBusqueda),
-                    monto_producto: montoProducto,
-                    monto_transporte: montoTransporte,
-                    total_pagado: totalPagado,
-                    saldo_pendiente: saldoPendiente,
-                    estado_pago: estadoPago,
-                    fecha_litigio: pr.arrival?.fecha_validacion ?? null,
-                    motivo_litigio: pr.arrival?.motivo_rechazo ?? null,
-
-                    litigio_resuelto: pr.arrival?.resuelto ?? false,
-                    fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
-                    descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
-                }),
-            ),
-        }));
-
-        return {
-            data,
-            meta: {
-                page,
-                limit,
-                total,
-                totalPages: Math.ceil(total / limit) || 0,
-            },
-            filtros: {
-                opciones: [
-                    { value: 'todos', label: 'Todos' },
-                    { value: 'pendientes', label: 'Pendientes de pago' },
-                    { value: 'pagados', label: 'Pagados' },
-                ],
-            },
-        };
-    }
-
-
-
     async createPartRequestPayment(
         dto: CreatePartRequestPaymentDto,
         files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
         user: { userId: string; companyId: string },
     ) {
-
         return this.partRequestRepo.manager.transaction(async (manager) => {
             if (!dto.asignaciones?.length) {
                 throw new RpcException(new BadRequestException('Debes seleccionar al menos una solicitud a pagar'));
@@ -348,7 +54,6 @@ export class PartRequestPaymentService {
 
             const partRequestIds = dto.asignaciones.map((a) => a.partRequestId);
 
-            // ─── Ya NO cargamos pagoAllocations ───────────────────────────────
             const partRequests = await manager
                 .createQueryBuilder(PartRequest, 'pr')
                 .innerJoinAndSelect('pr.sourcing', 'sourcing')
@@ -393,7 +98,6 @@ export class PartRequestPaymentService {
             for (const asign of dto.asignaciones) {
                 const pr = partRequestById.get(asign.partRequestId)!;
 
-                // ─── Total pagado previo con consulta agregada ────────────────
                 const { totalPagadoPrevio } = await manager
                     .createQueryBuilder(PartRequestPaymentAllocation, 'a')
                     .select('COALESCE(SUM(a.monto_asignado), 0)', 'totalPagadoPrevio')
@@ -419,20 +123,22 @@ export class PartRequestPaymentService {
 
                 if (completa) {
                     if (pr.order_id) {
-                        const precioVentaNum = Number(pr.precio_venta ?? 0);
+                        const { precio: precioOrden, esAcordado } = resolverPrecioOrden(pr);
                         const costoCompraNum = Number(pr.sourcing?.precio ?? 0);
 
-                        if (!precioVentaNum || precioVentaNum <= 0) {
+                        if (!precioOrden || precioOrden <= 0) {
                             throw new RpcException(
                                 new BadRequestException(
-                                    `Debes indicar el precio de venta de la solicitud #${pr.id} antes de completar el pago`,
+                                    `Debes indicar el precio de venta (o precio acordado) de la solicitud #${pr.id} antes de completar el pago`,
                                 ),
                             );
                         }
-                        if (precioVentaNum < costoCompraNum) {
+                        // El precio acordado puede ser menor al costo (se asume la pérdida por cumplir al cliente).
+                        // Solo el precio de venta debe cubrir el costo.
+                        if (!esAcordado && precioOrden < costoCompraNum) {
                             throw new RpcException(
                                 new BadRequestException(
-                                    `El precio de venta de la solicitud #${pr.id} ($${precioVentaNum}) no puede ser menor al costo de compra ($${costoCompraNum})`,
+                                    `El precio de venta de la solicitud #${pr.id} ($${precioOrden}) no puede ser menor al costo de compra ($${costoCompraNum})`,
                                 ),
                             );
                         }
@@ -517,7 +223,7 @@ export class PartRequestPaymentService {
                             order_id: pr.order_id,
                             company_id: user.companyId,
                             name_items: pr.descripcion,
-                            sale_price: pr.precio_venta,
+                            sale_price: precioParaOrden(pr),
                             purchase_price: pr.sourcing!.precio,
                             quantity: cantidadOrden!,
                             is_in_inventory: false,

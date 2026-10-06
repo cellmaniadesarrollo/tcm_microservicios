@@ -27,6 +27,11 @@ import { CompletarDatosPartRequestGatewayDto } from './dto/completar-datos-part-
 import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
 import { ResolverLitigioGatewayDto } from './dto/resolver-litigio.gateway.dto';
 import { CreatePartRequestTravelItemGatewayDto } from './dto/create-part-request-travel-item-gateway.dto';
+import { ListPartRequestTravelItemsGatewayDto } from './dto/list-part-request-travel-items-gateway.dto';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { CreateStandaloneTravelItemGatewayDto } from './dto/create-standalone-travel-item-gateway.dto';
+import { ResolveTravelItemGatewayDto } from './dto/resolve-travel-item-gateway.dto';
 
 @Controller('part-requests')
 @Auth()
@@ -522,16 +527,120 @@ export class PartRequestsController {
         );
     }
 
-    // @Post()
-    // @Features('part-request-travel-items/part-requests')
-    // createTravelItem(
-    //     @Body() dto: CreatePartRequestTravelItemGatewayDto,
-    //     @User() user: any,
-    // ) {
-    //     return this.partRequestsGatewayService.createTravelItem(dto, {
-    //         userId: user.sub,
-    //         companyId: user.companyId,
-    //         branchId: user.branchId,
-    //     });
-    // }
+    @Groups('LOGISTICA_REPUESTOS')
+    @Post('/part-request-travel-items')
+    async createTravelItem(@Req() request: FastifyRequest, @User() user: any) {
+        const { files, formData } = await parseMultipartRequest(request);
+        const processedFiles = await processAndValidateFiles(files);
+
+        const dto = plainToInstance(CreatePartRequestTravelItemGatewayDto, {
+            partRequestId: formData.partRequestId,
+            mode: formData.mode,
+            expectedQuantity: formData.expectedQuantity || undefined,
+            suggestedProviderId: formData.suggestedProviderId || undefined,
+            officeNotes: formData.officeNotes?.trim() || undefined,
+            useRequestImages: formData.useRequestImages,
+        });
+
+        const errors = await validate(dto, { whitelist: true });
+        if (errors.length) {
+            throw new BadRequestException(
+                errors.flatMap((e) => Object.values(e.constraints ?? {})),
+            );
+        }
+
+        return this.partRequestsGatewayService.createTravelItem(
+            dto,
+            serializeFilesForMicroservice(processedFiles),
+            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        );
+    }
+    @Groups('LOGISTICA_REPUESTOS', 'ORDER_AUDIT')
+    @Get('/part-request-travel-items')
+    listTravelItems(
+        @Query() query: ListPartRequestTravelItemsGatewayDto,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.listTravelItems(query, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
+    }
+
+    @Groups('LOGISTICA_REPUESTOS')
+    @Post('/part-request-travel-items/standalone')
+    async createStandaloneTravelItem(@Req() request: FastifyRequest, @User() user: any) {
+        const { files, formData } = await parseMultipartRequest(request);
+        const processedFiles = await processAndValidateFiles(files);
+
+        const dto = plainToInstance(CreateStandaloneTravelItemGatewayDto, {
+            descripcion: formData.descripcion,
+            mode: formData.mode,
+            marca: formData.marca,
+            modelo: formData.modelo,
+            modeloTecnico: formData.modeloTecnico,
+            tipo: formData.tipo,
+            color: formData.color,
+            calidad: formData.calidad,
+            expectedQuantity: formData.expectedQuantity || undefined,
+            suggestedProviderId: formData.suggestedProviderId || undefined,
+            officeNotes: formData.officeNotes,
+        });
+
+        const errors = await validate(dto, { whitelist: true });
+        if (errors.length) {
+            throw new BadRequestException(
+                errors.flatMap((e) => Object.values(e.constraints ?? {})),
+            );
+        }
+
+        return this.partRequestsGatewayService.createStandaloneTravelItem(
+            dto,
+            serializeFilesForMicroservice(processedFiles),
+            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        );
+    }
+    @Groups('LOGISTICA_REPUESTOS', 'ORDER_AUDIT')
+    @Get('/part-request-travel-items/:id')
+    getTravelItem(
+        @Param('id', ParseIntPipe) id: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.getTravelItem(id, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+            userGroups: user.groups, // ← igual que lo pasas en el full data de solicitudes
+        });
+    }
+    @Groups('LOGISTICA_REPUESTOS') // ajusta si el viajero pertenece a otro grupo
+    @Post('/part-request-travel-items/:id/resolve')
+    async resolveTravelItem(
+        @Param('id', ParseIntPipe) id: number,
+        @Req() request: FastifyRequest,
+        @User() user: any,
+    ) {
+        const { files, formData } = await parseMultipartRequest(request);
+        const processedFiles = await processAndValidateFiles(files);
+
+        const dto = plainToInstance(ResolveTravelItemGatewayDto, {
+            result: formData.result,
+            collectedQuantity: formData.collectedQuantity || undefined,
+            paidCost: formData.paidCost || undefined,
+            travelerNotes: formData.travelerNotes,
+        });
+
+        const errors = await validate(dto, { whitelist: true });
+        if (errors.length) {
+            throw new BadRequestException(errors.flatMap((e) => Object.values(e.constraints ?? {})));
+        }
+
+        return this.partRequestsGatewayService.resolveTravelItem(
+            id,
+            dto,
+            serializeFilesForMicroservice(processedFiles),
+            { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+        );
+    }
 }
