@@ -88,6 +88,9 @@ export class OrderDelivery {
     @Column({ type: 'decimal', precision: 12, scale: 2, nullable: true, default: 0 })
     subtotal_before_discount: number | null; // precio base al momento del cierre
 
+    @Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+    priority_surcharge_amount!: number;
+
     @Column({ type: 'decimal', precision: 12, scale: 2, default: 0 })
     discount_total: number; // suma de calculated_amount de los descuentos aplicados
 

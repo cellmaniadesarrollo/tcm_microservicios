@@ -131,4 +131,13 @@ export class IncomeBackendController {
     this.logger.log(`📤 GET /device-verification/order/${orderId}`);
     return this.incomeBackendService.getDeviceVerificationByOrderId(parseInt(orderId, 10));
   }
+
+  @Get('labels/:batchId')
+  @ApiOperation({ summary: 'Obtener datos de etiqueta por batchId' })
+  @ApiParam({ name: 'batchId', description: 'ID del batch' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Datos de etiqueta' })
+  async getLabelData(@Param('batchId') batchId: string) {
+    this.logger.log(`📤 GET /labels/${batchId}`);
+    return this.incomeBackendService.getLabelData(batchId);
+  }
 }

@@ -750,4 +750,15 @@ export class OrdersController {
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
   }
+
+  @Patch(':orderId/premium')
+  async activatePremium(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @User() user: any,
+  ) {
+    return this.ordersGatewayService.activatePremium(
+      orderId,
+      { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+    );
+  }
 }

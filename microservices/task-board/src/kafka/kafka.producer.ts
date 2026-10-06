@@ -1,4 +1,3 @@
-// task-board/src/kafka/kafka.producer.ts
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Kafka, Producer, Consumer, logLevel } from 'kafkajs';
 import { v4 as uuidv4 } from 'uuid';
@@ -17,6 +16,14 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   private producer: Producer;
   private consumer: Consumer;
   private readonly kafka: Kafka;
+
+  private producerUp = false;
+  private consumerConnected = false;
+  private consumerSubscribed = false;
+  private consumerRunning = false;
+  private connecting: Promise<void> | null = null;
+  private groupReady: Promise<void> | null = null;
+
   private pendingRequests = new Map<string, {
     resolve: (value: any) => void;
     reject: (reason: any) => void;
@@ -52,26 +59,24 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit() {
-    try {
-      await this.producer.connect();
-      console.log('✅ Kafka Producer conectado - ms-taskboard');
+    this.producer.on(this.producer.events.DISCONNECT, () => {
+      console.warn('⚠️ [Kafka] Producer desconectado, se reconectará en el próximo uso');
+      this.producerUp = false;
+    });
 
-      await this.consumer.connect();
-      await this.consumer.subscribe({
-        topics: ['taskboard.responses'],
-        fromBeginning: false,
-      });
-
-      await this.consumer.run({
-        eachMessage: async ({ message }) => {
-          await this.handleResponse(message);
-        },
-      });
-
-      console.log('✅ Kafka Response Consumer conectado - ms-taskboard');
-    } catch (error: any) {
-      console.error('❌ Error conectando Kafka:', error.message);
-    }
+    // Reintenta en segundo plano sin bloquear ni tumbar el arranque de la app
+    void (async () => {
+      for (let i = 1; i <= 10; i++) {
+        try {
+          await this.ensureConnected();
+          return;
+        } catch (e: any) {
+          console.error(`❌ Kafka intento ${i}/10: ${e.message}`);
+          await new Promise((r) => setTimeout(r, 3000 * i));
+        }
+      }
+      console.error('❌ Kafka: no se pudo conectar al arrancar; se reintentará bajo demanda');
+    })();
   }
 
   async onModuleDestroy() {
@@ -84,6 +89,64 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  // ==================== CONEXIÓN ====================
+
+  private ensureConnected(): Promise<void> {
+    if (this.producerUp && this.consumerRunning) return Promise.resolve();
+    if (!this.connecting) {
+      this.connecting = this.connectAll().finally(() => {
+        this.connecting = null;
+      });
+    }
+    return this.connecting;
+  }
+
+  private async connectAll() {
+    if (!this.producerUp) {
+      await this.producer.connect();
+      this.producerUp = true;
+      console.log('✅ Kafka Producer conectado - ms-taskboard');
+    }
+
+    if (!this.consumerRunning) {
+      if (!this.consumerConnected) {
+        await this.consumer.connect();
+        this.consumerConnected = true;
+      }
+      if (!this.consumerSubscribed) {
+        await this.consumer.subscribe({
+          topics: ['taskboard.responses'],
+          fromBeginning: false,
+        });
+        this.consumerSubscribed = true;
+      }
+
+      // Espera a que el consumer realmente se una al grupo
+      const joined = new Promise<void>((resolve) => {
+        const remove = this.consumer.on(this.consumer.events.GROUP_JOIN, () => {
+          remove();
+          resolve();
+        });
+      });
+
+      await this.consumer.run({
+        eachMessage: async ({ message }) => {
+          await this.handleResponse(message);
+        },
+      });
+
+      await Promise.race([
+        joined,
+        new Promise<void>((r) => setTimeout(r, 15000)),
+      ]);
+
+      this.consumerRunning = true;
+      console.log('✅ Kafka Response Consumer conectado - ms-taskboard');
+    }
+  }
+
+  // ==================== RESPUESTAS ====================
+
   private async handleResponse(message: any) {
     try {
       const raw = message.value?.toString();
@@ -92,22 +155,17 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      console.log(`📥 [Kafka] Raw response: ${raw.substring(0, 200)}...`);
-
       const event = JSON.parse(raw);
-      console.log(`📥 [Kafka] Evento parseado:`, JSON.stringify(event, null, 2));
-      
+
       // El requestId está dentro de event.data (porque users usa emit con estructura de evento)
       const responseData = event.data || event;
       const requestId = responseData.requestId;
-      
-      console.log(`📥 [Kafka] requestId extraído: ${requestId}`);
-      
+
       if (!requestId) {
         console.warn('⚠️ [Kafka] No se encontró requestId en la respuesta');
         return;
       }
-      
+
       const pending = this.pendingRequests.get(requestId);
 
       if (pending) {
@@ -124,11 +182,18 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error: any) {
       console.error('❌ Error procesando respuesta Kafka:', error.message);
-      console.error('   Raw message:', message.value?.toString());
     }
   }
 
+  // ==================== API PÚBLICA ====================
+
   async request<T = any>(topic: string, type: string, data: any): Promise<T> {
+    try {
+      await this.ensureConnected();
+    } catch (error: any) {
+      throw new Error(`Error enviando petición: Kafka no disponible (${error.message})`);
+    }
+
     const requestId = uuidv4();
 
     return new Promise<T>((resolve, reject) => {
@@ -144,11 +209,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
         messages: [
           {
             key: requestId,
-            value: JSON.stringify({
-              requestId,
-              type,
-              data,
-            }),
+            value: JSON.stringify({ requestId, type, data }),
           },
         ],
       }).catch((error) => {
@@ -161,6 +222,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
 
   async send<T = any>(topic: string, data: any): Promise<T> {
     try {
+      await this.ensureConnected();
       await this.producer.send({
         topic,
         messages: [
@@ -185,6 +247,8 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
     key?: string,
   ): Promise<boolean> {
     try {
+      await this.ensureConnected();
+
       const event: KafkaEvent<T> = {
         eventId: uuidv4(),
         eventType,

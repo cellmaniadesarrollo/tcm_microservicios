@@ -99,6 +99,9 @@ export class Order {
   @Column()
   order_priority_id!: number;
 
+  @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+  priority_surcharge_percentage!: number;
+
   @ManyToOne(() => CustomerCache, { eager: true })
   @JoinColumn({ name: 'customer_id' })
   customer!: CustomerCache;
