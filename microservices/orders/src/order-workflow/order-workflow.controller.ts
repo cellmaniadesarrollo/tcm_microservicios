@@ -50,7 +50,6 @@ export class OrderWorkflowController {
     return result; // ← NestJS ClientProxy sigue funcionando normal
   }
 
-
   @MessagePattern({ cmd: 'create_order' })
   async createOrder(data: {
     dto: CreateOrderDto;
@@ -59,6 +58,7 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.createOrder(data.dto, data.files ?? [], data.user);
   }
+
   @MessagePattern({ cmd: 'list_orders' })
   async listOrders(data: {
     dto: ListOrdersDto;
@@ -74,6 +74,7 @@ export class OrderWorkflowController {
     );
     return orders
   }
+
   @MessagePattern({ cmd: 'list_my_orders' })
   async listMyOrders(data: {
     dto: ListOrdersDto;
@@ -88,6 +89,7 @@ export class OrderWorkflowController {
       data.dto,
     );
   }
+
   @MessagePattern({ cmd: 'get_order_full_data' })
   async getOrderFullData(data: {
     dto: GetOrderFullDataDto;
@@ -143,7 +145,6 @@ export class OrderWorkflowController {
     }
   }
 
-
   @MessagePattern({ cmd: 'register_order_payment' })
   async registerPayment(
     @Payload() data: {
@@ -162,6 +163,7 @@ export class OrderWorkflowController {
       data.files ?? [], // ← nuevo
     );
   }
+
   @MessagePattern({ cmd: 'close_order' })
   async closeOrder(
     @Payload() data: {
@@ -186,6 +188,7 @@ export class OrderWorkflowController {
 
     return { paymentTypes: types, paymentMethods: methods };
   }
+
   @MessagePattern({ cmd: 'get_last_orders_by_device' })
   async getLastOrdersByDevice(data: {
     deviceId: number;
@@ -194,11 +197,11 @@ export class OrderWorkflowController {
     return this.orderWorkflowService.getLastOrdersByDevice(data.deviceId, data.user);
   }
 
-
   @MessagePattern({ cmd: 'get_order_public_data' })
   async getOrderPublicData(@Payload() data: { publicId: string }) {
     return this.orderWorkflowService.getOrderPublicData(data.publicId);
   }
+
   @MessagePattern({ cmd: 'create_order_note' })
   async createOrderNote(data: {
     dto: CreateOrderNoteDto;
@@ -207,7 +210,7 @@ export class OrderWorkflowController {
     //console.log(data)
     return this.orderWorkflowService.createOrderNote(data.dto, data.user);
   }
-  //para rebuild test
+
   @MessagePattern({ cmd: 'delete_order_note' })
   async deleteOrderNote(data: {
     dto: { note_id: number };
@@ -215,6 +218,7 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.deleteOrderNote(data.dto.note_id, data.user);
   }
+
   @MessagePattern({ cmd: 'update_order_note' })
   async updateOrderNote(data: {
     noteId: number;
@@ -223,6 +227,7 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.updateOrderNote(data.noteId, data.dto, data.user);
   }
+
   @MessagePattern({ cmd: 'get_order_payment' })
   async getOrderPayment(data: {
     dto: GetOrderPaymentDto;
@@ -230,6 +235,7 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.getOrderPayment(data.dto, data.user);
   }
+
   @MessagePattern({ cmd: 'link_device_to_order' })
   async linkDeviceToOrder(data: {
     dto: LinkDeviceToOrderDto;
@@ -252,6 +258,7 @@ export class OrderWorkflowController {
   async getShipping(@Payload() payload: { orderId: number }) {
     return this.orderShippingService.findByOrder(payload.orderId);
   }
+
   @MessagePattern({ cmd: 'verify_order_payment' })
   async verifyOrderPayment(@Payload() data: {
     dto: VerifyOrderPaymentDto;
@@ -259,7 +266,6 @@ export class OrderWorkflowController {
   }) {
     return this.orderWorkflowService.verifyOrderPayment(data.dto);
   }
-
 
   @MessagePattern({ cmd: 'get_payment_signed_urls' })
   async getPaymentSignedUrls(@Payload() data: {
@@ -293,6 +299,7 @@ export class OrderWorkflowController {
       data.user,
     );
   }
+
   @MessagePattern({ cmd: 'create_order_price_agreement' })
   async createOrderPriceAgreement(data: {
     orderId: number;
@@ -305,6 +312,7 @@ export class OrderWorkflowController {
       data.user,
     );
   }
+
   @MessagePattern({ cmd: 'pasar_a_bodega' })
   async pasarABodega(@Payload() data: any) {
     try {
@@ -333,6 +341,7 @@ export class OrderWorkflowController {
       });
     }
   }
+
   @MessagePattern({ cmd: 'get_warehouse_attachments' })
   async getWarehouseAttachments(@Payload() data: any) {
     try {
@@ -354,6 +363,7 @@ export class OrderWorkflowController {
       });
     }
   }
+
   @MessagePattern({ cmd: 'create_warehouse_payment' })
   async createWarehousePayment(@Payload() data: any) {
     try {
@@ -382,6 +392,7 @@ export class OrderWorkflowController {
       });
     }
   }
+
   @MessagePattern({ cmd: 'get_warehouse_payments' })
   async getWarehousePayments(@Payload() data: any) {
     try {
@@ -396,6 +407,31 @@ export class OrderWorkflowController {
       console.error('🔥 Error crítico en MS Órdenes (getWarehousePayments):', error);
       if (error.stack) console.error(error.stack);
 
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+
+  @MessagePattern({ cmd: 'activate_order_premium' })
+  async activatePremium(@Payload() data: {
+    orderId: number;
+    user: { userId: string; companyId: string; branchId: string };
+  }) {
+    try {
+      if (!data.orderId || !data.user) {
+        throw new RpcException('Payload incompleto: falta orderId o user');
+      }
+
+      return await this.orderWorkflowService.activatePremium(data.orderId, data.user);
+
+    } catch (error: any) {
+      // Si ya es RpcException (NotFound, BadRequest...), se relanza tal cual
+      if (error instanceof RpcException) throw error;
+
+      console.error('🔥 Error crítico en MS Órdenes (activatePremium):', error);
       throw new RpcException({
         status: 'error',
         message: error.message || 'Error interno en MS Órdenes',
