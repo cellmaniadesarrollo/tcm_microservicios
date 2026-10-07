@@ -15,6 +15,9 @@ import { LitigioLlegadaGatewayDto } from './dto/litigio-llegada-gateway.dto';
 import { ResolverLitigioGatewayDto } from './dto/resolver-litigio.gateway.dto';
 import { CreatePartRequestTravelItemGatewayDto } from './dto/create-part-request-travel-item-gateway.dto';
 import { RequestContext } from '@nestjs/microservices';
+import { ListPartRequestTravelItemsGatewayDto } from './dto/list-part-request-travel-items-gateway.dto';
+import { CreateStandaloneTravelItemGatewayDto } from './dto/create-standalone-travel-item-gateway.dto';
+import { ResolveTravelItemGatewayDto } from './dto/resolve-travel-item-gateway.dto';
 
 @Injectable()
 export class PartRequestsGatewayService {
@@ -114,7 +117,20 @@ export class PartRequestsGatewayService {
         return this.orderServiceClient.send('litigar_producto_pendiente', { dto, files, user });
     }
 
-    createTravelItem(dto: CreatePartRequestTravelItemGatewayDto, user: any) {
-        return this.orderServiceClient.send('create_part_request_travel_item', { dto, user });
+    createTravelItem(dto: CreatePartRequestTravelItemGatewayDto, files: any[], user: any) {
+        return this.orderServiceClient.send('create_part_request_travel_item', { dto, files, user });
+    }
+    listTravelItems(query: ListPartRequestTravelItemsGatewayDto, user: any) {
+        return this.orderServiceClient.send('list_part_request_travel_items', { query, user });
+    }
+
+    createStandaloneTravelItem(dto: CreateStandaloneTravelItemGatewayDto, files: any[], user: any) {
+        return this.orderServiceClient.send('create_standalone_travel_item', { dto, files, user });
+    }
+    getTravelItem(id: number, user: any) {
+        return this.orderServiceClient.send('get_part_request_travel_item', { id, user });
+    }
+    resolveTravelItem(id: number, dto: ResolveTravelItemGatewayDto, files: any[], user: any) {
+        return this.orderServiceClient.send('resolve_part_request_travel_item', { id, dto, files, user });
     }
 } 

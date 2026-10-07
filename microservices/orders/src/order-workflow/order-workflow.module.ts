@@ -32,6 +32,7 @@ import { WarehousePayment } from './entities/warehouse-payment.entity';
 import { OrderExtraService } from '../order-extras/entities/order-extra-service.entity';
 import { OrderPendingProduct } from '../order-extras/entities/order-pending-product.entity';
 import { PartRequest } from '../order-part-request/entities/part-request.entity';
+import { OrderPaymentsListService } from './order-payments-list.service';
 
 @Module({
   imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module,
@@ -43,7 +44,7 @@ import { PartRequest } from '../order-part-request/entities/part-request.entity'
     ]),
     BroadcastModule, SearchHistoryModule, DevicesModule, OrderValidationLockModule, InvoicesModule],
   controllers: [OrderWorkflowController],
-  providers: [OrderWorkflowService, PaymentCatalogSeederService, OrderShippingService],
+  providers: [OrderWorkflowService, PaymentCatalogSeederService, OrderShippingService, OrderPaymentsListService],
 
   exports: [OrderWorkflowService],
 })
