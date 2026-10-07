@@ -18,11 +18,12 @@ import { OrderShippingService } from './order-shipping.service';
 import { VerifyOrderPaymentDto } from './dto/verify-order-payment.dto';
 import { UpdateOrderPriceAgreementDto } from './dto/update-order-price-agreement.dto';
 import { CreateOrderPriceAgreementDto } from './dto/create-order-price-agreement.dto';
+import { OrderPaymentsListService } from './order-payments-list.service';
 
 @Controller('order-workflow')
 export class OrderWorkflowController {
   constructor(private readonly orderWorkflowService: OrderWorkflowService,
-    private readonly orderShippingService: OrderShippingService) { }
+    private readonly orderShippingService: OrderShippingService, private readonly orderPaymentsListService: OrderPaymentsListService) { }
 
   @MessagePattern({ cmd: 'async_orders_start' })
   async onSyncStart(
@@ -432,6 +433,20 @@ export class OrderWorkflowController {
       if (error instanceof RpcException) throw error;
 
       console.error('🔥 Error crítico en MS Órdenes (activatePremium):', error);
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
+  @MessagePattern({ cmd: 'list_order_payments' })
+  async listPayments(@Payload() data: any) {
+    try {
+      if (!data.user) throw new RpcException('Payload incompleto: falta user');
+      return await this.orderPaymentsListService.listPayments(data.query ?? {}, data.user);
+    } catch (error: any) {
+      console.error('🔥 Error en listPayments:', error);
       throw new RpcException({
         status: 'error',
         message: error.message || 'Error interno en MS Órdenes',

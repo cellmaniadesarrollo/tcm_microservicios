@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
+import { ListOrderPaymentsGatewayDto } from './dto/list-order-payments.gateway.dto';
 
 /**
  * Toda la lógica de "hablar con el microservicio de órdenes" vive acá:
@@ -407,5 +408,8 @@ export class OrdersGatewayService {
                 error.status || HttpStatus.INTERNAL_SERVER_ERROR,
             );
         }
+    }
+    listOrderPayments(query: ListOrderPaymentsGatewayDto, user: any) {
+        return this.send('list_order_payments', { query, user });
     }
 }

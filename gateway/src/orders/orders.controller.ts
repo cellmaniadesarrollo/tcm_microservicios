@@ -10,6 +10,7 @@ import {
   Req,
   ParseIntPipe,
   UseInterceptors,
+  Query,
 } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 
@@ -68,6 +69,7 @@ import { CreateOrderPriceAgreementGatewayDto } from './dto/create-order-price-ag
 import { UpdateDeviceImeiGatewayDto } from './dto/update-device-imei-gateway.dto';
 import { PasarABodegaGatewayDto } from './dto/pasar-a-bodega-gateway.dto';
 import { CreateWarehousePaymentGatewayDto } from './dto/create-warehouse-payment-gateway.dto';
+import { ListOrderPaymentsGatewayDto } from './dto/list-order-payments.gateway.dto';
 
 @Controller('orders')
 @Auth()
@@ -755,5 +757,17 @@ export class OrdersController {
       orderId,
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
     );
+  }
+  // gateway controller
+  @Get('/order-payments')
+  listOrderPayments(
+    @Query() query: ListOrderPaymentsGatewayDto,
+    @User() user: any,
+  ) {
+    return this.ordersGatewayService.listOrderPayments(query, {
+      userId: user.sub,
+      companyId: user.companyId,
+      branchId: user.branchId,
+    });
   }
 }

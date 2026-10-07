@@ -14,6 +14,7 @@ import { Provider } from './entities/provider.entity';
 import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/part-requests.helpers';
 import { PartRequestPaymentAllocation } from './entities/part-request-payment-allocation.entity';
 import { formatPartRequestNumber } from './helpers/company-numbering.helper';
+import { precioParaOrden, resolverPrecioOrden } from './helpers/pricing.helper';
 
 /**
  * Dueño de la etapa de pago: listado agrupado por proveedor (cola de pago),
@@ -29,7 +30,6 @@ export class PartRequestPaymentService {
         @InjectRepository(PartRequestPayment) private readonly paymentRepo: Repository<PartRequestPayment>,
         private readonly awsS3Service: AwsS3Service,
     ) { }
-
     async listParaPago(
         dto: {
             page?: number;
@@ -321,15 +321,11 @@ export class PartRequestPaymentService {
             },
         };
     }
-
-
-
     async createPartRequestPayment(
         dto: CreatePartRequestPaymentDto,
         files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
         user: { userId: string; companyId: string },
     ) {
-
         return this.partRequestRepo.manager.transaction(async (manager) => {
             if (!dto.asignaciones?.length) {
                 throw new RpcException(new BadRequestException('Debes seleccionar al menos una solicitud a pagar'));
@@ -348,7 +344,6 @@ export class PartRequestPaymentService {
 
             const partRequestIds = dto.asignaciones.map((a) => a.partRequestId);
 
-            // ─── Ya NO cargamos pagoAllocations ───────────────────────────────
             const partRequests = await manager
                 .createQueryBuilder(PartRequest, 'pr')
                 .innerJoinAndSelect('pr.sourcing', 'sourcing')
@@ -393,7 +388,6 @@ export class PartRequestPaymentService {
             for (const asign of dto.asignaciones) {
                 const pr = partRequestById.get(asign.partRequestId)!;
 
-                // ─── Total pagado previo con consulta agregada ────────────────
                 const { totalPagadoPrevio } = await manager
                     .createQueryBuilder(PartRequestPaymentAllocation, 'a')
                     .select('COALESCE(SUM(a.monto_asignado), 0)', 'totalPagadoPrevio')
@@ -419,20 +413,22 @@ export class PartRequestPaymentService {
 
                 if (completa) {
                     if (pr.order_id) {
-                        const precioVentaNum = Number(pr.precio_venta ?? 0);
+                        const { precio: precioOrden, esAcordado } = resolverPrecioOrden(pr);
                         const costoCompraNum = Number(pr.sourcing?.precio ?? 0);
 
-                        if (!precioVentaNum || precioVentaNum <= 0) {
+                        if (!precioOrden || precioOrden <= 0) {
                             throw new RpcException(
                                 new BadRequestException(
-                                    `Debes indicar el precio de venta de la solicitud #${pr.id} antes de completar el pago`,
+                                    `Debes indicar el precio de venta (o precio acordado) de la solicitud #${pr.id} antes de completar el pago`,
                                 ),
                             );
                         }
-                        if (precioVentaNum < costoCompraNum) {
+                        // El precio acordado puede ser menor al costo (se asume la pérdida por cumplir al cliente).
+                        // Solo el precio de venta debe cubrir el costo.
+                        if (!esAcordado && precioOrden < costoCompraNum) {
                             throw new RpcException(
                                 new BadRequestException(
-                                    `El precio de venta de la solicitud #${pr.id} ($${precioVentaNum}) no puede ser menor al costo de compra ($${costoCompraNum})`,
+                                    `El precio de venta de la solicitud #${pr.id} ($${precioOrden}) no puede ser menor al costo de compra ($${costoCompraNum})`,
                                 ),
                             );
                         }
@@ -517,7 +513,7 @@ export class PartRequestPaymentService {
                             order_id: pr.order_id,
                             company_id: user.companyId,
                             name_items: pr.descripcion,
-                            sale_price: pr.precio_venta,
+                            sale_price: precioParaOrden(pr),
                             purchase_price: pr.sourcing!.precio,
                             quantity: cantidadOrden!,
                             is_in_inventory: false,
