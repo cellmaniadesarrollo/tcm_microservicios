@@ -29,6 +29,7 @@ import {
 } from './helpers/date-time.helpers';
 import { DAY_NAMES, buildWeekDays } from './helpers/dashboard-data.helpers';
 import { CASHIER_PENDING_STATUS_IDS, CASHIER_DELIVERED_STATUS_ID, SERVICE_TECNICO_TYPE_ID } from './helpers/cashier-dashboard.constants';
+import { getPremiumCommissions } from './helpers/premium-commission';
 // ── Constantes de este dashboard ──────────────────────────────────────
 
 type SortMode = 'entry_date' | 'finalized_at' | 'delivered_at' | 'last_paid_at';
@@ -631,6 +632,7 @@ export class OrdersReportsService {
         const [
             finalizedTodayCount,
             assignmentsData,
+            premiumCommissions,
             ...commissionQueryResults
         ] = await Promise.all([
 
@@ -662,7 +664,7 @@ export class OrdersReportsService {
                 },
                 { $project: { _id: 0, today: 1, activePending: 1 } },
             ]),
-
+            getPremiumCommissions(this.orderReplicaModel, companyId, userId),
             // Queries de comisiones: una por comisión activa × período (today/week/month)
             ...commissionDescriptors.map(descriptor =>
                 this.orderReplicaModel
@@ -698,6 +700,11 @@ export class OrdersReportsService {
                     month: { total: commissionData.month.totalAmount, entries: commissionData.month.entries },
                 }
                 : null,
+            premiumCommissions: {        // ← tabla aparte en el frontend
+                today: { total: premiumCommissions.today.totalAmount, entries: premiumCommissions.today.entries },
+                week: { total: premiumCommissions.week.totalAmount, entries: premiumCommissions.week.entries },
+                month: { total: premiumCommissions.month.totalAmount, entries: premiumCommissions.month.entries },
+            },
         };
     }
 
