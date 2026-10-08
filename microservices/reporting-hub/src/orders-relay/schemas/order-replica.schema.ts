@@ -521,6 +521,8 @@ export class OrderReplica {
     // ── Historias de estados ─────────────────────────────────────────
     @Prop({ type: [StatusHistorySnapshotSchema], default: [] })
     statusHistory!: StatusHistorySnapshot[];
+    @Prop({ type: Number, default: 0 })
+    priority_surcharge_percentage!: number;
 }
 
 export const OrderReplicaSchema = SchemaFactory.createForClass(OrderReplica);
