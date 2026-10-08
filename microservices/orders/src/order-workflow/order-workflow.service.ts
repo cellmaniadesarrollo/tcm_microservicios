@@ -2629,6 +2629,11 @@ export class OrderWorkflowService {
  * - Sin fromCache → todas las órdenes
  * - Con fromCache → solo modificadas/creadas después de esa fecha
  */
+  /**
+   * Devuelve órdenes para sincronización bulk al orders-relay.
+   * - Sin fromCache → todas las órdenes
+   * - Con fromCache → solo modificadas/creadas después de esa fecha
+   */
   async findFullDataForSync(fromCache: string | null) {
     const qb = this.orderRepo
       .createQueryBuilder('order')
@@ -2718,15 +2723,6 @@ export class OrderWorkflowService {
       });
     });
 
-
-    // Esto imprimirá una tabla clara en tu terminal con ambos campos
-    // console.table(orders.map(o => ({
-    //   db_id: o.id,
-    //   public_id: o.public_id
-    // })));
-
-
-
     // ── Shape final ────────────────────────────────────────────────────────────
     return orders.map((order) => ({
       id: order.id,
@@ -2737,6 +2733,7 @@ export class OrderWorkflowService {
       branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
       type: { id: order.type?.id, name: order.type?.name },
       priority: { id: order.priority?.id, name: order.priority?.name },
+      priority_surcharge_percentage: Number(order.priority_surcharge_percentage ?? 0), // ✅ nuevo (snapshot)
       is_national: order.is_national,
       customer: {
         id: order.customer?.id,
@@ -2844,7 +2841,6 @@ export class OrderWorkflowService {
 
       attachments: attMap.get(`ORDER_${order.id}`) ?? [],
 
-      // ✅ Nuevo
       statusHistory: statusHistoryMap.get(order.id) ?? [],
 
       createdAt: order.createdAt,
@@ -2862,6 +2858,7 @@ export class OrderWorkflowService {
       branch: { id: order.branch?.id, name: order.branch?.name, address: order.branch?.address, code: order.branch?.code },
       type: { id: order.type?.id, name: order.type?.name },
       priority: { id: order.priority?.id, name: order.priority?.name },
+      priority_surcharge_percentage: Number(order.priority_surcharge_percentage ?? 0),
       is_national: order.is_national,
       customer: {
         id: order.customer?.id,
@@ -3844,6 +3841,7 @@ export class OrderWorkflowService {
 
     await this.broadcastService.publishOrderUpdated(orderId, 'priority_changed', {
       priority: { id: result.premium.id, name: result.premium.name },
+      priority_surcharge_percentage: Number(result.premium.surcharge_percentage ?? 0),
     });
 
     return {

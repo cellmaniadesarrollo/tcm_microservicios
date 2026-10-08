@@ -354,6 +354,24 @@ export class OrdersRelayService {
                 break;
             default:
                 console.warn(`⚠️ changed_scope desconocido: ${scope} | order: ${orderId}`);
+
+            // ── Prioridad ───────────────────────────────────────────────────────────
+            case 'priority_changed':
+                await this.orderModel.findOneAndUpdate(
+                    { id: orderId },
+                    {
+                        $set: {
+                            'priority.id': payload.priority.id,
+                            'priority.name': payload.priority.name,
+                            priority_surcharge_percentage: payload.priority_surcharge_percentage,
+                            updatedAt: ts,
+                        },
+                        ...(payload.statusHistoryEntry && {
+                            $push: { statusHistory: payload.statusHistoryEntry },
+                        }),
+                    },
+                );
+                break;
         }
     }
 
