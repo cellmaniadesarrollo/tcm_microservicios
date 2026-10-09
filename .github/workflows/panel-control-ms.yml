@@ -33,6 +33,7 @@ on:
           - task-board
           - notification-dispatcher
           - inventario
+          - scraper  
           # ── Infraestructura (solo logs/restart, nunca deploy) ──
           - kafka
           - rabbitmq
@@ -101,8 +102,7 @@ jobs:
             SERVICES_TO_PROCESS=""
 
             # ✅ AGREGAR inventario a la lista de servicios de aplicación
-            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario"
-
+            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario scraper"
             if [ "$ACTION" == "deploy_smart" ]; then
               echo "🔍 Analizando cambios automáticos..."
               cd ..
@@ -122,6 +122,7 @@ jobs:
                 ["task-board"]="microservices/task-board/"
                 ["notification-dispatcher"]="microservices/notification-dispatcher/"
                 ["inventario"]="microservices/inventario/"
+                ["scraper"]="microservices/scraper/"
               )
 
               for MS in "${!PATHS[@]}"; do

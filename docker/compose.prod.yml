@@ -401,6 +401,40 @@ services:
       redis:
         condition: service_healthy
 
+
+  # ─────────────────────────────────────────
+  # SCRAPER GSMARENA (una sola instancia: el candado es en memoria)
+  # ─────────────────────────────────────────
+
+  scraper:
+    build:
+      context: ../microservices/scraper
+      dockerfile: Dockerfile            # producción, no .dev
+    container_name: ms-scraper
+    restart: unless-stopped
+    stop_grace_period: 20s              # deja guardar el estado al desplegar
+    environment:
+      - APP_ENV=production
+      - HTTP_PORT=8080
+      - MONGO_URI=${MONGODB_URI_REPORTS}
+      - MONGO_DB=${MONGODB_DB_SCRAPER:-tcm_scraping}
+      - SCHEDULE_TZ=${SCRAPER_TZ:-America/Guayaquil}
+      - RUN_ON_START=${SCRAPER_RUN_ON_START:-false}
+      - SCRAPE_DELAY=${SCRAPER_DELAY:-8s}
+      - MAX_REQUESTS=${SCRAPER_MAX_REQUESTS:-3000}
+      - REFRESH_DAYS=${SCRAPER_REFRESH_DAYS:-30}
+      - COOLDOWN_BASE=${SCRAPER_COOLDOWN_BASE:-2h}
+      - COOLDOWN_MAX=${SCRAPER_COOLDOWN_MAX:-12h}
+    networks:
+      - backend
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   # ─────────────────────────────────────────
   # TASK BOARD MICROSERVICE
   # ─────────────────────────────────────────

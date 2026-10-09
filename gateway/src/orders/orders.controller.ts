@@ -693,12 +693,19 @@ export class OrdersController {
     const { files, formData } = await parseMultipartRequest(request);
 
     const cedulaCount = Number(formData.cedulaCount);
+    const imeiCount = Number(formData.imeiCount);
     if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
       throw new BadRequestException('cedulaCount inválido');
     }
-    const deviceCount = files.length - cedulaCount;
+    if (!Number.isInteger(imeiCount) || imeiCount < 0) {
+      throw new BadRequestException('imeiCount inválido');
+    }
+    const deviceCount = files.length - cedulaCount - imeiCount;
     if (cedulaCount < 2) {
       throw new BadRequestException('Debes adjuntar mínimo 2 fotos de la cédula');
+    }
+    if (imeiCount < 2) {
+      throw new BadRequestException('Debes adjuntar mínimo 2 fotos del IMEI (ARCOTEL)');
     }
     if (deviceCount < 2) {
       throw new BadRequestException('Debes adjuntar mínimo 2 fotos del dispositivo');
@@ -710,6 +717,7 @@ export class OrdersController {
       orderId: Number(formData.orderId),
       observation: formData.observation || undefined,
       cedulaCount,
+      imeiCount,
     };
 
     return this.ordersGatewayService.pasarABodega(
