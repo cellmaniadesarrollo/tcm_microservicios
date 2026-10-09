@@ -3248,7 +3248,7 @@ export class OrderWorkflowService {
   private readonly ESTADO_BODEGA = 9;
 
   async pasarABodega(
-    dto: { orderId: number; observation?: string; cedulaCount: number },
+    dto: { orderId: number; observation?: string; cedulaCount: number; imeiCount: number },
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
     user: { userId: string; companyId: string; branchId: string },
   ) {
@@ -3256,14 +3256,25 @@ export class OrderWorkflowService {
 
     // ── Validación de mínimos (antes de abrir la transacción) ──
     const cedulaCount = Number(dto.cedulaCount ?? 0);
-    if (!Number.isInteger(cedulaCount) || cedulaCount < 0 || cedulaCount > files.length) {
-      throw new RpcException(new BadRequestException('cedulaCount inválido'));
+    const imeiCount = Number(dto.imeiCount ?? 0);
+
+    if (
+      !Number.isInteger(cedulaCount) || cedulaCount < 0 ||
+      !Number.isInteger(imeiCount) || imeiCount < 0 ||
+      cedulaCount + imeiCount > files.length
+    ) {
+      throw new RpcException(new BadRequestException('cedulaCount/imeiCount inválido'));
     }
-    const deviceCount = files.length - cedulaCount;
+    const deviceCount = files.length - cedulaCount - imeiCount;
 
     if (cedulaCount < MIN_FOTOS) {
       throw new RpcException(
         new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos de la cédula del cliente`),
+      );
+    }
+    if (imeiCount < MIN_FOTOS) {
+      throw new RpcException(
+        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del IMEI (ARCOTEL)`),
       );
     }
     if (deviceCount < MIN_FOTOS) {
@@ -3290,15 +3301,28 @@ export class OrderWorkflowService {
       const { toStatus, history, fromStatusId, fromStatusName } =
         await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);
 
-      // 📎 Adjuntos obligatorios:
+      // 📎 Adjuntos obligatorios (orden fijo: cédula → imei → dispositivo):
       //   - Los primeros `cedulaCount` archivos → cédula del cliente (WAREHOUSE_HANDOVER)
+      //   - Los siguientes `imeiCount` archivos → IMEI para ARCOTEL (WAREHOUSE_HANDOVER_IMEI)
       //   - El resto → fotos del dispositivo (WAREHOUSE_HANDOVER_DEVICE)
       const attachments: Attachment[] = [];
 
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        const isCedula = i < cedulaCount;
-        const folder = isCedula ? 'cedula' : 'dispositivo';
+
+        let folder: string;
+        let entityType: AttachmentEntityType;
+
+        if (i < cedulaCount) {
+          folder = 'cedula';
+          entityType = AttachmentEntityType.WAREHOUSE_HANDOVER;
+        } else if (i < cedulaCount + imeiCount) {
+          folder = 'imei';
+          entityType = AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI;
+        } else {
+          folder = 'dispositivo';
+          entityType = AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE;
+        }
 
         const buffer = Buffer.from(file.buffer, 'base64');
         const prefix = `order/${order.id}/bodega/${folder}/`;
@@ -3307,9 +3331,7 @@ export class OrderWorkflowService {
         );
 
         const attachment = manager.create(Attachment, {
-          entity_type: isCedula
-            ? AttachmentEntityType.WAREHOUSE_HANDOVER
-            : AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE,
+          entity_type: entityType,
           entity_id: order.id,
           file_name: file.originalname,
           file_url: url,
@@ -3356,7 +3378,6 @@ export class OrderWorkflowService {
       };
     });
   }
-
   private async applyStatusChange(
     manager: EntityManager,
     order: Order,
@@ -3426,6 +3447,7 @@ export class OrderWorkflowService {
       where: {
         entity_type: In([
           AttachmentEntityType.WAREHOUSE_HANDOVER,        // cédula (incluye registros históricos)
+          AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI,   // fotos del IMEI (ARCOTEL)
           AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE, // fotos del dispositivo
         ]),
         entity_id: orderId,
@@ -3434,8 +3456,6 @@ export class OrderWorkflowService {
       order: { createdAt: 'ASC' },
     });
 
-    // Reutilizamos el mismo firmado de URLs que usa getOrderFullData,
-    // envolviendo el array en un objeto liviano compatible.
     const wrapper: any = { attachments };
     await this.enrichAttachmentsWithSignedUrls(wrapper);
 
@@ -3445,8 +3465,8 @@ export class OrderWorkflowService {
       orderId: order.id,
       orderNumber: order.order_number,
       attachments: signed,
-      // Agrupados para que el front no tenga que filtrar (opcional)
       cedula: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER),
+      imei: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI),
       dispositivo: signed.filter(a => a.entity_type === AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE),
     };
   }
