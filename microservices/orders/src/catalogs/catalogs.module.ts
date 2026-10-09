@@ -13,15 +13,31 @@ import { GeoCountry } from './entities/geo-country.entity';
 import { GeoDivision } from './entities/geo-division.entity';
 import { CatalogsSeeder } from './seeders/catalogs.seeder';
 import { ScheduleModule } from '@nestjs/schedule';
+import { ClientsModule, Transport } from '@nestjs/microservices';
+import { TechnicalModelsSyncService } from './technical-models-sync.service';
+import { ModelTechnicalCode } from './entities/model-technical-code.entity';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Brand, Model, DeviceType, OrderPriority, OrderType, OrderStatus,
     GeoCountry,
-    GeoDivision,
+    GeoDivision, ModelTechnicalCode
   ]), MysqlRawModule,
   ScheduleModule.forRoot(),
+  ClientsModule.register([
+    // ...tus clientes actuales,
+    {
+      name: 'SCRAPER_RPC',
+      transport: Transport.RMQ,
+      options: {
+        urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+        queue: 'scraper_models_queue_sync',
+        queueOptions: { durable: true },
+      },
+    },
+  ]),
+
   ],
-  providers: [CatalogsService, CatalogsSeeder],
+  providers: [CatalogsService, CatalogsSeeder, TechnicalModelsSyncService,],
   controllers: [CatalogsController],
 
 })

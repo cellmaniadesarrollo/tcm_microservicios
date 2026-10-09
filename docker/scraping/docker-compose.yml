@@ -1,0 +1,58 @@
+name: tcm-scraping
+
+services:
+  scraper:
+    stop_grace_period: 20s
+    build:
+      context: ../../microservices/scraper
+      dockerfile: Dockerfile.dev
+    container_name: ms-scraper
+    restart: always
+    volumes:
+      - ../../microservices/scraper:/app
+      - scraper-gomod:/go/pkg/mod        # Caché de dependencias/módulos Go
+      - /app/tmp                         # Evita que el binario de Linux ensucie tu tmp local
+    env_file: [../.env]
+    environment:
+      - APP_ENV=development
+      - HTTP_PORT=8080
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - MONGO_URI=${MONGODB_URI}
+      - MONGO_DB=${MONGODB_DB_SCRAPER}
+      - REDIS_URL=${REDIS_URL}
+          # ── Scraper GSMArena ──────────────────────────────────────────
+      # Zona horaria para "medianoche". No depende del TZ del contenedor.
+      - SCHEDULE_TZ=${SCHEDULE_TZ:-America/Guayaquil}
+      # Ejecutar un ciclo al arrancar. DEV: true solo para probar (air reinicia
+      # el proceso en cada guardado). PROD: false, que corra solo a medianoche.
+      - RUN_ON_START=${RUN_ON_START:-false}
+      # Pausa base entre requests (+ jitter hasta el doble: 5s => 5-10s).
+      # PROD: 8s (más lento = menos riesgo de bloqueo; el relleno inicial dura más).
+      - SCRAPE_DELAY=${SCRAPE_DELAY:-5s}
+      # Presupuesto de requests por ejecución nocturna (0 = sin límite).
+      # DEV de prueba: 30. PROD: 3000-5000; súbelo solo si no hay bloqueos.
+      - MAX_REQUESTS=${MAX_REQUESTS:-5000}
+      # Refrescar fichas más viejas que N días. PROD: 30 (o 60 para menos tráfico).
+      - REFRESH_DAYS=${REFRESH_DAYS:-30}
+      # Enfriamiento tras un bloqueo: base y tope del backoff (1h, 2h, 4h... hasta el tope).
+      # PROD: base 2h, tope 12h. Si el sitio manda Retry-After, se respeta.
+      - COOLDOWN_BASE=${COOLDOWN_BASE:-1h}
+      - COOLDOWN_MAX=${COOLDOWN_MAX:-12h}
+    networks:
+      - backend
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  scraper-gomod:
+
+networks:
+  backend:
+    external: true
