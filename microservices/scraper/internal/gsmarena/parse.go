@@ -93,6 +93,14 @@ func (c *Client) ModelsPage(ctx context.Context, brand Brand, path string) ([]Mo
 		})
 	})
 
-	next, _ := doc.Find("a.pages-next").Attr("href")
+	// El botón "siguiente" ahora es <a class="prevnextbutton" title="Next page">.
+	// Se deja el selector antiguo como respaldo por si el sitio vuelve a cambiar.
+	next, _ := doc.Find(`a.prevnextbutton[title="Next page"]`).First().Attr("href")
+	if next == "" {
+		next, _ = doc.Find("a.pages-next").First().Attr("href")
+	}
+	if next == "#" {
+		next = ""
+	}
 	return out, next, nil
-}
+}     

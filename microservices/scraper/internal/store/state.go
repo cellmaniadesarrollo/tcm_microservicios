@@ -18,19 +18,24 @@ type CrawlStats struct {
 
 // CrawlState es el único documento de control del crawl (colección crawl_state).
 type CrawlState struct {
-	ID            string     `bson:"_id"`
-	Status        string     `bson:"status"` // running | paused | blocked | done
-	RunDay        string     `bson:"run_day"`
-	StartedAt     time.Time  `bson:"started_at"`
-	FinishedAt    time.Time  `bson:"finished_at"`
-	BlockedUntil  time.Time  `bson:"blocked_until"`
-	BlockCount    int        `bson:"block_count"`
-	ListingDone   bool       `bson:"listing_done"`
-	DoneBrands    []string   `bson:"done_brands"`
-	BrandSourceID string     `bson:"brand_source_id"`
-	NextPath      string     `bson:"next_path"`
-	Stats         CrawlStats `bson:"stats"`
-	LastError     string     `bson:"last_error"`
+	ID           string    `bson:"_id"`
+	Status       string    `bson:"status"` // running | paused | blocked | done
+	RunDay       string    `bson:"run_day"`
+	StartedAt    time.Time `bson:"started_at"`
+	FinishedAt   time.Time `bson:"finished_at"`
+	BlockedUntil time.Time `bson:"blocked_until"`
+	BlockCount   int       `bson:"block_count"`
+
+	// Cursor del listado: permite continuar donde quedó, sin volver a la página 1.
+	ListingDone   bool      `bson:"listing_done"`
+	ListingDoneAt time.Time `bson:"listing_done_at"` // NUEVO: cuándo terminó el listado completo
+	NewCheckDay string `bson:"new_check_day"` // último día en que se revisaron modelos nuevos
+	DoneBrands    []string  `bson:"done_brands"`
+	BrandSourceID string    `bson:"brand_source_id"`
+	NextPath      string    `bson:"next_path"`
+
+	Stats     CrawlStats `bson:"stats"`
+	LastError string     `bson:"last_error"`
 }
 
 func (s *Store) LoadState(ctx context.Context, id string) (*CrawlState, error) {
