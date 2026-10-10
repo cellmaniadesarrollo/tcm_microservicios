@@ -48,3 +48,4 @@ print-service-public-py/
 tmp
 .git
 *.log
+.env.prod
