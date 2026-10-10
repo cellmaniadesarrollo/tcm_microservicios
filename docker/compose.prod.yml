@@ -425,6 +425,7 @@ services:
       - REFRESH_DAYS=${SCRAPER_REFRESH_DAYS:-30}
       - COOLDOWN_BASE=${SCRAPER_COOLDOWN_BASE:-2h}
       - COOLDOWN_MAX=${SCRAPER_COOLDOWN_MAX:-12h}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
     mem_limit: 256m

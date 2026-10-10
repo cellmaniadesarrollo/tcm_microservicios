@@ -152,4 +152,4 @@ func (c *Consumer) reply(ctx context.Context, ch *amqp.Channel, d amqp.Delivery,
 	if err != nil {
 		log.Printf("reply publish: %v", err)
 	}
-}
+} 
