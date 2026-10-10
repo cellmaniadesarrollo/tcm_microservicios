@@ -5,6 +5,17 @@ import { Model, Types } from 'mongoose';
 import { Notification, NotificationDocument, ReadHistoryEntry, StatusHistoryEntry } from './entities/notification.entity';
 import { NotificationTracking, NotificationTrackingDocument } from './entities/notification-tracking.entity';
 
+export interface DeliveredFilters {
+  search?: string;
+  startDate?: string | Date | null;
+  endDate?: string | Date | null;
+  called?: 'all' | 'called' | 'not_called' | string;
+  problem?: 'all' | 'has_problem' | 'no_problem' | string;
+  today?: boolean;
+  todayStart?: string | Date | null;
+  todayEnd?: string | Date | null;
+}
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -674,31 +685,65 @@ export class NotificationsService {
     page: number = 1,
     limit: number = 20,
     includeArchived: boolean = false,
-    onlyWithNotes: boolean = false
+    onlyWithNotes: boolean = false,
+    filters: DeliveredFilters = {},
   ) {
     const skip = (page - 1) * limit;
     const excludedNotificationIds = await this.getExcludedNotificationIds();
-    
+
     const oneMonthAgo = new Date();
     oneMonthAgo.setDate(oneMonthAgo.getDate() - 30);
-    
+
+    // ---------- Normalizar filtros ----------
+    const search = (filters.search || '').trim();
+    const startDate = filters.startDate ? new Date(filters.startDate) : null;
+    const endDate = filters.endDate ? new Date(filters.endDate) : null;
+    const called = filters.called && filters.called !== 'all' ? filters.called : null;
+    const problem = filters.problem && filters.problem !== 'all' ? filters.problem : null;
+
+    let todayStart: Date | null = null;
+    let todayEnd: Date | null = null;
+    if (filters.today) {
+      todayStart = filters.todayStart ? new Date(filters.todayStart) : new Date(new Date().setHours(0, 0, 0, 0));
+      todayEnd = filters.todayEnd ? new Date(filters.todayEnd) : new Date(new Date().setHours(23, 59, 59, 999));
+    }
+
+    // ---------- $match inicial (usa índices, antes de cualquier lookup) ----------
+    const and: any[] = [
+      { $or: [{ entityType: 'order' }, { entityType: 'ORDER' }] },
+    ];
+
+    if (search) {
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      and.push({
+        $or: [
+          { 'orderData.customerName': { $regex: escaped, $options: 'i' } },
+          {
+            $expr: {
+              $regexMatch: {
+                input: { $toString: { $ifNull: ['$orderData.orderNumber', ''] } },
+                regex: escaped,
+              },
+            },
+          },
+        ],
+      });
+    }
+
     const matchStage: any = {
-      _id: { $nin: excludedNotificationIds }, // 👈 Exclusión agregada
+      _id: { $nin: excludedNotificationIds },
       currentStatus: 'ENTREGADA',
-      $or: [
-        { entityType: 'order' },
-        { entityType: 'ORDER' }
-      ]
+      $and: and,
     };
-    
-    if (!includeArchived) {
-      matchStage.isArchived = { $ne: true };
-    }
-    
-    if (onlyWithNotes) {
-      matchStage.notes = { $exists: true, $nin: [null, ''] };
-    }
-    
+    if (!includeArchived) matchStage.isArchived = { $ne: true };
+    if (onlyWithNotes) matchStage.notes = { $exists: true, $nin: [null, ''] };
+
+    // ---------- Rango de fecha de entrega ----------
+    // Siempre <= hace 1 mes; si el usuario pone "hasta" más antiguo, manda el del usuario.
+    const upper = endDate && endDate < oneMonthAgo ? endDate : oneMonthAgo;
+    const deliveryRange: any = { $ne: null, $lte: upper };
+    if (startDate) deliveryRange.$gte = startDate;
+
     const pipeline: any[] = [
       { $match: matchStage },
       {
@@ -711,55 +756,101 @@ export class NotificationsService {
                     $filter: {
                       input: '$statusHistory',
                       as: 'history',
-                      cond: { $eq: ['$$history.status', 'ENTREGADA'] }
-                    }
+                      cond: { $eq: ['$$history.status', 'ENTREGADA'] },
+                    },
                   },
                   as: 'delivery',
-                  in: '$$delivery.changedAt'
-                }
+                  in: '$$delivery.changedAt',
+                },
               },
-              0
-            ]
-          }
-        }
+              0,
+            ],
+          },
+        },
       },
-      {
-        $match: {
-          deliveryDate: { $exists: true, $ne: null, $lte: oneMonthAgo }
-        }
-      },
+      { $match: { deliveryDate: deliveryRange } },
       { $sort: { deliveryDate: -1 } },
-      {
-        $group: {
-          _id: '$entityId',
-          notification: { $first: '$$ROOT' }
-        }
-      },
+      { $group: { _id: '$entityId', notification: { $first: '$$ROOT' } } },
       { $replaceRoot: { newRoot: '$notification' } },
+    ];
+
+    // ---------- Filtros que dependen de otras colecciones ----------
+    // (después del $group, así el $lookup corre sobre menos documentos)
+    const needsTracking = !!(called || problem || todayStart);
+
+    if (needsTracking) {
+      pipeline.push(
+        {
+          $lookup: {
+            from: 'notification_tracking',
+            let: { nid: '$_id' },
+            pipeline: [
+              { $match: { $expr: { $eq: ['$notificationId', '$$nid'] } } },
+              { $sort: { createdAt: -1 } },
+              { $limit: 1 },
+              { $project: { isCalled: 1, hasProblems: 1, calledAt: 1, archivedAt: 1 } },
+            ],
+            as: 'latestTracking',
+          },
+        },
+        { $addFields: { tracking: { $arrayElemAt: ['$latestTracking', 0] } } },
+      );
+
+      const trackingMatch: any = {};
+      if (called === 'called') trackingMatch['tracking.isCalled'] = true;
+      if (called === 'not_called') trackingMatch['tracking.isCalled'] = { $ne: true };
+      if (problem === 'has_problem') trackingMatch['tracking.hasProblems'] = true;
+      if (problem === 'no_problem') trackingMatch['tracking.hasProblems'] = { $ne: true };
+      if (Object.keys(trackingMatch).length) pipeline.push({ $match: trackingMatch });
+    }
+
+    if (todayStart && todayEnd) {
+      const range = { $gte: todayStart, $lte: todayEnd };
+      pipeline.push({
+        $lookup: {
+          from: 'order_observations',
+          let: { oid: '$entityId' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$orderId', '$$oid'] }, createdAt: range } },
+            { $limit: 1 },
+            { $project: { _id: 1 } },
+          ],
+          as: 'todayObs',
+        },
+      });
+      pipeline.push({
+        $match: {
+          $or: [
+            { 'tracking.calledAt': range },
+            { 'tracking.archivedAt': range },
+            { archivedAt: range },
+            { 'todayObs.0': { $exists: true } },
+          ],
+        },
+      });
+    }
+
+    // ---------- Limpieza, orden y paginación ----------
+    pipeline.push(
+      { $project: { latestTracking: 0, todayObs: 0, tracking: 0 } },
       { $sort: { deliveryDate: -1 } },
       {
         $facet: {
           metadata: [{ $count: 'total' }],
-          notifications: [{ $skip: skip }, { $limit: limit }]
-        }
-      }
-    ];
-    
+          notifications: [{ $skip: skip }, { $limit: limit }],
+        },
+      },
+    );
+
     const result = await this.notificationModel.aggregate(pipeline);
     const total = result[0]?.metadata[0]?.total || 0;
     const notifications = result[0]?.notifications || [];
-    
-    console.log(`📊 Entregadas hace más de 1 mes: ${total} (archivadas: ${!includeArchived ? 'excluidas' : 'incluidas'}, solo con notas: ${onlyWithNotes})`);
-    
-    return {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      notifications,
-    };
-  }
 
+    console.log(`📊 Entregadas >1 mes: ${total} | filtros: ${JSON.stringify({ search, called, problem, today: !!todayStart, startDate, endDate })}`);
+
+    return { total, page, limit, totalPages: Math.ceil(total / limit), notifications };
+  }
+  
   // 🔹 CORREGIDO: Exclusión añadida en la consulta de finished orders
   async getFinishedOrdersOverThreeMonths(
     page: number = 1,
