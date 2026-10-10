@@ -1,7 +1,7 @@
 // microservices/notifications/src/notifications/notifications.controller.ts
 import { Controller } from '@nestjs/common';
 import { MessagePattern, Payload, EventPattern, Ctx, RmqContext } from '@nestjs/microservices';
-import { NotificationsService } from './notifications.service';
+import { DeliveredFilters, NotificationsService } from './notifications.service';
 import { NotificationTrackingService } from './notification-tracking.service'; // ✅ IMPORTAR
 import { CallCounterService } from './call-counter.service';
 
@@ -260,13 +260,15 @@ export class NotificationsController {
     limit?: number;
     includeArchived?: boolean;
     onlyWithNotes?: boolean;
+    filters?: DeliveredFilters;
   }) {
-    console.log(`📦 [Notifications] get_delivered_notifications - page: ${data.page}, limit: ${data.limit}, includeArchived: ${data.includeArchived}, onlyWithNotes: ${data.onlyWithNotes}`);
+    console.log(`📦 [Notifications] get_delivered_notifications`, JSON.stringify(data));
     return await this.notificationsService.getDeliveredNotifications(
       data.page || 1,
       data.limit || 20,
       data.includeArchived || false,
-      data.onlyWithNotes || false
+      data.onlyWithNotes || false,
+      data.filters || {},
     );
   }
 
