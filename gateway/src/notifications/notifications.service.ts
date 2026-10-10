@@ -3,6 +3,17 @@ import { Injectable, Inject } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { lastValueFrom } from 'rxjs';
 
+export interface DeliveredFilters {
+  search?: string;
+  startDate?: string;
+  endDate?: string;
+  called?: string;
+  problem?: string;
+  today?: boolean;
+  todayStart?: string;
+  todayEnd?: string;
+}
+
 @Injectable()
 export class NotificationsService {
   constructor(
@@ -139,13 +150,14 @@ export class NotificationsService {
     page: number = 1,
     limit: number = 20,
     includeArchived: boolean = false,
-    onlyWithNotes: boolean = false
+    onlyWithNotes: boolean = false,
+    filters: DeliveredFilters = {},
   ) {
-    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}`);
+    console.log(`📤 [Gateway] getDeliveredNotifications - page: ${page}, limit: ${limit}, includeArchived: ${includeArchived}, onlyWithNotes: ${onlyWithNotes}, filters: ${JSON.stringify(filters)}`);
     return await lastValueFrom(
       this.notificationsClient.send(
         { cmd: 'get_delivered_notifications' },
-        { page, limit, includeArchived, onlyWithNotes }
+        { page, limit, includeArchived, onlyWithNotes, filters }
       )
     );
   }

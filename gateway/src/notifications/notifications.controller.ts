@@ -114,18 +114,34 @@ export class NotificationsController {
 
   @Get('delivered')
   async getDeliveredNotifications(
-    @Query('page') page?: number,
-    @Query('limit') limit?: number,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Query('includeArchived') includeArchived?: string,
     @Query('onlyWithNotes') onlyWithNotes?: string,
+    @Query('search') search?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('called') called?: string,
+    @Query('problem') problem?: string,
+    @Query('today') today?: string,
+    @Query('todayStart') todayStart?: string,
+    @Query('todayEnd') todayEnd?: string,
   ) {
-    const includeArchivedBool = includeArchived === 'true';
-    const onlyWithNotesBool = onlyWithNotes === 'true';
     return this.notificationsService.getDeliveredNotifications(
-      page,
-      limit,
-      includeArchivedBool,
-      onlyWithNotesBool
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 20,
+      includeArchived === 'true',
+      onlyWithNotes === 'true',
+      {
+        search,
+        startDate,
+        endDate,
+        called,
+        problem,
+        today: today === 'true',
+        todayStart,
+        todayEnd,
+      },
     );
   }
 
