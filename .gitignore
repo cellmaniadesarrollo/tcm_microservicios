@@ -44,3 +44,8 @@ Thumbs.db
 
 print-service-public-py/
 .devtool
+
+tmp
+.git
+*.log
+.env.prod
