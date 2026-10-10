@@ -17,6 +17,19 @@ type syncRequest struct {
 	Limit         int64      `json:"limit"`
 }
 
+// checkAuth valida el token interno y normaliza el límite de página.
+func checkAuth(req *syncRequest, secret string) error {
+	if secret == "" || subtle.ConstantTimeCompare([]byte(req.InternalToken), []byte(secret)) != 1 {
+		return errors.New("unauthorized")
+	}
+	if req.Limit <= 0 || req.Limit > 1000 {
+		req.Limit = 500
+	}
+	return nil
+}
+
+// ── sync_technical_models ────────────────────────────────────────────
+
 type syncResponse struct {
 	Items      []store.TechnicalModelRow `json:"items"`
 	NextCursor int64                     `json:"nextCursor"`
@@ -29,11 +42,8 @@ func TechnicalModelsHandler(st *store.Store, secret string) Handler {
 		if err := json.Unmarshal(data, &req); err != nil {
 			return nil, errors.New("bad payload")
 		}
-		if secret == "" || subtle.ConstantTimeCompare([]byte(req.InternalToken), []byte(secret)) != 1 {
-			return nil, errors.New("unauthorized")
-		}
-		if req.Limit <= 0 || req.Limit > 1000 {
-			req.Limit = 500
+		if err := checkAuth(&req, secret); err != nil {
+			return nil, err
 		}
 
 		// pedimos limit+1 para saber si hay más páginas
@@ -53,5 +63,42 @@ func TechnicalModelsHandler(st *store.Store, secret string) Handler {
 			rows = []store.TechnicalModelRow{}
 		}
 		return syncResponse{Items: rows, NextCursor: next, HasMore: hasMore}, nil
+	}
+}
+
+// ── sync_models ──────────────────────────────────────────────────────
+
+type modelsResponse struct {
+	Items      []store.ModelRow `json:"items"`
+	NextCursor int64            `json:"nextCursor"`
+	HasMore    bool             `json:"hasMore"`
+}
+
+func ModelsHandler(st *store.Store, secret string) Handler {
+	return func(ctx context.Context, data json.RawMessage) (any, error) {
+		var req syncRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			return nil, errors.New("bad payload")
+		}
+		if err := checkAuth(&req, secret); err != nil {
+			return nil, err
+		}
+
+		rows, err := st.ListModels(ctx, req.After, req.Limit+1)
+		if err != nil {
+			return nil, err
+		}
+		hasMore := int64(len(rows)) > req.Limit
+		if hasMore {
+			rows = rows[:req.Limit]
+		}
+		next := req.After
+		if len(rows) > 0 {
+			next = rows[len(rows)-1].NumericID
+		}
+		if rows == nil {
+			rows = []store.ModelRow{}
+		}
+		return modelsResponse{Items: rows, NextCursor: next, HasMore: hasMore}, nil
 	}
 }

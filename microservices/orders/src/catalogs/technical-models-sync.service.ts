@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
@@ -20,10 +20,11 @@ interface SyncPage {
 }
 
 @Injectable()
-export class TechnicalModelsSyncService implements OnModuleInit {
+export class TechnicalModelsSyncService {
     private readonly logger = new Logger(TechnicalModelsSyncService.name);
     private readonly PAGE_SIZE = 500;
     private readonly INSERT_CHUNK = 2000;
+    private running = false;
 
     constructor(
         @Inject('SCRAPER_RPC') private readonly client: ClientProxy,
@@ -32,11 +33,21 @@ export class TechnicalModelsSyncService implements OnModuleInit {
         private readonly codeRepo: Repository<ModelTechnicalCode>,
     ) { }
 
-    onModuleInit() {
-        // Sin await: si el scraper está caído, el arranque de la app no se bloquea.
-        this.syncAll().catch((err) =>
-            this.logger.error(`❌ Sync de modelos técnicos falló: ${err?.message ?? err}`),
-        );
+    /**
+     * Punto de entrada seguro: evita ejecuciones simultáneas y nunca lanza
+     * excepciones (si el scraper está caído, solo queda el error en el log).
+     * Lo invoca ModelsSyncService al arrancar, después de sincronizar los modelos.
+     */
+    async runSafe() {
+        if (this.running) return;
+        this.running = true;
+        try {
+            await this.syncAll();
+        } catch (err: any) {
+            this.logger.error(`❌ Sync de modelos técnicos falló: ${err?.message ?? err}`);
+        } finally {
+            this.running = false;
+        }
     }
 
     /** Pide páginas al scraper hasta que hasMore sea false. Es idempotente. */
@@ -60,6 +71,10 @@ export class TechnicalModelsSyncService implements OnModuleInit {
                     .pipe(timeout(30_000)),
             );
 
+            this.logger.log(
+                `📥 Página recibida: ${page.items.length} items (after=${after}, hasMore=${page.hasMore})`,
+            );
+
             const result = await this.saveBatch(page.items);
             saved += result.saved;
             skipped += result.skipped;
@@ -73,7 +88,9 @@ export class TechnicalModelsSyncService implements OnModuleInit {
             hasMore = page.hasMore;
         }
 
-        this.logger.log(`✅ Modelos técnicos sincronizados | códigos: ${saved} | modelos no encontrados: ${skipped}`);
+        this.logger.log(
+            `✅ Modelos técnicos sincronizados | códigos: ${saved} | modelos no encontrados: ${skipped}`,
+        );
     }
 
     private async saveBatch(items: TechnicalModelItem[]) {
@@ -87,12 +104,12 @@ export class TechnicalModelsSyncService implements OnModuleInit {
         const idByFindId = new Map(models.map((m) => [m.models_find_id, m.models_id]));
 
         const rows: { mtc_models_id: number; mtc_code: string }[] = [];
-        let skipped = 0;
+        const missing: string[] = [];
 
         for (const item of items) {
             const modelsId = idByFindId.get(item.sourceId);
             if (!modelsId) {
-                skipped++;
+                missing.push(item.sourceId);
                 continue;
             }
             const codes = new Set(
@@ -101,6 +118,12 @@ export class TechnicalModelsSyncService implements OnModuleInit {
             for (const code of codes) {
                 rows.push({ mtc_models_id: modelsId, mtc_code: code.slice(0, 100) });
             }
+        }
+
+        if (missing.length) {
+            this.logger.warn(
+                `Sin coincidencia en models (${missing.length}): ${missing.slice(0, 10).join(', ')}`,
+            );
         }
 
         for (let i = 0; i < rows.length; i += this.INSERT_CHUNK) {
@@ -113,6 +136,6 @@ export class TechnicalModelsSyncService implements OnModuleInit {
                 .execute();
         }
 
-        return { saved: rows.length, skipped };
+        return { saved: rows.length, skipped: missing.length };
     }
 }

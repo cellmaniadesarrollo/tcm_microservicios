@@ -16,6 +16,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { TechnicalModelsSyncService } from './technical-models-sync.service';
 import { ModelTechnicalCode } from './entities/model-technical-code.entity';
+import { ModelsSyncService } from './models-sync.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Brand, Model, DeviceType, OrderPriority, OrderType, OrderStatus,
@@ -37,7 +38,7 @@ import { ModelTechnicalCode } from './entities/model-technical-code.entity';
   ]),
 
   ],
-  providers: [CatalogsService, CatalogsSeeder, TechnicalModelsSyncService,],
+  providers: [CatalogsService, CatalogsSeeder, TechnicalModelsSyncService, ModelsSyncService],
   controllers: [CatalogsController],
 
 })

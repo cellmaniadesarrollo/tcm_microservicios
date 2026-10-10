@@ -419,12 +419,6 @@ services:
       - MONGO_URI=${MONGODB_URI_REPORTS}
       - MONGO_DB=${MONGODB_DB_SCRAPER:-tcm_scraping}
       - SCHEDULE_TZ=${SCRAPER_TZ:-America/Guayaquil}
-      - RUN_ON_START=${SCRAPER_RUN_ON_START:-false}
-      - SCRAPE_DELAY=${SCRAPER_DELAY:-8s}
-      - MAX_REQUESTS=${SCRAPER_MAX_REQUESTS:-3000}
-      - REFRESH_DAYS=${SCRAPER_REFRESH_DAYS:-30}
-      - COOLDOWN_BASE=${SCRAPER_COOLDOWN_BASE:-2h}
-      - COOLDOWN_MAX=${SCRAPER_COOLDOWN_MAX:-12h}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
     networks:
       - backend
