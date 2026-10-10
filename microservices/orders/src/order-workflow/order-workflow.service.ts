@@ -1226,6 +1226,105 @@ export class OrderWorkflowService {
     }
   }
 
+  async getOrderBasicData(
+    orderId: number,
+    user: { companyId: string; branchId: string; userId: string },
+  ) {
+    try {
+      const order = await this.orderRepo
+        .createQueryBuilder('order')
+        .leftJoinAndSelect('order.customer', 'customer')
+        .leftJoinAndSelect('customer.contacts', 'contacts')
+        .leftJoinAndSelect('order.device', 'device')
+        .leftJoinAndSelect('device.imeis', 'imeis')
+        .leftJoinAndSelect('device.model', 'model')
+        .leftJoinAndSelect('model.brand', 'brand')
+        .leftJoinAndSelect('device.type', 'deviceType')
+        .leftJoinAndSelect('order.type', 'type')
+        .leftJoinAndSelect('order.priority', 'priority')
+        .leftJoinAndSelect('order.currentStatus', 'currentStatus')
+        .leftJoinAndSelect('order.technicians', 'technicians')
+        .where('order.id = :orderId', { orderId })
+        .andWhere('order.company_id = :companyId', { companyId: user.companyId })
+        .getOne();
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      return {
+        id: order.id,
+        order_number: order.order_number,
+        public_id: order.public_id,
+        entry_date: order.entry_date,
+        is_national: order.is_national,
+
+        status: order.currentStatus
+          ? { id: order.currentStatus.id, name: order.currentStatus.name }
+          : null,
+        type: order.type ? { id: order.type.id, name: order.type.name } : null,
+        priority: order.priority
+          ? { id: order.priority.id, name: order.priority.name }
+          : null,
+
+        // Motivo de ingreso
+        detalleIngreso: order.detalleIngreso,
+        revisadoAntes: order.revisadoAntes,
+
+        customer: order.customer
+          ? {
+              id: order.customer.id,
+              idNumber: order.customer.idNumber,
+              idTypeName: order.customer.idTypeName,
+              firstName: order.customer.firstName,
+              lastName: order.customer.lastName,
+              contacts: (order.customer.contacts ?? []).map((c) => ({
+                id: c.id,
+                typeName: c.typeName,
+                value: c.value,
+                isPrimary: c.isPrimary,
+              })),
+            }
+          : null,
+
+        device: order.device
+          ? {
+              device_id: order.device.device_id,
+              serial_number: order.device.serial_number,
+              color: order.device.color,
+              storage: order.device.storage,
+              type: order.device.type
+                ? { id: order.device.type.id, name: order.device.type.name }
+                : null,
+              model: order.device.model
+                ? {
+                    models_id: order.device.model.models_id,
+                    models_name: order.device.model.models_name,
+                    models_img_url: order.device.model.models_img_url,
+                    brand_id: order.device.model.brand?.brands_id,
+                    brand_name: order.device.model.brand?.brands_name,
+                  }
+                : null,
+              imeis: (order.device.imeis ?? []).map((i) => ({
+                imei_id: i.imei_id,
+                imei_number: i.imei_number,
+              })),
+            }
+          : null,
+
+        technicians: (order.technicians ?? []).map(mapUser),
+      };
+    } catch (error) {
+      if (!(error instanceof RpcException)) {
+        console.error('Error inesperado en getOrderBasicData:', error);
+        throw new RpcException(
+          new InternalServerErrorException('Error interno al obtener datos básicos de la orden'),
+        );
+      }
+      throw error;
+    }
+  }
+
   private async enrichAttachmentsWithSignedUrls(order: Order) {
     const promises: Promise<void>[] = [];
 
