@@ -20,24 +20,30 @@ func (r *Crawler) shouldResumeNow(ctx context.Context) bool {
 	return st.Status == "running" || (st.Status == "paused" && st.LastError == "interrumpido")
 }
 
+// stillBlocked: true si hay un bloqueo vigente (no conviene pedir nada todavía).
+func (r *Crawler) stillBlocked(ctx context.Context) bool {
+	st, err := r.st.LoadState(ctx, store.SourceGSMArena)
+	if err != nil || st == nil {
+		return false
+	}
+	return st.Status == "blocked" && time.Now().Before(st.BlockedUntil)
+}
+
 // Schedule corre el crawl cada medianoche (en loc) y reintenta cuando vence un bloqueo.
 func (r *Crawler) Schedule(ctx context.Context, loc *time.Location, runOnStart bool) {
-	// al arrancar: ejecutar si se pidió, o si el proceso anterior quedó a medias
-// al arrancar
-if runOnStart || r.shouldResumeNow(ctx) {
-    st, err := r.st.LoadState(ctx, store.SourceGSMArena)
-    // Solo correr si NO estamos bloqueados (o el bloqueo ya venció)
-    if err != nil || st == nil || st.Status != "blocked" || time.Now().After(st.BlockedUntil) {
-        r.Run(ctx, time.Now().In(loc))
-    } else {
-        r.log.Info("saltando ejecución al arranque: todavía bloqueado",
-            "hasta", st.BlockedUntil.Format(time.RFC3339))
-    }
-}
+	// Al arrancar: ejecutar si se pidió (desarrollo) o si el proceso anterior quedó a medias.
+	if runOnStart || r.shouldResumeNow(ctx) {
+		if r.stillBlocked(ctx) {
+			r.log.Info("se omite la ejecución al arrancar: todavía en enfriamiento")
+		} else {
+			r.Run(ctx, time.Now().In(loc))
+		}
+	}
 
 	for {
 		wake := nextMidnight(time.Now().In(loc))
 
+		// Si hay un bloqueo que vence antes de la medianoche, despertar entonces.
 		if st, err := r.st.LoadState(ctx, store.SourceGSMArena); err == nil && st != nil &&
 			st.Status == "blocked" && st.BlockedUntil.Before(wake) {
 			wake = st.BlockedUntil

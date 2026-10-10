@@ -136,3 +136,36 @@ func (s *Store) DevicesNeedingSpecs(ctx context.Context, staleBefore, retryFaile
 	}
 	return out, nil
 }
+// CountBrandDevices cuenta cuántos modelos de una marca hay guardados.
+func (s *Store) CountBrandDevices(ctx context.Context, brandSourceID string) (int64, error) {
+	return s.db.Collection("devices").CountDocuments(ctx, bson.D{
+		{Key: "source", Value: SourceGSMArena},
+		{Key: "brand.source_id", Value: brandSourceID},
+	}) 
+} 
+
+// BrandCounts devuelve cuántos modelos hay guardados por marca (clave: brand.source_id).
+func (s *Store) BrandCounts(ctx context.Context) (map[string]int64, error) {
+	cur, err := s.db.Collection("devices").Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{{Key: "source", Value: SourceGSMArena}}}},
+		{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$brand.source_id"},
+			{Key: "n", Value: bson.D{{Key: "$sum", Value: 1}}},
+		}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		ID string `bson:"_id"`
+		N  int64  `bson:"n"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(rows))
+	for _, r := range rows {
+		out[r.ID] = r.N
+	}
+	return out, nil
+}

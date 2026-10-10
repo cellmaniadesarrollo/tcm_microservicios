@@ -60,17 +60,21 @@ func main() {
 
 	gs := gsmarena.NewClient(cfg.ScrapeDelay)
 	crawler := ingest.NewCrawler(gs, st, log, ingest.Options{
-		StaleAfter:   time.Duration(cfg.RefreshDays) * 24 * time.Hour,
-		MaxRequests:  cfg.MaxRequests,
-		CooldownBase: cfg.CooldownBase,
-		CooldownMax:  cfg.CooldownMax,
+		StaleAfter:     time.Duration(cfg.RefreshDays) * 24 * time.Hour,
+		ListingRefresh: time.Duration(cfg.ListingRefreshDays) * 24 * time.Hour,
+		MaxRequests:    cfg.MaxRequests,
+		MaxPages:       cfg.MaxPages,
+		MaxSpecs:       cfg.MaxSpecs,
+		CooldownBase:   cfg.CooldownBase,
+		CooldownMax:    cfg.CooldownMax,
 	})
 
 	// ── NUEVO: consumer de RabbitMQ ──────────────────────────────────
 	consumer := messaging.NewConsumer(cfg.RabbitURL, cfg.RabbitQueue)
 	consumer.Handle("sync_technical_models", messaging.TechnicalModelsHandler(st, cfg.InternalSecret))
+	consumer.Handle("sync_models", messaging.ModelsHandler(st, cfg.InternalSecret))
 
-	consumerDone := make(chan struct{})
+	consumerDone := make(chan struct{})  
 	go func() {
 		defer close(consumerDone)
 		consumer.Run(ctx) // bloquea hasta que ctx se cancele (Ctrl+C / SIGTERM)
