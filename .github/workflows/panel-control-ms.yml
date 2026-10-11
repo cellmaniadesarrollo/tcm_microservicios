@@ -42,7 +42,7 @@ on:
       sync_env:
         description: 'Escribir el .env desde el secreto PROD_ENV_B64 antes de desplegar'
         required: true
-        default: true
+        default: false
         type: boolean
 
 permissions:
@@ -53,14 +53,9 @@ concurrency:
   group: panel-prod
   cancel-in-progress: false
 
-env:
-  # Servicios que se despliegan con imagen compilada en GitHub (GHCR).
-  # Los demás siguen compilando en la EC2. Añade aquí cada servicio que migres.
-  MIGRATED: "scraper"
-
 jobs:
   # ─────────────────────────────────────────────
-  # 1. PLAN: decide qué servicios se despliegan y cuáles hay que compilar
+  # 1. PLAN: decide qué servicios se compilan y despliegan
   # ─────────────────────────────────────────────
   plan:
     runs-on: ubuntu-latest
@@ -120,30 +115,23 @@ jobs:
             )
 
             for MS in "${!PATHS[@]}"; do
-              if echo "$CHANGED" | grep -q "${PATHS[$MS]}"; then
+              if echo "$CHANGED" | grep -q "^${PATHS[$MS]}"; then
                 SERVICES="$SERVICES $MS"
               fi
             done
-
-            if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|Dockerfile)'; then
-              echo "⚠️ Cambio estructural: se procesará todo."
-              SERVICES="$ALL_SERVICES"
-            fi
           fi
 
           SERVICES="$(echo $SERVICES | xargs)"
 
-          # De los servicios a desplegar, los migrados se compilan en GitHub
+          # Todos los servicios desplegados se compilan en GitHub
           BUILD=()
           for MS in $SERVICES; do
-            if echo " $MIGRATED " | grep -q " $MS "; then
-              BUILD+=("\"$MS\"")
-            fi
+            BUILD+=("\"$MS\"")
           done
           MATRIX="[$(IFS=,; echo "${BUILD[*]}")]"
 
           echo "Servicios a desplegar: ${SERVICES:-ninguno}"
-          echo "Servicios a compilar en GitHub: $MATRIX"
+          echo "Matriz de build: $MATRIX"
 
           echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
           echo "build_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
@@ -154,14 +142,15 @@ jobs:
           fi
 
   # ─────────────────────────────────────────────
-  # 2. BUILD: compila y sube a GHCR los servicios migrados
+  # 2. BUILD: compila y sube a GHCR
   # ─────────────────────────────────────────────
   build:
     needs: plan
     if: needs.plan.outputs.has_builds == 'true'
     runs-on: ubuntu-latest
     strategy:
-      max-parallel: 2
+      max-parallel: 3
+      fail-fast: false
       matrix:
         service: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
     steps:
@@ -218,7 +207,6 @@ jobs:
           SERVICE: ${{ inputs.target_service }}
           SYNC_ENV: ${{ inputs.sync_env }}
           SERVICES_TO_PROCESS: ${{ needs.plan.outputs.services }}
-          MIGRATED: ${{ env.MIGRATED }}
           IMAGE_TAG: ${{ github.sha }}
           ENV_B64: ${{ secrets.PROD_ENV_B64 }}
           GHCR_USER: ${{ github.actor }}
@@ -229,15 +217,14 @@ jobs:
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
           command_timeout: 60m
-          envs: ACTION,SERVICE,SYNC_ENV,SERVICES_TO_PROCESS,MIGRATED,IMAGE_TAG,ENV_B64,GHCR_USER,GHCR_TOKEN
+          envs: ACTION,SERVICE,SYNC_ENV,SERVICES_TO_PROCESS,IMAGE_TAG,ENV_B64,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
             cd /home/ubuntu/proyects/tcm_microservicios/docker || exit 1
             COMPOSE="docker compose -f compose.prod.yml"
             INFRA_SERVICES="kafka rabbitmq init-kafka"
 
-            is_infra()    { echo "$INFRA_SERVICES" | grep -qw "$1"; }
-            is_migrated() { echo " $MIGRATED " | grep -q " $1 "; }
+            is_infra() { echo "$INFRA_SERVICES" | grep -qw "$1"; }
 
             # --- 1. VER LOGS ---
             if [ "$ACTION" = "view_logs" ]; then
@@ -295,32 +282,17 @@ jobs:
               fi
             fi
 
-            # 3.2 Login temporal a GHCR si hay servicios migrados
-            NEEDS_PULL=false
-            for MS in $SERVICES_TO_PROCESS; do
-              if is_migrated "$MS"; then NEEDS_PULL=true; fi
-            done
-            if [ "$NEEDS_PULL" = "true" ]; then
-              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
-              trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-            fi
+            # 3.2 Login temporal a GHCR
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
 
-            # 3.3 Ejecución secuencial (cuidando RAM)
+            # 3.3 Ejecución secuencial (cuidando RAM): pull + recreate
             for MS in $SERVICES_TO_PROCESS; do
-              if is_migrated "$MS"; then
-                TAGVAR="$(echo "$MS" | tr 'a-z-' 'A-Z_')_TAG"
-                export "$TAGVAR=$IMAGE_TAG"
-                echo "📦 $MS desde imagen ($IMAGE_TAG): pull + recreate..."
-                $COMPOSE pull "$MS"
-                $COMPOSE up -d --no-deps --force-recreate --wait "$MS"
-              else
-                echo "🔨 $MS: build + recreate en la EC2..."
-                $COMPOSE up -d --build --force-recreate "$MS"
-                case "$MS" in
-                  gateway|realtime|inventario) sleep 12 ;;
-                  *) sleep 8 ;;
-                esac
-              fi
+              TAGVAR="$(echo "$MS" | tr 'a-z-' 'A-Z_')_TAG"
+              export "$TAGVAR=$IMAGE_TAG"
+              echo "📦 $MS desde imagen ($IMAGE_TAG): pull + recreate..."
+              $COMPOSE pull "$MS"
+              $COMPOSE up -d --no-deps --force-recreate --wait "$MS"
               echo "✅ $MS listo."
             done
 
