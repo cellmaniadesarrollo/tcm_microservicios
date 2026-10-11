@@ -1,8 +1,11 @@
-name: Sync Files to EC2
+name: Sync compose to EC2
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'docker/compose.prod.yml'
+  workflow_dispatch:
 
 jobs:
   sync:
@@ -11,7 +14,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Sync via SSH
+      - name: Copiar compose.prod.yml a la EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.EC2_PORT }}
+          source: docker/compose.prod.yml
+          target: /home/ubuntu/proyects/tcm_microservicios/docker
+          strip_components: 1
+          overwrite: true
+
+      - name: Validar sintaxis del compose
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -19,8 +34,6 @@ jobs:
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
           script: |
-            cd /home/ubuntu/proyects/tcm_microservicios || exit 1
-            # Actualizamos la referencia de git para que el servidor sepa qué hay de nuevo
-            git fetch origin main
-            git reset --hard origin/main
-            echo "✅ Archivos sincronizados. El sistema está listo para el despliegue manual."
+            cd /home/ubuntu/proyects/tcm_microservicios/docker || exit 1
+            docker compose -f compose.prod.yml config -q
+            echo "✅ compose.prod.yml copiado y válido."

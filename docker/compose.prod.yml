@@ -1,5 +1,6 @@
 # docker/compose.prod.yml
 # Versión de producción en EC2 con RabbitMQ LOCAL (no expuesto)
+# Los microservicios se descargan como imagen desde GHCR (se compilan en GitHub).
 
 services:
   # ─────────────────────────────────────────
@@ -87,8 +88,8 @@ services:
           ms.taskboard.created
           ms.taskboard.updated
           ms.taskboard.deleted
-          ms.inventory.spare.assigned 
-          ms.inventory.spare.cancelled 
+          ms.inventory.spare.assigned
+          ms.inventory.spare.cancelled
           ms.inventory.spare.returned
           ms.inventory.spare.cancellation.requested
           ms.reporting.validation.created
@@ -101,7 +102,7 @@ services:
           users.requests
           users.update-token
           taskboard.responses
-          ms.order.invoice.emission.requested 
+          ms.order.invoice.emission.requested
           ms.billing.invoice.status.updated
         "
 
@@ -148,13 +149,11 @@ services:
       start_period: 30s
 
   # ─────────────────────────────────────────
-  # MICROSERVICIOS
+  # MICROSERVICIOS (imágenes desde GHCR)
   # ─────────────────────────────────────────
 
   gateway:
-    build:
-      context: ../gateway
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-gateway:${GATEWAY_TAG:-latest}
     container_name: ms-gateway
     restart: always
     ports:
@@ -174,9 +173,7 @@ services:
         condition: service_healthy
 
   users:
-    build:
-      context: ../microservices/users
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-users:${USERS_TAG:-latest}
     container_name: ms-users
     restart: always
     environment:
@@ -196,9 +193,7 @@ services:
         condition: service_healthy
 
   orders:
-    build:
-      context: ../microservices/orders
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-orders:${ORDERS_TAG:-latest}
     container_name: ms-orders
     restart: always
     environment:
@@ -231,9 +226,7 @@ services:
         condition: service_completed_successfully
 
   clients:
-    build:
-      context: ../microservices/clients
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-clients:${CLIENTS_TAG:-latest}
     container_name: ms-clients
     restart: always
     environment:
@@ -255,9 +248,7 @@ services:
         condition: service_completed_successfully
 
   companies:
-    build:
-      context: ../microservices/companies
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-companies:${COMPANIES_TAG:-latest}
     container_name: ms-companies
     restart: always
     environment:
@@ -277,9 +268,7 @@ services:
         condition: service_healthy
 
   subscriptions:
-    build:
-      context: ../microservices/subscriptions
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-subscriptions:${SUBSCRIPTIONS_TAG:-latest}
     container_name: ms-subscriptions
     restart: always
     environment:
@@ -299,9 +288,7 @@ services:
         condition: service_healthy
 
   reports:
-    build:
-      context: ../microservices/reporting-hub
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-reports:${REPORTS_TAG:-latest}
     container_name: ms-reports
     restart: always
     environment:
@@ -319,9 +306,7 @@ services:
       start_period: 60s
 
   notification-dispatcher:
-    build:
-      context: ../microservices/notification-dispatcher
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-notification-dispatcher:${NOTIFICATION_DISPATCHER_TAG:-latest}
     container_name: ms-notification-dispatcher
     restart: always
     environment:
@@ -349,9 +334,7 @@ services:
       start_period: 60s
 
   notifications:
-    build:
-      context: ../microservices/notifications
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-notifications:${NOTIFICATIONS_TAG:-latest}
     container_name: ms-notifications
     restart: always
     ports:
@@ -380,9 +363,7 @@ services:
       start_period: 60s
 
   realtime:
-    build:
-      context: ../realtime
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-realtime:${REALTIME_TAG:-latest}
     container_name: ms-realtime
     restart: always
     environment:
@@ -401,17 +382,15 @@ services:
       redis:
         condition: service_healthy
 
-
   # ─────────────────────────────────────────
   # SCRAPER GSMARENA (una sola instancia: el candado es en memoria)
   # ─────────────────────────────────────────
 
   scraper:
     image: ghcr.io/cellmaniadesarrollo/tcm-scraper:${SCRAPER_TAG:-latest}
-    pull_policy: always
     container_name: ms-scraper
     restart: unless-stopped
-    stop_grace_period: 20s
+    stop_grace_period: 20s              # deja guardar el estado al desplegar
     environment:
       - APP_ENV=production
       - HTTP_PORT=8080
@@ -434,18 +413,16 @@ services:
   # ─────────────────────────────────────────
 
   task-board:
-    build:
-      context: ../microservices/task-board
-      dockerfile: Dockerfile  # Usar Dockerfile de producción (no .dev)
+    image: ghcr.io/cellmaniadesarrollo/tcm-task-board:${TASK_BOARD_TAG:-latest}
     container_name: ms-task-board
     restart: always
     ports:
       - "3005:3001"
     environment:
-      - NODE_ENV=production  # Cambiado a production
+      - NODE_ENV=production
       - PORT=3000
       - INTERNAL_SECRET=${INTERNAL_SECRET}
-      - DB_HOST=${TASKBOARD_DB_HOST}  # Variable específica
+      - DB_HOST=${TASKBOARD_DB_HOST}
       - DB_PORT=${TASKBOARD_DB_PORT}
       - DB_USER=${TASKBOARD_DB_USER}
       - DB_PASSWORD=${TASKBOARD_DB_PASSWORD}
@@ -485,9 +462,7 @@ services:
   # ─────────────────────────────────────────
 
   inventario:
-    build:
-      context: ../microservices/inventario
-      dockerfile: Dockerfile
+    image: ghcr.io/cellmaniadesarrollo/tcm-inventario:${INVENTARIO_TAG:-latest}
     container_name: ms-inventario
     restart: always
     ports:
@@ -499,54 +474,54 @@ services:
       - PORT=3030
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - LEGACY_JWT_SECRET=${LEGACY_JWT_SECRET}
-      
+
       # ─── MongoDB CONEXIÓN 1: PRODUCTOS ───
       - DB_NAME_INVENTARIO=${DB_NAME_INVENTARIO}
       - MONGODB_URI=${MONGODB_URI_NOTIFICATIONS}
-      
+
       # ─── MongoDB CONEXIÓN 2: INCOMES (Atlas) ───
       - MONGODB_ATLAS_URI=${MONGODB_ATLAS_URI}
       - DB_NAME_ATLAS=${DB_NAME_ATLAS}
-      
+
       # ─── Redis ───
       - REDIS_HOST=redis-realtime
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       - REDIS_DB=0
-      
+
       # ─── RabbitMQ ───
       - RABBITMQ_URL=${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
-      
+
       # ─── Kafka ───
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
-      
+
       # ─── JWT ───
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
-      
+
       # ─── URLs de servicios ───
       - ORDER_SERVICE_URL=${ORDER_SERVICE_URL:-http://orders:3001}
       - NOTIFICATION_SERVICE_URL=${NOTIFICATION_SERVICE_URL:-http://notifications:3010}
       - USER_SERVICE_URL=${USER_SERVICE_URL:-http://users:3001}
       - PRODUCT_SERVICE_URL=${PRODUCT_SERVICE_URL:-http://products:3020}
-      
+
       # ─── Configuración de la aplicación ───
       - CORS_ORIGIN=${CORS_ORIGIN}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - SERVICE_NAME=INVENTARIO_SERVICE
       - SERVICE_PORT=3030
       - SERVICE_RPC_PORT=3005
-      
+
       # ─── URLs de backend ───
       - INCOME_BACKEND_URL=${INCOME_BACKEND_URL}
       - INVENTORY_BACKEND_URL=${INVENTORY_BACKEND_URL}
-    
+
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    
+
     networks:
       - backend
-    
+
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -554,7 +529,7 @@ services:
         condition: service_healthy
       init-kafka:
         condition: service_completed_successfully
-    
+
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3030/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"]
       interval: 30s
