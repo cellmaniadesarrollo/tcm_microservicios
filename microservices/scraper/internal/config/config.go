@@ -45,7 +45,7 @@ func Load() Config {
 
 	if cfg.Env == "production" {
 		// Producción: masivo pero con ritmo suave para que no te baneen.
-		cfg.RunOnStart =true //false
+		cfg.RunOnStart = false
 		cfg.ScrapeDelay = 8 * time.Second
 		cfg.MaxRequests = 2000
 		cfg.MaxPages = 0 // todas las páginas
