@@ -398,6 +398,7 @@ services:
       - MONGO_DB=${MONGODB_DB_SCRAPER:-tcm_scraping}
       - SCHEDULE_TZ=${SCRAPER_TZ:-America/Guayaquil}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
     networks:
       - backend
     mem_limit: 256m
