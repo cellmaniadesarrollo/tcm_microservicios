@@ -45,7 +45,7 @@ func Load() Config {
 
 	if cfg.Env == "production" {
 		// Producción: masivo pero con ritmo suave para que no te baneen.
-		cfg.RunOnStart = false
+		cfg.RunOnStart =true //false
 		cfg.ScrapeDelay = 8 * time.Second
 		cfg.MaxRequests = 2000
 		cfg.MaxPages = 0 // todas las páginas
@@ -55,12 +55,17 @@ func Load() Config {
 		cfg.CooldownBase = 3 * time.Hour
 		cfg.CooldownMax = 12 * time.Hour
 	} else {
-		// Desarrollo: muy poco, para probar los brokers en cada reinicio.
 		cfg.RunOnStart = true
-		cfg.ScrapeDelay = 2 * time.Second
-		cfg.MaxRequests = 15
-		cfg.MaxPages = 1
-		cfg.MaxSpecs = 5
+		cfg.ScrapeDelay = 4 * time.Second
+		cfg.MaxRequests = 2000
+		cfg.MaxPages = 0 // 0 = todas las páginas del listado
+		cfg.MaxSpecs = 0 // 0 = todas las fichas pendientes
+		// Desarrollo: muy poco, para probar los brokers en cada reinicio.
+		// cfg.RunOnStart = true
+		// cfg.ScrapeDelay = 2 * time.Second
+		// cfg.MaxRequests = 15
+		// cfg.MaxPages = 1
+		// cfg.MaxSpecs = 5
 		cfg.RefreshDays = 30
 		cfg.ListingRefreshDays = 30
 		cfg.CooldownBase = 10 * time.Minute
