@@ -39,12 +39,6 @@ on:
           - rabbitmq
           - init-kafka
 
-      sync_env:
-        description: 'Escribir el .env desde el secreto PROD_ENV_B64 antes de desplegar'
-        required: true
-        default: false
-        type: boolean
-
 permissions:
   contents: read
   packages: write
@@ -205,10 +199,8 @@ jobs:
         env:
           ACTION: ${{ inputs.action_type }}
           SERVICE: ${{ inputs.target_service }}
-          SYNC_ENV: ${{ inputs.sync_env }}
           SERVICES_TO_PROCESS: ${{ needs.plan.outputs.services }}
           IMAGE_TAG: ${{ github.sha }}
-          ENV_B64: ${{ secrets.PROD_ENV_B64 }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -217,7 +209,7 @@ jobs:
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
           command_timeout: 60m
-          envs: ACTION,SERVICE,SYNC_ENV,SERVICES_TO_PROCESS,IMAGE_TAG,ENV_B64,GHCR_USER,GHCR_TOKEN
+          envs: ACTION,SERVICE,SERVICES_TO_PROCESS,IMAGE_TAG,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
             cd /home/ubuntu/proyects/tcm_microservicios/docker || exit 1
@@ -264,29 +256,11 @@ jobs:
               exit 0
             fi
 
-            # 3.1 Escribir el .env desde el secreto (con copia de seguridad)
-            if [ "$SYNC_ENV" = "true" ]; then
-              if [ -z "$ENV_B64" ]; then
-                echo "⚠️ PROD_ENV_B64 está vacío: se conserva el .env actual."
-              else
-                if [ -f .env ]; then cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)"; fi
-                ( umask 177; echo "$ENV_B64" | base64 -d | tr -d '\r' > .env.new )
-                if [ ! -s .env.new ]; then
-                  echo "❌ El .env decodificado está vacío. Abortando."
-                  rm -f .env.new
-                  exit 1
-                fi
-                mv .env.new .env
-                ls -1t .env.bak.* 2>/dev/null | tail -n +6 | xargs -r rm -f
-                echo "🔐 .env actualizado desde el secreto."
-              fi
-            fi
-
-            # 3.2 Login temporal a GHCR
+            # 3.1 Login temporal a GHCR
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
 
-            # 3.3 Ejecución secuencial (cuidando RAM): pull + recreate
+            # 3.2 Ejecución secuencial (cuidando RAM): pull + recreate
             for MS in $SERVICES_TO_PROCESS; do
               TAGVAR="$(echo "$MS" | tr 'a-z-' 'A-Z_')_TAG"
               export "$TAGVAR=$IMAGE_TAG"
