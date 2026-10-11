@@ -33,115 +33,243 @@ on:
           - task-board
           - notification-dispatcher
           - inventario
-          - scraper  
+          - scraper
           # ── Infraestructura (solo logs/restart, nunca deploy) ──
           - kafka
           - rabbitmq
           - init-kafka
 
+      sync_env:
+        description: 'Escribir el .env desde el secreto PROD_ENV_B64 antes de desplegar'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: panel-prod
+  cancel-in-progress: false
+
+env:
+  # Servicios que se despliegan con imagen compilada en GitHub (GHCR).
+  # Los demás siguen compilando en la EC2. Añade aquí cada servicio que migres.
+  MIGRATED: "scraper"
+
 jobs:
-  control_panel:
+  # ─────────────────────────────────────────────
+  # 1. PLAN: decide qué servicios se despliegan y cuáles hay que compilar
+  # ─────────────────────────────────────────────
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.p.outputs.services }}
+      build_matrix: ${{ steps.p.outputs.build_matrix }}
+      has_builds: ${{ steps.p.outputs.has_builds }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Calcular servicios
+        id: p
+        env:
+          ACTION: ${{ inputs.action_type }}
+          TARGET: ${{ inputs.target_service }}
+        run: |
+          ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario scraper"
+          INFRA_SERVICES="kafka rabbitmq init-kafka"
+          SERVICES=""
+
+          case "$ACTION" in
+            deploy_force|deploy_smart)
+              if echo "$INFRA_SERVICES" | grep -qw "$TARGET"; then
+                echo "🚫 '$TARGET' es infraestructura. Usa restart_only o view_logs."
+                exit 1
+              fi
+              ;;
+          esac
+
+          if [ "$ACTION" = "deploy_force" ]; then
+            if [ "$TARGET" = "all" ]; then
+              SERVICES="$ALL_SERVICES"
+            else
+              SERVICES="$TARGET"
+            fi
+
+          elif [ "$ACTION" = "deploy_smart" ]; then
+            echo "🔍 Analizando cambios del último commit (el servicio elegido se ignora)..."
+            CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+
+            declare -A PATHS=(
+              ["gateway"]="gateway/"
+              ["users"]="microservices/users/"
+              ["companies"]="microservices/companies/"
+              ["clients"]="microservices/clients/"
+              ["orders"]="microservices/orders/"
+              ["subscriptions"]="microservices/subscriptions/"
+              ["reports"]="microservices/reporting-hub/"
+              ["realtime"]="realtime/"
+              ["notifications"]="microservices/notifications/"
+              ["task-board"]="microservices/task-board/"
+              ["notification-dispatcher"]="microservices/notification-dispatcher/"
+              ["inventario"]="microservices/inventario/"
+              ["scraper"]="microservices/scraper/"
+            )
+
+            for MS in "${!PATHS[@]}"; do
+              if echo "$CHANGED" | grep -q "${PATHS[$MS]}"; then
+                SERVICES="$SERVICES $MS"
+              fi
+            done
+
+            if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|Dockerfile)'; then
+              echo "⚠️ Cambio estructural: se procesará todo."
+              SERVICES="$ALL_SERVICES"
+            fi
+          fi
+
+          SERVICES="$(echo $SERVICES | xargs)"
+
+          # De los servicios a desplegar, los migrados se compilan en GitHub
+          BUILD=()
+          for MS in $SERVICES; do
+            if echo " $MIGRATED " | grep -q " $MS "; then
+              BUILD+=("\"$MS\"")
+            fi
+          done
+          MATRIX="[$(IFS=,; echo "${BUILD[*]}")]"
+
+          echo "Servicios a desplegar: ${SERVICES:-ninguno}"
+          echo "Servicios a compilar en GitHub: $MATRIX"
+
+          echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+          echo "build_matrix=$MATRIX" >> "$GITHUB_OUTPUT"
+          if [ ${#BUILD[@]} -gt 0 ]; then
+            echo "has_builds=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_builds=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ─────────────────────────────────────────────
+  # 2. BUILD: compila y sube a GHCR los servicios migrados
+  # ─────────────────────────────────────────────
+  build:
+    needs: plan
+    if: needs.plan.outputs.has_builds == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 2
+      matrix:
+        service: ${{ fromJSON(needs.plan.outputs.build_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolver contexto e imagen
+        id: ctx
+        env:
+          SERVICE: ${{ matrix.service }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          case "$SERVICE" in
+            gateway)  CTX=gateway ;;
+            realtime) CTX=realtime ;;
+            reports)  CTX=microservices/reporting-hub ;;
+            *)        CTX="microservices/$SERVICE" ;;
+          esac
+          echo "path=$CTX" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')/tcm-$SERVICE" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ steps.ctx.outputs.path }}
+          push: true
+          platforms: linux/amd64        # linux/arm64 si `uname -m` en la EC2 da aarch64
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: |
+            ${{ steps.ctx.outputs.image }}:${{ github.sha }}
+            ${{ steps.ctx.outputs.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  # ─────────────────────────────────────────────
+  # 3. DEPLOY: logs, restart o despliegue en la EC2
+  # ─────────────────────────────────────────────
+  deploy:
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.plan.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Execute Management Task
+      - name: Ejecutar tarea en la EC2
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          ACTION: ${{ inputs.action_type }}
+          SERVICE: ${{ inputs.target_service }}
+          SYNC_ENV: ${{ inputs.sync_env }}
+          SERVICES_TO_PROCESS: ${{ needs.plan.outputs.services }}
+          MIGRATED: ${{ env.MIGRATED }}
+          IMAGE_TAG: ${{ github.sha }}
+          ENV_B64: ${{ secrets.PROD_ENV_B64 }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
           port: ${{ secrets.EC2_PORT }}
           command_timeout: 60m
+          envs: ACTION,SERVICE,SYNC_ENV,SERVICES_TO_PROCESS,MIGRATED,IMAGE_TAG,ENV_B64,GHCR_USER,GHCR_TOKEN
           script: |
             set -e
-            cd /home/ubuntu/proyects/tcm_microservicios || exit 1
-
-            ACTION="${{ github.event.inputs.action_type }}"
-            SERVICE="${{ github.event.inputs.target_service }}"
-
-            # Servicios de infraestructura: solo logs/restart, nunca deploy
+            cd /home/ubuntu/proyects/tcm_microservicios/docker || exit 1
+            COMPOSE="docker compose -f compose.prod.yml"
             INFRA_SERVICES="kafka rabbitmq init-kafka"
 
-            is_infra() {
-              echo "$INFRA_SERVICES" | grep -qw "$1"
-            }
+            is_infra()    { echo "$INFRA_SERVICES" | grep -qw "$1"; }
+            is_migrated() { echo " $MIGRATED " | grep -q " $1 "; }
 
             # --- 1. VER LOGS ---
-            if [ "$ACTION" == "view_logs" ]; then
-              if [ "$SERVICE" == "all" ]; then
-                echo "📋 Mostrando logs globales (resumen)..."
-                docker compose -f docker/compose.prod.yml logs --tail=50
+            if [ "$ACTION" = "view_logs" ]; then
+              if [ "$SERVICE" = "all" ]; then
+                echo "📋 Estado de los contenedores:"
+                $COMPOSE ps
+                echo "📋 Logs globales (resumen)..."
+                $COMPOSE logs --tail=50
               else
-                echo "📋 Mostrando logs de: $SERVICE"
-                docker compose -f docker/compose.prod.yml logs --tail=100 "$SERVICE"
+                echo "📋 Logs de: $SERVICE"
+                $COMPOSE logs --tail=100 "$SERVICE"
               fi
               exit 0
             fi
 
-            # --- 2. REINICIAR (SIN REBUILD) ---
-            if [ "$ACTION" == "restart_only" ]; then
-              if [ "$SERVICE" == "all" ]; then
+            # --- 2. REINICIAR (no relee el .env ni descarga imágenes nuevas) ---
+            if [ "$ACTION" = "restart_only" ]; then
+              if [ "$SERVICE" = "all" ]; then
                 echo "♻️ Reiniciando TODO el stack..."
-                docker compose -f docker/compose.prod.yml restart
+                $COMPOSE restart
               else
                 echo "♻️ Reiniciando servicio: $SERVICE"
-                docker compose -f docker/compose.prod.yml restart "$SERVICE"
+                $COMPOSE restart "$SERVICE"
               fi
               exit 0
             fi
 
-            # --- 3. DESPLIEGUE (SMART O FORZADO) ---
-
-            # Bloquear deploy directo a servicios de infraestructura
+            # --- 3. DESPLIEGUE ---
             if is_infra "$SERVICE"; then
               echo "🚫 '$SERVICE' es un servicio de infraestructura."
               echo "   Usa restart_only o view_logs para este servicio."
               exit 1
-            fi
-
-            cd docker
-            SERVICES_TO_PROCESS=""
-
-            # ✅ AGREGAR inventario a la lista de servicios de aplicación
-            ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario scraper"
-            if [ "$ACTION" == "deploy_smart" ]; then
-              echo "🔍 Analizando cambios automáticos..."
-              cd ..
-              CHANGED=$(git diff --name-only HEAD HEAD~1)
-              cd docker
-
-              declare -A PATHS=(
-                ["gateway"]="gateway/"
-                ["users"]="microservices/users/"
-                ["companies"]="microservices/companies/"
-                ["clients"]="microservices/clients/"
-                ["orders"]="microservices/orders/"
-                ["subscriptions"]="microservices/subscriptions/"
-                ["reports"]="microservices/reporting-hub/"
-                ["realtime"]="realtime/"
-                ["notifications"]="microservices/notifications/"
-                ["task-board"]="microservices/task-board/"
-                ["notification-dispatcher"]="microservices/notification-dispatcher/"
-                ["inventario"]="microservices/inventario/"
-                ["scraper"]="microservices/scraper/"
-              )
-
-              for MS in "${!PATHS[@]}"; do
-                if echo "$CHANGED" | grep -q "${PATHS[$MS]}"; then
-                  SERVICES_TO_PROCESS="$SERVICES_TO_PROCESS $MS"
-                fi
-              done
-
-              if echo "$CHANGED" | grep -qE '(docker/compose\.prod\.yml|Dockerfile)'; then
-                echo "⚠️ Cambio estructural: Se procesará todo."
-                SERVICES_TO_PROCESS="$ALL_SERVICES"
-              fi
-
-            elif [ "$ACTION" == "deploy_force" ]; then
-              if [ "$SERVICE" == "all" ]; then
-                SERVICES_TO_PROCESS="$ALL_SERVICES"
-              else
-                SERVICES_TO_PROCESS="$SERVICE"
-              fi
             fi
 
             if [ -z "$(echo $SERVICES_TO_PROCESS | xargs)" ]; then
@@ -149,15 +277,50 @@ jobs:
               exit 0
             fi
 
-            # --- EJECUCIÓN SECUENCIAL (CUIDANDO RAM) ---
-            for MS in $SERVICES_TO_PROCESS; do
-              echo "🔨 Procesando $MS (Build + Recreate)..."
-              docker compose -f compose.prod.yml up -d --build --force-recreate "$MS"
+            # 3.1 Escribir el .env desde el secreto (con copia de seguridad)
+            if [ "$SYNC_ENV" = "true" ]; then
+              if [ -z "$ENV_B64" ]; then
+                echo "⚠️ PROD_ENV_B64 está vacío: se conserva el .env actual."
+              else
+                if [ -f .env ]; then cp .env ".env.bak.$(date +%Y%m%d-%H%M%S)"; fi
+                ( umask 177; echo "$ENV_B64" | base64 -d | tr -d '\r' > .env.new )
+                if [ ! -s .env.new ]; then
+                  echo "❌ El .env decodificado está vacío. Abortando."
+                  rm -f .env.new
+                  exit 1
+                fi
+                mv .env.new .env
+                ls -1t .env.bak.* 2>/dev/null | tail -n +6 | xargs -r rm -f
+                echo "🔐 .env actualizado desde el secreto."
+              fi
+            fi
 
-              case "$MS" in
-                gateway|realtime|inventario) sleep 12 ;;  # ✅ Agregar inventario al sleep
-                *) sleep 8 ;;
-              esac
+            # 3.2 Login temporal a GHCR si hay servicios migrados
+            NEEDS_PULL=false
+            for MS in $SERVICES_TO_PROCESS; do
+              if is_migrated "$MS"; then NEEDS_PULL=true; fi
+            done
+            if [ "$NEEDS_PULL" = "true" ]; then
+              echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+              trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+            fi
+
+            # 3.3 Ejecución secuencial (cuidando RAM)
+            for MS in $SERVICES_TO_PROCESS; do
+              if is_migrated "$MS"; then
+                TAGVAR="$(echo "$MS" | tr 'a-z-' 'A-Z_')_TAG"
+                export "$TAGVAR=$IMAGE_TAG"
+                echo "📦 $MS desde imagen ($IMAGE_TAG): pull + recreate..."
+                $COMPOSE pull "$MS"
+                $COMPOSE up -d --no-deps --force-recreate --wait "$MS"
+              else
+                echo "🔨 $MS: build + recreate en la EC2..."
+                $COMPOSE up -d --build --force-recreate "$MS"
+                case "$MS" in
+                  gateway|realtime|inventario) sleep 12 ;;
+                  *) sleep 8 ;;
+                esac
+              fi
               echo "✅ $MS listo."
             done
 
