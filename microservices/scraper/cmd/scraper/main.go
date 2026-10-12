@@ -12,9 +12,10 @@ import (
 	_ "time/tzdata" // zonas horarias dentro del binario (imágenes Docker mínimas)
 
 	"github.com/tu-org/tcm-scraper/internal/config"
+	"github.com/tu-org/tcm-scraper/internal/events" // NUEVO
 	"github.com/tu-org/tcm-scraper/internal/gsmarena"
 	"github.com/tu-org/tcm-scraper/internal/ingest"
-	"github.com/tu-org/tcm-scraper/internal/messaging" // NUEVO
+	"github.com/tu-org/tcm-scraper/internal/messaging"
 	"github.com/tu-org/tcm-scraper/internal/store"
 )
 
@@ -58,28 +59,27 @@ func main() {
 		}
 	}()
 
+	// NUEVO: publisher de Kafka (tiempo real)
+	pub := events.NewPublisher(cfg.KafkaBrokers, log)
+
 	gs := gsmarena.NewClient(cfg.ScrapeDelay)
 	crawler := ingest.NewCrawler(gs, st, log, ingest.Options{
-		StaleAfter:     time.Duration(cfg.RefreshDays) * 24 * time.Hour,
-		ListingRefresh: time.Duration(cfg.ListingRefreshDays) * 24 * time.Hour,
-		MaxRequests:    cfg.MaxRequests,
-		MaxPages:       cfg.MaxPages,
-		MaxSpecs:       cfg.MaxSpecs,
-		CooldownBase:   cfg.CooldownBase,
-		CooldownMax:    cfg.CooldownMax,
+		StaleAfter:   time.Duration(cfg.RefreshDays) * 24 * time.Hour,
+		MaxRequests:  cfg.MaxRequests,
+		CooldownBase: cfg.CooldownBase,
+		CooldownMax:  cfg.CooldownMax,
+		Pub:          pub, // NUEVO
 	})
 
-	// ── NUEVO: consumer de RabbitMQ ──────────────────────────────────
 	consumer := messaging.NewConsumer(cfg.RabbitURL, cfg.RabbitQueue)
 	consumer.Handle("sync_technical_models", messaging.TechnicalModelsHandler(st, cfg.InternalSecret))
 	consumer.Handle("sync_models", messaging.ModelsHandler(st, cfg.InternalSecret))
 
-	consumerDone := make(chan struct{})  
+	consumerDone := make(chan struct{})
 	go func() {
 		defer close(consumerDone)
-		consumer.Run(ctx) // bloquea hasta que ctx se cancele (Ctrl+C / SIGTERM)
+		consumer.Run(ctx)
 	}()
-	// ─────────────────────────────────────────────────────────────────
 
 	crawlDone := make(chan struct{})
 	go func() {
@@ -90,19 +90,19 @@ func main() {
 	<-ctx.Done()
 	log.Info("apagando...")
 
-	// esperar a que el crawler guarde su estado antes de cerrar Mongo
 	select {
 	case <-crawlDone:
 	case <-time.After(15 * time.Second):
 		log.Warn("el crawler no terminó a tiempo")
 	}
 
-	// NUEVO: esperar al consumer para no cortar una consulta a medias
 	select {
 	case <-consumerDone:
 	case <-time.After(5 * time.Second):
 		log.Warn("el consumer no terminó a tiempo")
 	}
+
+	pub.Close() // NUEVO: después del crawler, que es quien publica
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

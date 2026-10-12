@@ -14,8 +14,7 @@ import { Cron } from '@nestjs/schedule';
 @Injectable()
 export class CatalogsService {
     constructor(
-        @Inject('MYSQL_READ_ONLY')
-        private mysql,
+
         @InjectRepository(Brand)
         private readonly brandRepo: Repository<Brand>,
 
@@ -37,16 +36,7 @@ export class CatalogsService {
 
     ) { }
 
-    // Se ejecuta todos los días a las 00:00 y 12:00
-    @Cron('0 0,12 * * *')
-    async handleScheduledSync() {
-        console.log('⏰ Ejecutando sincronización programada de catálogos...');
-        try {
-            await this.syncBranchModels();
-        } catch (err) {
-            console.error('❌ Error en sincronización programada:', err);
-        }
-    }
+
     async populateIfEmpty(): Promise<void> {
         const count = await this.deviceTypeRepo.count();
 
@@ -99,111 +89,6 @@ export class CatalogsService {
 
             console.log('Order statuses poblados correctamente.');
         }
-    }
-    /**
- * Sincroniza las tablas Brands y Models desde la base MySQL hacia PostgreSQL.
- * Solo inserta los registros que no existan en la caché local, manteniendo consistencia sin duplicados.
- */
-    async syncBranchModels() {
-        // ==========================
-        // 1. Leer datos desde MySQL
-        // ==========================
-        const [brands] = await this.mysql.query(`SELECT * FROM brands`);
-        const [models] = await this.mysql.query(`SELECT * FROM models`);
-
-        // ==========================
-        // 2. Leer PostgreSQL (estado actual)
-        // ==========================
-        const pgBrands = await this.brandRepo.find();
-        const pgModels = await this.modelRepo.find();
-
-        // ==========================
-        // Utilidad: inserción por lotes
-        // ==========================
-        const insertInBatches = async (
-            repo: any,
-            items: any[],
-            batchSize = 1000
-        ) => {
-            for (let i = 0; i < items.length; i += batchSize) {
-                const batch = items.slice(i, i + batchSize);
-                await repo.save(batch);
-            }
-        };
-
-        // =====================================================
-        // 3. SINCRONIZAR MARCAS (SIEMPRE PRIMERO)
-        // =====================================================
-        const existingBrandsSet = new Set(
-            pgBrands.map(b => b.brands_find_id)
-        );
-
-        const newBrands = brands
-            .filter(b => !existingBrandsSet.has(b.brands_find_id))
-            .map(b => ({
-                brands_id: b.brands_id,
-                brands_find_id: b.brands_find_id,
-                brands_name: b.brands_name,
-                brands_devices_count: b.brands_devices_count,
-                brands_laptops_count: b.brands_laptops_count,
-            }));
-
-        if (newBrands.length > 0) {
-            await insertInBatches(this.brandRepo, newBrands, 300);
-        }
-
-        // =====================================================
-        // 4. RELEER MARCAS (CRÍTICO EN PRODUCCIÓN)
-        // =====================================================
-        const syncedBrands = await this.brandRepo.find();
-        const syncedBrandIds = new Set(
-            syncedBrands.map(b => b.brands_id)
-        );
-
-        // =====================================================
-        // 5. SINCRONIZAR MODELOS (VALIDANDO FK)
-        // =====================================================
-        const existingModelsSet = new Set(
-            pgModels.map(m => m.models_find_id)
-        );
-
-        const newModels = models
-            .filter(m => !existingModelsSet.has(m.models_find_id))
-            // 🔴 Evita violación de FK en producción
-            .filter(m => syncedBrandIds.has(m.models_brands_id))
-            .map(m => ({
-                models_id: m.models_id,
-                models_find_id: m.models_find_id,
-                models_name: m.models_name,
-                models_brands_id: m.models_brands_id,
-                models_img_url: m.models_img_url,
-                models_description: m.models_description,
-            }));
-
-        if (newModels.length > 0) {
-            await insertInBatches(this.modelRepo, newModels, 1000);
-        }
-
-        // =====================================================
-        // 6. RESPUESTA FINAL
-        // =====================================================
-        if (newBrands.length === 0 && newModels.length === 0) {
-            return {
-                message: 'Sincronización omitida: no se detectaron cambios',
-                brands: syncedBrands.length,
-                models: pgModels.length,
-            };
-        }
-
-        return {
-            message: 'Sincronización realizada correctamente',
-            insertedBrands: newBrands.length,
-            insertedModels: newModels.length,
-            totalBrandsMysql: brands.length,
-            totalModelsMysql: models.length,
-            totalBrandsPostgres: syncedBrands.length,
-            totalModelsPostgres: pgModels.length + newModels.length,
-        };
     }
 
 

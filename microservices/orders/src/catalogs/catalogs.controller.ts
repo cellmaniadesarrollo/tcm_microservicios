@@ -5,16 +5,16 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 @Controller('catalogs')
 export class CatalogsController {
   constructor(private readonly catalogsService: CatalogsService) { }
-  async onModuleInit() {
-    try {
-      const data = await this.catalogsService.syncBranchModels()
-      await this.catalogsService.populateIfEmpty()
+  // async onModuleInit() {
+  //   try {
 
-    } catch (err) {
-      console.log(process.env.MYSQL_DB_HOST1)
-      console.error('❌ Error solicitando sincronización inicial :', err);
-    }
-  }
+  //     await this.catalogsService.populateIfEmpty()
+
+  //   } catch (err) {
+  //     console.log(process.env.MYSQL_DB_HOST1)
+  //     console.error('❌ Error solicitando sincronización inicial :', err);
+  //   }
+  // }
 
   @MessagePattern({ cmd: 'async_normalizations_start' })
   async onNormalizationsSync() {
