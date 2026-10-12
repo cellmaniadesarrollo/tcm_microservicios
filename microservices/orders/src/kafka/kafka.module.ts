@@ -9,10 +9,11 @@ import { CustomersEventsModule } from '../customers-events/customers-events.modu
 import { SpareAssignmentsModule } from '../spare-assignments/spare-assignments.module';
 import { ReportingHubModule } from '../reporting-hub/reporting-hub.module';
 import { InvoicesModule } from '../invoices/invoices.module';
+import { CatalogsModule } from '../catalogs/catalogs.module';
 @Global()
 @Module({
     imports: [CompaniesModule, UsersEmployeesEventsModule, UsersEmployeesEventsModule, CustomersEventsModule,
-        SpareAssignmentsModule, ReportingHubModule, InvoicesModule
+        SpareAssignmentsModule, ReportingHubModule, InvoicesModule, CatalogsModule
     ],
     providers: [KafkaProducerService, KafkaConsumerService, KafkaListenersOrchestrator],
     exports: [KafkaProducerService, KafkaConsumerService],

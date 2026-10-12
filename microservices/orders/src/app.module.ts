@@ -7,7 +7,6 @@ import { UsersEmployeesEventsModule } from './users-employees-events/users-emplo
 import { OrderWorkflowModule } from './order-workflow/order-workflow.module';
 import { DevicesModule } from './devices/devices.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
-import { MysqlRawModule } from './mysql-raw/mysql-raw.module';
 import { CompaniesModule } from './companies/companies.module';
 import { OrderFindingsModule } from './order-findings/order-findings.module';
 import { AwsS3Service } from './aws-s3/aws-s3.service';
@@ -38,8 +37,7 @@ import { OrderDiscountsModule } from './order-discounts/order-discounts.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }), InvoicesModule, CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule,
-    MysqlRawModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, ReportingHubModule,
+    }), InvoicesModule, CustomersEventsModule, UsersEmployeesEventsModule, OrderWorkflowModule, DevicesModule, CatalogsModule, CompaniesModule, OrderFindingsModule, AwsS3Module, NotificationsModule, ReportingHubModule,
     HealthModule,
     OrderExtrasModule,
     SearchHistoryModule,

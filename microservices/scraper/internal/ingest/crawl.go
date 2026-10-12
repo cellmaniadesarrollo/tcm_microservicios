@@ -10,6 +10,7 @@ import (
 
 	"github.com/tu-org/tcm-scraper/internal/gsmarena"
 	"github.com/tu-org/tcm-scraper/internal/store"
+	"github.com/tu-org/tcm-scraper/internal/events"
 )
 
 var (
@@ -29,6 +30,7 @@ type Options struct {
 	CooldownMax    time.Duration // tope de la espera
 	MaxConsecFails int           // fallos seguidos antes de pausar
 	Batch          int           // tamaño de lote de la cola de fichas
+	Pub *events.Publisher // opcional; nil = sin Kafka
 }
 
 type Crawler struct {
@@ -178,8 +180,6 @@ func (r *Crawler) crawlListing(ctx context.Context, state *store.CrawlState, bud
 		done[id] = true
 	}
 
-	pages := 0 // páginas leídas en esta ejecución
-
 	for _, b := range brands {
 		if done[b.FindID] {
 			continue
@@ -192,9 +192,6 @@ func (r *Crawler) crawlListing(ctx context.Context, state *store.CrawlState, bud
 		for path != "" {
 			if ctx.Err() != nil {
 				return ctx.Err()
-			}
-			if r.opt.MaxPages > 0 && pages >= r.opt.MaxPages {
-				return errPageLimit
 			}
 			if !budgetOK() {
 				return errBudget
@@ -210,27 +207,21 @@ func (r *Crawler) crawlListing(ctx context.Context, state *store.CrawlState, bud
 				return err
 			}
 			// 200 sin modelos en una marca que tiene dispositivos = página de bloqueo
-			if len(models) == 0 && b.DevicesCount > 0 {
-				return fmt.Errorf("%w: página vacía de %s (%s)", ErrSoftBlock, b.Name, path)
+			if len(models) == 0 && path == b.Path && b.DevicesCount > 0 {
+				return fmt.Errorf("%w: listado vacío de %s", ErrSoftBlock, b.Name)
 			}
 
-			if err := r.st.UpsertDevicesBasic(ctx, b, models); err != nil {
+			// KAFKA: el store devuelve solo los modelos que realmente se insertaron
+			created, err := r.st.UpsertDevicesBasic(ctx, b, models)
+			if err != nil {
 				return err
 			}
-			pages++
+			r.publishCreated(ctx, b, created) 
+
 			state.Stats.Devices += len(models)
 			state.BrandSourceID, state.NextPath = b.FindID, next
-			r.save(state) // aquí queda guardado el cursor (marca y página)
+			r.save(state)
 			path = next
-		}
-
-		// Verificar que la marca quedó completa antes de darla por hecha.
-		got, err := r.st.CountBrandDevices(ctx, b.FindID)
-		if err != nil {
-			return err
-		}
-		if b.DevicesCount > 0 && got < int64(b.DevicesCount)*9/10 {
-			return fmt.Errorf("%w: %s quedó incompleta (%d de %d)", ErrSoftBlock, b.Name, got, b.DevicesCount)
 		}
 
 		state.DoneBrands = append(state.DoneBrands, b.FindID)
@@ -240,15 +231,13 @@ func (r *Crawler) crawlListing(ctx context.Context, state *store.CrawlState, bud
 	}
 
 	state.ListingDone = true
-	state.ListingDoneAt = time.Now().UTC()
 	r.save(state)
 	return nil
 }
 
 func (r *Crawler) crawlSpecs(ctx context.Context, state *store.CrawlState, budgetOK func() bool) error {
 	staleBefore := time.Now().Add(-r.opt.StaleAfter)
-	consec := 0 // fallos seguidos
-	saved := 0  // fichas guardadas en esta ejecución
+	consec := 0
 
 	for {
 		refs, err := r.st.DevicesNeedingSpecs(ctx, staleBefore, time.Now().Add(-24*time.Hour), r.opt.Batch)
@@ -262,9 +251,6 @@ func (r *Crawler) crawlSpecs(ctx context.Context, state *store.CrawlState, budge
 		for _, d := range refs {
 			if ctx.Err() != nil {
 				return ctx.Err()
-			}
-			if r.opt.MaxSpecs > 0 && saved >= r.opt.MaxSpecs {
-				return errSpecsLimit
 			}
 			if !budgetOK() {
 				return errBudget
@@ -299,7 +285,8 @@ func (r *Crawler) crawlSpecs(ctx context.Context, state *store.CrawlState, budge
 			if err := r.st.SetDeviceSpecs(ctx, d.SourceID, specs); err != nil {
 				return err
 			}
-			saved++
+			r.publishTechnical(ctx, d.SourceID, specs) // KAFKA
+
 			state.Stats.Specs++
 			if state.Stats.Specs%25 == 0 {
 				r.save(state)
@@ -350,9 +337,11 @@ func (r *Crawler) syncNewModels(ctx context.Context, state *store.CrawlState, bu
 			if len(models) == 0 {
 				return fmt.Errorf("%w: página vacía de %s (%s)", ErrSoftBlock, b.Name, path)
 			}
-			if err := r.st.UpsertDevicesBasic(ctx, b, models); err != nil {
+			created, err := r.st.UpsertDevicesBasic(ctx, b, models)
+			if err != nil {
 				return err
 			}
+			r.publishCreated(ctx, b, created)
 
 			now, err := r.st.CountBrandDevices(ctx, b.FindID)
 			if err != nil {
@@ -411,3 +400,29 @@ func (r *Crawler) finish(state *store.CrawlState, runErr error) {
 	}
 	r.save(state)
 } 
+
+func (r *Crawler) publishCreated(ctx context.Context, b gsmarena.Brand, created []gsmarena.Model) {
+	for _, m := range created {
+		r.opt.Pub.Publish(ctx, events.TopicModelCreated, m.FindID, "MODEL_CREATED", events.ModelCreated{
+			NumericID:   int64(m.ID),
+			SourceID:    m.FindID,
+			Name:        m.Name,
+			ImgURL:      m.ImgURL,
+			Description: m.Description,
+			Brand: events.BrandPayload{
+				ID:       int64(b.ID),
+				SourceID: b.FindID,
+				Name:     b.Name,
+			},
+		})
+	}
+}
+
+func (r *Crawler) publishTechnical(ctx context.Context, sourceID string, sp *gsmarena.ModelSpecs) {
+	codes := sp.TechnicalModels()
+	if len(codes) == 0 {
+		return // equipos antiguos sin fila Models: nada que anunciar
+	}
+	r.opt.Pub.Publish(ctx, events.TopicModelTechnicalUp, sourceID, "MODEL_TECHNICAL_UPDATED",
+		events.ModelTechnical{SourceID: sourceID, TechnicalModels: codes})
+}

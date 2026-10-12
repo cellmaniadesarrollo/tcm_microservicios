@@ -104,6 +104,8 @@ services:
           taskboard.responses
           ms.order.invoice.emission.requested
           ms.billing.invoice.status.updated
+          ms.catalog.model.created
+          ms.catalog.model.technical.updated
         "
 
         echo "⏳ Sincronizando tópicos en Kafka..."

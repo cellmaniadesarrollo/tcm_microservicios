@@ -92,7 +92,7 @@ export class ModelsSyncService {
         );
     }
 
-    private async saveBatch(items: ModelItem[]) {
+    async saveBatch(items: ModelItem[]) {
         if (!items?.length) return { newBrands: 0, newModels: 0, existing: 0 };
 
         /** 1️⃣ Marcas: resolver cuáles existen y crear las que faltan */
