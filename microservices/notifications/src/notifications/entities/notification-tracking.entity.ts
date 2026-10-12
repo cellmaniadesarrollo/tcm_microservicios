@@ -28,6 +28,12 @@ export class NotificationTracking {
   })
   notificationId: string;
 
+  // 🆕 ID de la ORDEN (entityId de la notificación).
+  // Permite que el tracking sea el mismo sin importar cuál de las
+  // notificaciones hermanas (técnico/creador) se esté mostrando.
+  @Prop({ type: String, default: null })
+  entityId: string;
+
   @Prop({ 
     type: String, 
     default: null 
@@ -136,7 +142,10 @@ NotificationTrackingSchema.index({ notificationId: 1, createdAt: -1 });
 NotificationTrackingSchema.index({ notificationId: 1, isArchived: 1 });
 NotificationTrackingSchema.index({ notificationId: 1, isCalled: 1 });
 NotificationTrackingSchema.index({ notificationId: 1, hasProblems: 1 });
-NotificationTrackingSchema.index({ notificationId: 1, doesNotApply: 1 }); // Index por notificación y estado
-NotificationTrackingSchema.index({ isCalled: 1, hasProblems: 1, doesNotApply: 1 }); // Index compuesto para consultas globales
+NotificationTrackingSchema.index({ notificationId: 1, doesNotApply: 1 });
+NotificationTrackingSchema.index({ isCalled: 1, hasProblems: 1, doesNotApply: 1 });
 NotificationTrackingSchema.index({ archivedAt: 1 });
 NotificationTrackingSchema.index({ 'actions.performedAt': -1 });
+
+// 🆕 Índice para buscar el tracking por orden
+NotificationTrackingSchema.index({ entityId: 1, updatedAt: -1 });

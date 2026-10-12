@@ -783,10 +783,10 @@ export class NotificationsService {
         {
           $lookup: {
             from: 'notification_tracking',
-            let: { nid: '$_id' },
+            let: { oid: '$entityId' },
             pipeline: [
-              { $match: { $expr: { $eq: ['$notificationId', '$$nid'] } } },
-              { $sort: { createdAt: -1 } },
+              { $match: { $expr: { $eq: ['$entityId', '$$oid'] }, doesNotApply: { $ne: true } } },
+              { $sort: { isCalled: -1, hasProblems: -1, updatedAt: -1 } },
               { $limit: 1 },
               { $project: { isCalled: 1, hasProblems: 1, calledAt: 1, archivedAt: 1 } },
             ],

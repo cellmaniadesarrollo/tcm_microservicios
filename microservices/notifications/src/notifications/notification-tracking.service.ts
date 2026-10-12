@@ -39,6 +39,7 @@ export class NotificationTrackingService {
 
     const tracking = new this.trackingModel({
       ...createDto,
+      entityId: notification.entityId,
       actions: actions
     });
 
@@ -50,8 +51,13 @@ export class NotificationTrackingService {
    * Excluye automáticamente los registros marcados con doesNotApply: true
    */
   async findByNotificationId(notificationId: string): Promise<NotificationTrackingDocument[]> {
-    return await this.trackingModel.find({ 
-      notificationId,
+    const notification = await this.notificationModel.findById(notificationId);
+    if (!notification) {
+      throw new NotFoundException(`Notification with id ${notificationId} not found`);
+    }
+
+    return await this.trackingModel.find({
+      entityId: notification.entityId,
       doesNotApply: { $ne: true }
     })
       .sort({ createdAt: -1 })
@@ -68,21 +74,20 @@ export class NotificationTrackingService {
       throw new NotFoundException(`Notification with id ${notificationId} not found`);
     }
 
-    const existingTracking = await this.trackingModel.findOne({ 
-      notificationId,
+    // Se busca por ORDEN (entityId), no por notificación,
+    // así da igual cuál de las notificaciones hermanas muestre la lista.
+    const existingTracking = await this.trackingModel.findOne({
+      entityId: notification.entityId,
       doesNotApply: { $ne: true }
     })
-      .sort({ createdAt: -1 })
+      .sort({ isCalled: -1, hasProblems: -1, updatedAt: -1 })
       .exec();
-    
+
     if (existingTracking) {
       return existingTracking as any as NotificationTrackingDocument;
     }
-    
-    const newTracking = await this.create({ 
-      notificationId
-    });
-    
+
+    const newTracking = await this.create({ notificationId });
     return newTracking as any as NotificationTrackingDocument;
   }
 
