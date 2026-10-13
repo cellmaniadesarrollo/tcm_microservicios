@@ -94,21 +94,30 @@ export class CalendarService {
       throw new NotFoundException(`Tarea con ID ${id} no encontrada`);
     }
 
+    const previousUserId = task.userId;
+    let scheduleChanged = false;
+
     if (updateDto.dueDate) {
       const newDate = new Date(updateDto.dueDate);
       task.day = newDate.getDate();
       task.month = newDate.getMonth();
       task.year = newDate.getFullYear();
       task.dueDate = newDate;
+      scheduleChanged = true;
     }
 
     if (updateDto.dueTime !== undefined) {
       task.dueTime = updateDto.dueTime || null;
+      scheduleChanged = true;
     }
 
     const { dueDate, dueTime, ...updateData } = updateDto;
     Object.assign(task, updateData);
-    
+
+    if (scheduleChanged || task.userId !== previousUserId) {
+      task.notifiedAt = null;
+    }
+
     return await this.employeeTaskRepository.save(task);
   }
 

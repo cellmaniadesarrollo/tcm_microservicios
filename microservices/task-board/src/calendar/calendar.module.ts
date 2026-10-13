@@ -8,11 +8,14 @@ import { CalendarTcpController } from './calendar-tcp.controller';
 import { CalendarService } from './calendar.service';
 import { GoogleCalendarService } from './google-calendar.service';
 import { EmployeeTask } from './entities/employee-task.entity';
+import { PushNotificationsModule } from '../push-notifications/push-notifications.module';
+import { CalendarRemindersService } from './calendar-reminders.service';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([EmployeeTask]),
     ConfigModule,
+    PushNotificationsModule,
     // 🔥 AGREGAR cliente de users
     ClientsModule.register([
       {
@@ -29,6 +32,7 @@ import { EmployeeTask } from './entities/employee-task.entity';
   providers: [
     CalendarService,
     GoogleCalendarService,
+    CalendarRemindersService
   ],
   exports: [CalendarService, GoogleCalendarService],
 })

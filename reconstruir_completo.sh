@@ -1,304 +1,172 @@
-#!/bin/bash
-# ============================================
-# CONFIGURACIÓN - SIN CIERRE AUTOMÁTICO
-# ============================================
-set -u          # Variables no definidas = error
-# NOTA: NO usamos "set -e" para que no se cierre ante errores
+#!/usr/bin/env bash
+# ============================================================
+# TCM microservicios - levantar / reconstruir stack de Docker
+#
+# Uso:
+#   ./start-all.sh                  # levanta todo (sin reconstruir imágenes)
+#   ./start-all.sh --build          # reconstruye (con caché) y levanta
+#   ./start-all.sh --build --no-cache
+#   ./start-all.sh --restart        # detiene contenedores ms-* antes de levantar
+#   ./start-all.sh --prune          # además limpia imágenes/caché huérfanas (dangling)
+#   ./start-all.sh gateway inventario   # solo esos stacks
+#   ./start-all.sh --down           # detiene todos los stacks (conserva volúmenes)
+# ============================================================
+set -u   # sin "set -e": un fallo no debe cortar el resto
 
-# ============================================
-# VARIABLES
-# ============================================
-BASE="/media/lenovo/DISCO/MICROSERVICIOS/tcm_microservicios/docker"
+BASE="${BASE:-/media/lenovo/DISCO/MICROSERVICIOS/tcm_microservicios/docker}"
 ENV_FILE="$BASE/.env"
-ERRORS=0
-FAILED_SERVICES=()
+LOG_DIR="/tmp/tcm-logs"
+mkdir -p "$LOG_DIR"
 
-# ============================================
-# FUNCIÓN PARA MANEJAR ERRORES SIN CERRAR
-# ============================================
-handle_error() {
-    local service="$1"
-    local error_msg="$2"
-    
-    echo ""
-    echo "============================================"
-    echo "⚠️  ERROR EN: $service"
-    echo "============================================"
-    echo "❌ $error_msg"
-    echo "📝 Continuando con el siguiente servicio..."
-    echo "============================================"
-    echo ""
-    
-    ERRORS=$((ERRORS + 1))
-    FAILED_SERVICES+=("$service")
+# Orden de arranque (carpeta dentro de $BASE). Gateway va al final
+# porque depende del resto (incluye también "realtime").
+ALL_STACKS=(infra notifications services inventario task-boards gateway)
+# Stacks opcionales existentes en tu carpeta (descomenta si los usas):
+# ALL_STACKS+=(core notification-dispatcher reports scraping)
+
+BUILD=0; NO_CACHE=0; RESTART=0; PRUNE=0; DOWN=0
+SELECTED=()
+
+for arg in "$@"; do
+  case "$arg" in
+    --build)    BUILD=1 ;;
+    --no-cache) NO_CACHE=1; BUILD=1 ;;
+    --restart)  RESTART=1 ;;
+    --prune)    PRUNE=1 ;;
+    --down)     DOWN=1 ;;
+    -h|--help)  sed -n '2,13p' "$0"; exit 0 ;;
+    *)          SELECTED+=("$arg") ;;
+  esac
+done
+[ ${#SELECTED[@]} -eq 0 ] && SELECTED=("${ALL_STACKS[@]}")
+
+FAILED=()
+
+log()  { echo -e "\n=== $* ==="; }
+fail() { echo "❌ $1: $2"; FAILED+=("$1"); }
+
+compose() {  # compose <dir> <args...>
+  local dir="$1"; shift
+  ( cd "$BASE/$dir" && docker compose --env-file "$ENV_FILE" "$@" )
 }
 
-# ============================================
-# 1. LIMPIEZA CONTROLADA (SIN BORRAR VOLÚMENES)
-# ============================================
-echo "============================================"
-echo "🧹 LIMPIEZA SEGURA"
-echo "============================================"
-
-# Detener contenedores específicos
-echo "🛑 Deteniendo contenedores ms-..."
-docker stop $(docker ps -q --filter "name=ms-") 2>/dev/null || true
-docker rm -f $(docker ps -aq --filter "name=ms-") 2>/dev/null || true
-
-# Eliminar contenedores huérfanos
-echo "🗑️ Eliminando contenedores huérfanos..."
-docker rm -f $(docker ps -aq) 2>/dev/null || true
-
-# Limpiar imágenes no usadas
-echo "🖼️ Limpiando imágenes no usadas..."
-docker image prune -af 2>/dev/null || true
-
-# Limpiar caché
-echo "🏗️ Limpiando build cache..."
-docker builder prune -af 2>/dev/null || true
-
-# Limpiar redes no usadas
-echo "🌐 Limpiando redes no usadas..."
-docker network prune -f 2>/dev/null || true
-
-echo "✅ Limpieza segura completada (datos preservados)"
-echo ""
-
-# ============================================
-# 2. VERIFICAR .ENV
-# ============================================
-echo "============================================"
-echo "🔍 VERIFICANDO .ENV"
-echo "============================================"
-
-if [ ! -f "$ENV_FILE" ]; then
-    echo "⚠️ ADVERTENCIA: Archivo .env no encontrado"
-    echo "   Ruta: $ENV_FILE"
-    echo "   Los servicios podrían no funcionar correctamente"
-else
-    echo "✅ Archivo .env encontrado"
-fi
-echo ""
-
-# ============================================
-# 3. CREAR RED BACKEND
-# ============================================
-echo "============================================"
-echo "🌐 VERIFICANDO RED BACKEND"
-echo "============================================"
-
-if ! docker network inspect backend >/dev/null 2>&1; then
-    echo "📡 Creando red backend..."
-    docker network create backend 2>/dev/null || {
-        echo "⚠️ No se pudo crear la red (posiblemente ya existe)"
-    }
-else
-    echo "✅ Red backend ya existe"
-fi
-echo ""
-
-# ============================================
-# 4. FUNCIÓN MEJORADA PARA CONSTRUIR SERVICIOS
-# ============================================
-build_service() {
-    local name="$1"
-    local dir="$2"
-    
-    echo ""
-    echo "============================================"
-    echo "📦 CONSTRUYENDO: $name"
-    echo "============================================"
-    
-    # Verificar que existe el directorio
-    if [ ! -d "$BASE/$dir" ]; then
-        handle_error "$name" "El directorio $BASE/$dir no existe"
-        return 1
-    fi
-    
-    # Entrar al directorio
-    cd "$BASE/$dir" 2>/dev/null || {
-        handle_error "$name" "No se pudo acceder a $BASE/$dir"
-        return 1
-    }
-    
-    echo "📂 Directorio: $(pwd)"
-    
-    # Verificar docker-compose.yml
-    if [ ! -f "docker-compose.yml" ] && [ ! -f "compose.yml" ]; then
-        handle_error "$name" "No existe docker-compose.yml"
-        return 1
-    fi
-    
-    # INTENTAR BUILD (con manejo de errores)
-    echo "🔨 Ejecutando build --no-cache..."
-    if ! docker compose build --no-cache 2>&1 | tee /tmp/build_${name}.log; then
-        handle_error "$name" "Error en el build (ver logs en /tmp/build_${name}.log)"
-        return 1
-    fi
-    
-    # INTENTAR LEVANTAR (con manejo de errores)
-    echo "🚀 Levantando $name..."
-    if ! docker compose --env-file "$ENV_FILE" up -d 2>&1 | tee /tmp/up_${name}.log; then
-        # Verificar si es error de puerto
-        if grep -q "port is already allocated" /tmp/up_${name}.log; then
-            echo "⚠️ Conflicto de puertos detectado"
-            handle_port_conflict "$name"
-            # Intentar de nuevo con puertos cambiados
-            echo "🔄 Reintentando con puertos ajustados..."
-            if ! docker compose --env-file "$ENV_FILE" up -d 2>&1; then
-                handle_error "$name" "Error al levantar después de ajustar puertos"
-                return 1
-            fi
-        else
-            handle_error "$name" "Error al levantar el servicio (ver logs)"
-            return 1
-        fi
-    fi
-    
-    echo "✅ $name construido y levantado correctamente"
-    return 0
+# Espera a que un contenedor esté healthy (o running si no tiene healthcheck)
+wait_healthy() {
+  local container="$1" timeout="${2:-120}" waited=0 status
+  while [ $waited -lt "$timeout" ]; do
+    status=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || echo "missing")
+    case "$status" in healthy|running) echo "✅ $container: $status"; return 0 ;; esac
+    sleep 3; waited=$((waited + 3))
+  done
+  echo "⚠️  $container no quedó healthy en ${timeout}s (estado: $status)"
+  return 1
 }
 
-# ============================================
-# 5. FUNCIÓN PARA MANEJAR CONFLICTOS DE PUERTOS
-# ============================================
-handle_port_conflict() {
-    local service="$1"
-    
-    echo "🔧 Ajustando puertos para $service..."
-    
-    # Verificar qué puertos están en conflicto
-    if grep -q "3005" docker-compose.yml; then
-        echo "   Puerto 3005 está ocupado, cambiando a 3010..."
-        sed -i 's/- "3005:3005"/- "3010:3005"/g' docker-compose.yml
-        sed -i 's/- "3005:3005"/- "3010:3005"/g' docker-compose.yml 2>/dev/null || true
-        echo "   ✅ Puerto cambiado a 3010:3005"
-    fi
-    
-    if grep -q "3006" docker-compose.yml; then
-        echo "   Puerto 3006 está ocupado, cambiando a 3011..."
-        sed -i 's/- "3006:3006"/- "3011:3006"/g' docker-compose.yml
-        echo "   ✅ Puerto cambiado a 3011:3006"
-    fi
-    
-    if grep -q "3010" docker-compose.yml; then
-        echo "   Puerto 3010 está ocupado, cambiando a 3012..."
-        sed -i 's/- "3010:3010"/- "3012:3010"/g' docker-compose.yml
-        echo "   ✅ Puerto cambiado a 3012:3010"
-    fi
-    
-    echo "📄 Nuevos puertos configurados:"
-    grep -E "^[[:space:]]+- \"[0-9]+:[0-9]+\"" docker-compose.yml || true
-}
+# ---------- Pre-chequeos ----------
+[ -f "$ENV_FILE" ] || echo "⚠️  No existe $ENV_FILE; los servicios podrían fallar."
+docker info >/dev/null 2>&1 || { echo "❌ Docker no está disponible."; exit 1; }
 
-# ============================================
-# 6. LEVANTAR INFRAESTRUCTURA
-# ============================================
-echo "============================================"
-echo "🏗️ LEVANTANDO INFRAESTRUCTURA"
-echo "============================================"
-
-if [ ! -d "$BASE/infra" ]; then
-    echo "⚠️ No existe el directorio infra, saltando..."
-else
-    cd "$BASE/infra" || {
-        echo "⚠️ No se pudo acceder a infra"
-    }
-    
-    echo "📂 Directorio: $(pwd)"
-    
-    # Build infra (sin fallar)
-    echo "🔨 Preparando infraestructura..."
-    docker compose build --no-cache 2>/dev/null || true
-    
-    # Levantar infra (sin fallar)
-    echo "🚀 Levantando Kafka, Redis, RabbitMQ..."
-    docker compose --env-file "$ENV_FILE" up -d 2>/dev/null || {
-        echo "⚠️ Error al levantar infraestructura (continuando...)"
-    }
+# ---------- Apagar ----------
+if [ $DOWN -eq 1 ]; then
+  log "Deteniendo stacks (volúmenes conservados)"
+  for (( i=${#SELECTED[@]}-1; i>=0; i-- )); do
+    s="${SELECTED[$i]}"
+    [ -d "$BASE/$s" ] && compose "$s" down --remove-orphans
+  done
+  exit 0
 fi
 
-echo ""
-echo "⏳ Esperando 15 segundos para servicios base..."
-sleep 15
+# ---------- Limpieza opcional ----------
+if [ $RESTART -eq 1 ]; then
+  log "Deteniendo contenedores del proyecto"
+  for s in "${SELECTED[@]}"; do
+    [ -d "$BASE/$s" ] && compose "$s" down --remove-orphans 2>/dev/null
+  done
+fi
 
-# ============================================
-# 7. CONSTRUIR SERVICIOS
-# ============================================
-echo ""
-echo "============================================"
-echo "🏗️ RECONSTRUYENDO SERVICIOS"
-echo "============================================"
+if [ $PRUNE -eq 1 ]; then
+  log "Limpieza de imágenes/caché huérfanas (dangling)"
+  docker image prune -f
+  docker builder prune -f
+fi
 
-# Lista de servicios a construir
-build_service "Services" "services"
-build_service "Gateway" "gateway"
-# build_service "Realtime" "realtime"  # COMENTADO - NO EXISTE
-build_service "Task Boards" "task-boards"
-build_service "Notifications" "notifications"
-build_service "Inventario" "inventario"
+# ---------- Red ----------
+docker network inspect backend >/dev/null 2>&1 || {
+  log "Creando red backend"; docker network create backend
+}
 
-# ============================================
-# 8. MOSTRAR RESULTADOS
-# ============================================
-echo ""
-echo "============================================"
-echo "📊 RESULTADOS FINALES"
-echo "============================================"
+# ---------- Levantar ----------
+for s in "${SELECTED[@]}"; do
+  log "Stack: $s"
+  if [ ! -f "$BASE/$s/docker-compose.yml" ] && [ ! -f "$BASE/$s/compose.yml" ]; then
+    fail "$s" "no existe docker-compose.yml en $BASE/$s"; continue
+  fi
 
-# Mostrar errores si los hubo
-if [ $ERRORS -gt 0 ]; then
-    echo "⚠️ Se encontraron $ERRORS errores:"
-    for service in "${FAILED_SERVICES[@]}"; do
-        echo "   ❌ $service"
+  if [ $BUILD -eq 1 ]; then
+    flags=(); [ $NO_CACHE -eq 1 ] && flags=(--no-cache)
+    echo "🔨 build ${flags[*]:-}"
+    # Build secuencial (evita cortes de red por descargas npm en paralelo) y hasta 3 intentos
+    ok=0
+    for attempt in 1 2 3; do
+      COMPOSE_PARALLEL_LIMIT=1 compose "$s" build "${flags[@]}" 2>&1 | tee "$LOG_DIR/build_$s.log"
+      if [ "${PIPESTATUS[0]}" -eq 0 ]; then ok=1; break; fi
+      echo "⚠️  Build de $s falló (intento $attempt/3), reintentando en 5s..."
+      sleep 5
     done
-    echo ""
-    echo "💡 Los servicios fallidos pueden requerir atención manual"
-    echo "   Revisa los logs en /tmp/build_*.log y /tmp/up_*.log"
+    [ $ok -eq 0 ] && { fail "$s" "falló el build tras 3 intentos (ver $LOG_DIR/build_$s.log)"; continue; }
+  fi
+
+  echo "🚀 up -d"
+  compose "$s" up -d 2>&1 | tee "$LOG_DIR/up_$s.log"
+  if [ "${PIPESTATUS[0]}" -ne 0 ]; then
+    if grep -qi "port is already allocated" "$LOG_DIR/up_$s.log"; then
+      fail "$s" "puerto ocupado (revisa 'docker ps' / 'ss -ltnp'); no se modifican los compose"
+    else
+      fail "$s" "falló el arranque (ver $LOG_DIR/up_$s.log)"
+    fi
+    continue
+  fi
+
+  # Esperas específicas para dependencias base
+  case "$s" in
+    infra)
+      wait_healthy rabbitmq 120
+      wait_healthy kafka 120
+      wait_healthy redis-realtime 60
+      ;;
+    notifications)
+      wait_healthy ms-notifications-rabbitmq 90
+      wait_healthy ms-notifications-mongodb 90
+      ;;
+  esac
+done
+
+# ---------- Resumen ----------
+log "Resumen"
+if [ ${#FAILED[@]} -gt 0 ]; then
+  echo "⚠️  Stacks con error: ${FAILED[*]}"
+  echo "   Logs: $LOG_DIR/"
 else
-    echo "✅ Todos los servicios se reconstruyeron exitosamente"
+  echo "✅ Todo levantado correctamente"
 fi
 
-echo ""
-echo "📊 Contenedores activos:"
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "⚠️ No se pudo listar contenedores"
+echo
+docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-echo ""
-echo "📋 Puertos disponibles:"
-echo "  - Gateway:        http://localhost:3000"
-echo "  - Notifications:  http://localhost:3010"
-echo "  - Products:       http://localhost:3020"
-echo "  - Inventario:     http://localhost:3030"
-echo "  - Task Boards:    http://localhost:3005"
-echo "  - Swagger Inv:    http://localhost:3030/api/docs"
+cat <<'EOF'
 
-# Mostrar puertos actuales de inventario
-echo ""
-echo "🔍 Puertos de Inventario:"
-docker port ms-inventario 2>/dev/null || echo "⚠️ Inventario no está corriendo"
+Puertos (host):
+  Gateway            http://localhost:3000
+  Realtime           http://localhost:3002
+  Notifications      http://localhost:3010   (RPC 3003)
+  Task Board         http://localhost:3005   -> contenedor 3001
+  Inventario         http://localhost:3030   (docs: /api/docs)
+  RabbitMQ (infra)   http://localhost:15672
+  RabbitMQ (notif.)  http://localhost:15673
+  Mongo Express      http://localhost:8081
+  Kafka 9092/9094 · Redis 6379
 
-echo ""
-echo "💾 Espacio en disco:"
-df -h /media/lenovo/DISCO/ 2>/dev/null || df -h / 2>/dev/null
+Logs de un servicio:  docker logs -f ms-gateway --tail=50
+EOF
 
-echo ""
-echo "============================================"
-if [ $ERRORS -eq 0 ]; then
-    echo "🎉 ¡TODO COMPLETADO CON ÉXITO!"
-else
-    echo "⚠️ PROCESO COMPLETADO CON $ERRORS ERRORES"
-    echo "   Revisa los logs para más detalles"
-fi
-echo "============================================"
-echo ""
-
-# Mostrar cómo ver logs
-if [ $ERRORS -gt 0 ]; then
-    echo "📝 Para ver logs de errores:"
-    echo "   cat /tmp/build_*.log"
-    echo "   cat /tmp/up_*.log"
-    echo ""
-    echo "📝 Para ver logs de un servicio específico:"
-    echo "   docker logs ms-inventario --tail=50"
-    echo "   docker logs ms-gateway --tail=50"
-fi
+[ ${#FAILED[@]} -eq 0 ]

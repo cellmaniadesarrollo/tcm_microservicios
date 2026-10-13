@@ -69,4 +69,8 @@ export class EmployeeTask {
 
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt: Date;
+
+  // Cuándo se envió el aviso (evita repetirlo)
+  @Column({ name: 'notified_at', type: 'timestamp', nullable: true })
+  notifiedAt: Date | null;
 }
