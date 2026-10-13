@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { CatalogsService } from './catalogs.service';
 import { CatalogsController } from './catalogs.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { MysqlRawModule } from '../mysql-raw/mysql-raw.module';
 import { Brand } from './entities/brand.entity';
 import { Model } from './entities/model.entity';
 import { DeviceType } from './entities/device_type.entity';
@@ -17,12 +16,13 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { TechnicalModelsSyncService } from './technical-models-sync.service';
 import { ModelTechnicalCode } from './entities/model-technical-code.entity';
 import { ModelsSyncService } from './models-sync.service';
+import { CatalogsEventsListener } from './catalogs-events.listener';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Brand, Model, DeviceType, OrderPriority, OrderType, OrderStatus,
     GeoCountry,
     GeoDivision, ModelTechnicalCode
-  ]), MysqlRawModule,
+  ]),
   ScheduleModule.forRoot(),
   ClientsModule.register([
     // ...tus clientes actuales,
@@ -38,8 +38,9 @@ import { ModelsSyncService } from './models-sync.service';
   ]),
 
   ],
-  providers: [CatalogsService, CatalogsSeeder, TechnicalModelsSyncService, ModelsSyncService],
+  providers: [CatalogsService, CatalogsSeeder, TechnicalModelsSyncService, ModelsSyncService, CatalogsEventsListener],
   controllers: [CatalogsController],
+  exports: [CatalogsEventsListener]
 
 })
 export class CatalogsModule { }

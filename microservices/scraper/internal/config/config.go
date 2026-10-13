@@ -27,6 +27,7 @@ type Config struct {
 	ListingRefreshDays int           // días antes de volver a recorrer el listado
 	CooldownBase       time.Duration // espera tras el primer bloqueo
 	CooldownMax        time.Duration // tope de la espera
+	KafkaBrokers string // KAFKA_BOOTSTRAP_SERVERS (varios separados por coma)
 }
 
 func Load() Config {
@@ -41,6 +42,7 @@ func Load() Config {
 		InternalSecret: get("INTERNAL_SECRET", ""),
 
 		ScheduleTZ: get("SCHEDULE_TZ", "America/Guayaquil"),
+		KafkaBrokers: get("KAFKA_BOOTSTRAP_SERVERS", ""),
 	}
 
 	if cfg.Env == "production" {

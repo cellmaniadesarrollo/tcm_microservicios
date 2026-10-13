@@ -22,9 +22,11 @@ func deviceFilter(sourceID string) bson.D {
 }
 
 // UpsertDevicesBasic guarda en lote los datos del listado sin tocar la ficha ya guardada.
-func (s *Store) UpsertDevicesBasic(ctx context.Context, brand gsmarena.Brand, models []gsmarena.Model) error {
+// UpsertDevicesBasic guarda en lote los datos del listado sin tocar la ficha ya guardada.
+// Devuelve los modelos que NO existían y fueron insertados.
+func (s *Store) UpsertDevicesBasic(ctx context.Context, brand gsmarena.Brand, models []gsmarena.Model) ([]gsmarena.Model, error) {
 	if len(models) == 0 {
-		return nil
+		return nil, nil
 	}
 	now := time.Now().UTC()
 	ops := make([]mongo.WriteModel, 0, len(models))
@@ -50,10 +52,16 @@ func (s *Store) UpsertDevicesBasic(ctx context.Context, brand gsmarena.Brand, mo
 			}).
 			SetUpsert(true))
 	}
-	if _, err := s.db.Collection("devices").BulkWrite(ctx, ops, options.BulkWrite().SetOrdered(false)); err != nil {
-		return fmt.Errorf("bulk upsert devices (%s): %w", brand.FindID, err)
+	res, err := s.db.Collection("devices").BulkWrite(ctx, ops, options.BulkWrite().SetOrdered(false))
+	if err != nil {
+		return nil, fmt.Errorf("bulk upsert devices (%s): %w", brand.FindID, err)
 	}
-	return nil
+
+	created := make([]gsmarena.Model, 0, len(res.UpsertedIDs))
+	for idx := range res.UpsertedIDs {
+		created = append(created, models[idx])
+	}
+	return created, nil
 }
 
 // SetDeviceSpecs guarda la ficha completa de un dispositivo ya listado.
