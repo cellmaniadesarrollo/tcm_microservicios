@@ -34,32 +34,44 @@ export class CalendarRemindersService {
       },
     });
 
+    // 👇 LOG NUEVO: confirma que el cron corre y cuántos candidatos encuentra
+    this.logger.log(`⏱ Cron recordatorios: ${candidates.length} candidatos`);
+
     for (const task of candidates) {
       const dueAt = getDueAt(task.dueDate, task.dueTime);
       if (!dueAt) continue;
 
       const late = now.getTime() - dueAt.getTime();
-      if (late < 0 || late > MAX_LATE_MS) continue; // aún no es la hora, o ya pasó mucho
+      if (late < 0 || late > MAX_LATE_MS) continue;
 
-      // Reclamar el aviso de forma atómica (evita duplicados si hay 2 instancias)
+      // Reclamar el aviso de forma atómica
       const claim = await this.repo.update(
         { id: task.id, notifiedAt: IsNull() },
         { notifiedAt: now },
       );
       if (!claim.affected) continue;
 
+      // 👇 BLOQUE CAMBIADO: antes solo hacía sendToUser sin revisar el resultado
       try {
-        await this.pushService.sendToUser(task.userId, {
+        const sent = await this.pushService.sendToUser(task.userId, {
           userId: task.userId,
           title: `⏰ ${task.title}`,
           body: task.description || 'Tienes un evento programado ahora',
           data: {
-            url: '/taskboard/calendar', // ajusta a tu ruta real
+            url: '/taskboard/calendar',
             taskId: task.id,
             kind: 'calendar_reminder',
           },
         });
+
+        this.logger.log(`🔔 Tarea ${task.id} (user ${task.userId}): enviados=${sent}`);
+
+        if (sent === 0) {
+          // no se entregó: liberar para reintentar dentro de la ventana de 1 hora
+          await this.repo.update({ id: task.id }, { notifiedAt: null });
+        }
       } catch (e: any) {
+        await this.repo.update({ id: task.id }, { notifiedAt: null });
         this.logger.error(`❌ Aviso ${task.id} falló: ${e?.message}`);
       }
     }
