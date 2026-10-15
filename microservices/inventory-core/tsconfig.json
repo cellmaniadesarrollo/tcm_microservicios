@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "resolveJsonModule": true, 
+        "esModuleInterop": true, 
+    "module": "commonjs", // Mantenemos CommonJS para este módulo/proyecto
+    "target": "ES2023",
+    "outDir": "./dist",
+    
+    /* Cambiamos baseUrl por paths para silenciar el error */
+    "paths": {
+      "*": ["./*"]
+    },
+
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "sourceMap": true,
+    "incremental": true,
+    "skipLibCheck": true,
+    "strictNullChecks": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": false,
+    "strictBindCallApply": false,
+    "noFallthroughCasesInSwitch": false
+  }
+}

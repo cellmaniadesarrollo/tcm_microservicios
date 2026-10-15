@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+# Necesario para chokidar (watching en Docker)
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY package*.json ./
+
+# instalar chokidar, ts-node-dev y dependencias
+RUN npm install
+
+# copiar el código FUERA DE aquí, porque usas volumes
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "run", "start"] 

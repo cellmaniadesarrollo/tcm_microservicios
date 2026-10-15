@@ -14,6 +14,8 @@ import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/p
 import { GRUPOS_CON_ACCESO_ESPERA_PAGO } from './part-request.constants';
 import { PartRequestTravelItem } from './entities/part-request-travel-item.entity';
 import { formatPartRequestNumber, nextCompanyNumber } from './helpers/company-numbering.helper';
+import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
+import { buildProgress } from './utils/part-request-progress.util';
 
 /**
  * Dueño del ciclo de vida base de PartRequest: creación, listados, lectura
@@ -218,6 +220,50 @@ export class PartRequestService {
 
         return result;
     }
+    // Pega estos métodos dentro de tu clase de servicio (reemplazan los existentes).
+    // Requiere el archivo part-request-progress.util.ts que te di antes.
+    //
+    // Imports necesarios arriba del servicio (ajusta rutas relativas):
+    //   import { PartRequestStatusHistory } from './entities/part-request-status-history.entity';
+    //   import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
+    //   import { buildProgress } from './part-request-progress.util';
+
+    // ───────────────────────── Helpers privados ─────────────────────────
+
+    private async loadActors(ids: Array<string | null | undefined>) {
+        const map = new Map<string, any>();
+        const unique = [...new Set(ids.filter((x): x is string => !!x))];
+        if (!unique.length) return map;
+
+        const repo = this.partRequestRepo.manager.getRepository(UserEmployeeCache);
+        const users = await repo.createQueryBuilder('u').whereInIds(unique).getMany();
+        const pk = repo.metadata.primaryColumns[0];
+        for (const u of users) map.set(String(pk.getEntityValue(u)), mapUser(u));
+        return map;
+    }
+
+    private async loadHistorialMap(ids: number[]) {
+        const map = new Map<number, any[]>();
+        if (!ids.length) return map;
+
+        const rows = await this.partRequestRepo.manager
+            .getRepository(PartRequestStatusHistory)
+            .find({
+                where: { part_request_id: In(ids) },
+                order: { fecha: 'ASC', id: 'ASC' },
+            });
+
+        const actors = await this.loadActors(rows.map((r) => r.actor_id));
+        for (const r of rows) {
+            const list = map.get(r.part_request_id) ?? [];
+            list.push({ ...r, actor: actors.get(r.actor_id) ?? null });
+            map.set(r.part_request_id, list);
+        }
+        return map;
+    }
+
+    // ───────────────────────── listPartRequests ─────────────────────────
+
     async listPartRequests(
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
@@ -229,6 +275,7 @@ export class PartRequestService {
         const qb = this.partRequestRepo
             .createQueryBuilder('pr')
             .leftJoinAndSelect('pr.order', 'order')
+            .leftJoinAndSelect('order.currentStatus', 'orderStatus')
             .leftJoinAndSelect('pr.technician', 'technician')
             .leftJoinAndSelect('pr.responsableBusqueda', 'responsableBusqueda')
             .leftJoinAndSelect('pr.responsableRecepcion', 'responsableRecepcion')
@@ -302,18 +349,44 @@ export class PartRequestService {
             .take(limit)
             .getManyAndCount();
 
-        const data = partRequests.map((pr) => ({
-            ...pr,
-            numero_formateado: formatPartRequestNumber(pr.numero),
-            fecha_solicitud: pr.createdAt,
-            order_number: pr.order?.order_number ?? null,
-            technician: mapUser(pr.technician),
-            responsableBusqueda: mapUser(pr.responsableBusqueda),
-            responsableRecepcion: mapUser(pr.responsableRecepcion),
-            litigio_resuelto: pr.arrival?.resuelto ?? false,
-            fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
-            descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
-        }));
+        // Historial en una segunda consulta (evita problemas de skip/take + join a colección)
+        const historialMap = await this.loadHistorialMap(partRequests.map((p) => p.id));
+
+        const data = partRequests.map((pr) => {
+            const historial = historialMap.get(pr.id) ?? [];
+            const progreso = buildProgress({
+                estado: pr.estado,
+                order_id: pr.order_id,
+                historial,
+                arrival: pr.arrival,
+                orderStatusName: pr.order?.currentStatus?.name ?? null,   // 👈 esta
+            });
+
+            return {
+                ...pr,
+                numero_formateado: formatPartRequestNumber(pr.numero),
+                fecha_solicitud: pr.createdAt,
+                order_number: pr.order?.order_number ?? null,
+                technician: mapUser(pr.technician),
+                responsableBusqueda: mapUser(pr.responsableBusqueda),
+                responsableRecepcion: mapUser(pr.responsableRecepcion),
+                litigio_resuelto: pr.arrival?.resuelto ?? false,
+                fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
+                descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
+
+                // ─── Nuevo ───
+                historial,
+                progreso,
+                estado_visual: progreso.estado_visual,
+                estado_visual_label: progreso.estado_visual_label,
+                // Solo cuando la solicitud está completada
+                // (quita "progreso.completada &&" para mostrarlo siempre que haya orden)
+                estado_orden:
+                    progreso.completada && pr.order?.currentStatus
+                        ? { id: pr.order.currentStatus.id, name: pr.order.currentStatus.name }
+                        : null,
+            };
+        });
 
         return {
             data,
@@ -329,10 +402,13 @@ export class PartRequestService {
         };
     }
 
+    // ───────────────────────── getPartRequestFullData ─────────────────────────
+
     async getPartRequestFullData(id: number, user: { companyId: string; userGroups?: string[] }) {
         const pr = await this.partRequestRepo
             .createQueryBuilder('pr')
             .leftJoinAndSelect('pr.order', 'order')
+            .leftJoinAndSelect('order.currentStatus', 'orderStatus')
             .leftJoinAndSelect('order.customer', 'customer')
             .leftJoinAndSelect('order.device', 'device')
             .leftJoinAndSelect('device.model', 'model')
@@ -424,34 +500,30 @@ export class PartRequestService {
             shipping = { ...pr.shipping, attachments: shippingAttachments };
         }
 
-        // Fotos de llegada + validación
+        // Fotos de llegada + validación + resolución del litigio
         let arrival: (typeof pr.arrival & {
             attachments_llegada: Attachment[];
             attachments_validacion: Attachment[];
+            attachments_resolucion: Attachment[];
         }) | null = null;
 
         if (pr.arrival) {
-            const [llegadaAttachments, validacionAttachments] = await Promise.all([
+            const findByType = (entity_type: AttachmentEntityType) =>
                 this.attachmentRepo.find({
-                    where: {
-                        entity_type: AttachmentEntityType.PART_REQUEST_ARRIVAL,
-                        entity_id: pr.arrival.id,
-                        is_active: true,
-                    },
-                }),
-                this.attachmentRepo.find({
-                    where: {
-                        entity_type: AttachmentEntityType.PART_REQUEST_ARRIVAL_APPROVAL,
-                        entity_id: pr.arrival.id,
-                        is_active: true,
-                    },
-                }),
+                    where: { entity_type, entity_id: pr.arrival!.id, is_active: true },
+                });
+
+            const [llegadaAttachments, validacionAttachments, resolucionAttachments] = await Promise.all([
+                findByType(AttachmentEntityType.PART_REQUEST_ARRIVAL),
+                findByType(AttachmentEntityType.PART_REQUEST_ARRIVAL_APPROVAL),
+                findByType(AttachmentEntityType.PART_REQUEST_LITIGIO_RESOLUCION),
             ]);
 
             arrival = {
                 ...pr.arrival,
                 attachments_llegada: llegadaAttachments,
                 attachments_validacion: validacionAttachments,
+                attachments_resolucion: resolucionAttachments,
             };
         }
 
@@ -484,14 +556,69 @@ export class PartRequestService {
             order: { createdAt: 'DESC' },
         });
 
+        // ─── Historial, actores y progreso ───
+        const historial = [...(pr.historial ?? [])].sort(
+            (a, b) => +new Date(a.fecha) - +new Date(b.fecha) || a.id - b.id,
+        );
+
+        const actors = await this.loadActors([
+            ...historial.map((h) => h.actor_id),
+            arrival?.registrado_por_id,
+            arrival?.validado_por_id,
+        ]);
+
+        const progreso = buildProgress({
+            estado: pr.estado,
+            order_id: pr.order_id,
+            historial,
+            arrival: pr.arrival,
+            orderStatusName: pr.order?.currentStatus?.name ?? null,   // 👈 esta
+        });
+
+        // ─── Bloque de litigio ───
+        // Nota: asumo que las fotos de apertura del litigio usan PART_REQUEST_ARRIVAL_APPROVAL.
+        const a = arrival;
+        const litigio =
+            a && (a.resultado_validacion === 'LITIGIO' || a.resuelto)
+                ? {
+                    estado: a.resuelto ? 'RESUELTO' : 'ABIERTO',
+                    resuelto: a.resuelto,
+                    apertura: {
+                        fecha: a.fecha_validacion ?? null,
+                        por: a.validado_por_id ? actors.get(a.validado_por_id) ?? null : null,
+                        categoria: a.motivo_categoria ?? null,
+                        motivo: a.motivo_rechazo ?? null,
+                        cantidad_llegada: a.cantidad,
+                        attachments: a.attachments_validacion,
+                    },
+                    resolucion: a.resuelto
+                        ? {
+                            fecha: a.fecha_resolucion ?? null,
+                            por: a.resueltoPor ? mapUser(a.resueltoPor) : null,
+                            descripcion: a.descripcion_resolucion ?? null,
+                            attachments: a.attachments_resolucion,
+                        }
+                        : null,
+                }
+                : null;
+
         const result: any = {
             id: pr.id,
-            numero: pr.numero ?? null,                                  // <-- nuevo
-            numero_formateado: formatPartRequestNumber(pr.numero),      // <-- nuevo
+            numero: pr.numero ?? null,
+            numero_formateado: formatPartRequestNumber(pr.numero),
             fecha_solicitud: pr.createdAt,
             descripcion: pr.descripcion,
             tipo: pr.tipo,
             estado: pr.estado,
+            estado_visual: progreso.estado_visual,
+            estado_visual_label: progreso.estado_visual_label,
+            progreso,
+            litigio,
+            // Solo cuando la solicitud está completada (el estado también va siempre dentro de "order")
+            estado_orden:
+                progreso.completada && pr.order?.currentStatus
+                    ? { id: pr.order.currentStatus.id, name: pr.order.currentStatus.name }
+                    : null,
             technician: mapUser(pr.technician),
             responsableBusqueda: mapUser(pr.responsableBusqueda),
             responsableRecepcion: mapUser(pr.responsableRecepcion),
@@ -532,6 +659,10 @@ export class PartRequestService {
                 ? {
                     ...arrival,
                     resueltoPor: arrival.resueltoPor ? mapUser(arrival.resueltoPor) : null,
+                    registradoPor: actors.get(arrival.registrado_por_id) ?? null,
+                    validadoPor: arrival.validado_por_id
+                        ? actors.get(arrival.validado_por_id) ?? null
+                        : null,
                 }
                 : null,
             travelItem: travelItem
@@ -558,6 +689,9 @@ export class PartRequestService {
                     id: pr.order.id,
                     order_number: pr.order.order_number,
                     public_id: pr.order.public_id ?? null,
+                    estado: pr.order.currentStatus
+                        ? { id: pr.order.currentStatus.id, name: pr.order.currentStatus.name }
+                        : null,
                     customer: pr.order.customer
                         ? {
                             id: pr.order.customer.id,
@@ -585,7 +719,7 @@ export class PartRequestService {
                         : null,
                 }
                 : null,
-            historial: pr.historial ?? [],
+            historial: historial.map((h) => ({ ...h, actor: actors.get(h.actor_id) ?? null })),
             attachments,
         };
 
@@ -609,6 +743,7 @@ export class PartRequestService {
         if (arrival) {
             toSign.push({ id: arrival.id, attachments: arrival.attachments_llegada });
             toSign.push({ id: arrival.id, attachments: arrival.attachments_validacion });
+            toSign.push({ id: arrival.id, attachments: arrival.attachments_resolucion });
         }
         await enrichPartRequestAttachmentsWithSignedUrls(toSign, this.awsS3Service);
 
@@ -1033,4 +1168,12 @@ export class PartRequestService {
             dias_umbral: diasUmbral,
         };
     }
+
+
+
+
+
+
+
+
 }
