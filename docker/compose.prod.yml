@@ -168,6 +168,7 @@ services:
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - LEGACY_JWT_SECRET
       - WHATSAPP_WEBHOOK_VERIFY_TOKEN
+      - PRINT_SECRET=${PRINT_SECRET}
     networks:
       - backend
     depends_on:
