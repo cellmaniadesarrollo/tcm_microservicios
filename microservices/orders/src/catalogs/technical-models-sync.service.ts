@@ -1,3 +1,4 @@
+//src\catalogs\technical-models-sync.service.ts
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';

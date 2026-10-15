@@ -1,0 +1,6 @@
+[
+  { "code": "ORIGINAL",  "name": "ORIGINAL",   "isSystem": false },
+  { "code": "OEM",       "name": "OEM",        "isSystem": false },
+  { "code": "AAA",       "name": "AAA",        "isSystem": false },
+  { "code": "RECOVERED", "name": "RECUPERADA", "isSystem": true }
+]

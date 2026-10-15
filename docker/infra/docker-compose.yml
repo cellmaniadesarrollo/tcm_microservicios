@@ -75,6 +75,7 @@ services:
           ms.order.invoice.emission.requested \
           ms.catalog.model.created \
           ms.catalog.model.technical.updated \
+          ms.inventory.core \
           ms.billing.invoice.status.updated; do
           /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
             --create --if-not-exists --topic $$TOPIC \

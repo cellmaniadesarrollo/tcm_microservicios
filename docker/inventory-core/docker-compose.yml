@@ -1,0 +1,35 @@
+name: tcm-inventory-core
+
+services:
+  inventory-core:
+    build:
+      context: ../../microservices/inventory-core
+      dockerfile: Dockerfile.dev
+    container_name: ms-inventory-core
+    restart: always
+    volumes:
+      - ../../microservices/inventory-core:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    env_file: [../.env]
+    environment:
+      - NODE_ENV=development
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_INVENTORY_CORE}
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+networks:
+  backend:
+    external: true
