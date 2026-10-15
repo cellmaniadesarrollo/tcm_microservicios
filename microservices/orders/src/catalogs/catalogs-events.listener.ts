@@ -1,3 +1,4 @@
+// /src\catalogs\catalogs-events.listener.ts
 import { Injectable } from '@nestjs/common';
 import { KafkaConsumerService } from '../kafka/kafka.consumer';
 import { ModelsSyncService } from './models-sync.service';

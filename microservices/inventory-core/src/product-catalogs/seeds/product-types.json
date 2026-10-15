@@ -1,0 +1,7 @@
+[
+  { "kind": "PART",      "code": "BAT", "name": "BATERIA" },
+  { "kind": "PART",      "code": "PAN", "name": "PANTALLA" },
+  { "kind": "PART",      "code": "FLX", "name": "FLEX DE CARGA" },
+  { "kind": "ACCESSORY", "code": "EST", "name": "ESTUCHE" },
+  { "kind": "DEVICE",    "code": "CEL", "name": "CELULAR" }
+]
