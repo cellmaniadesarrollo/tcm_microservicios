@@ -29,6 +29,7 @@ export enum PartRequestStatus {
     INGRESADO_ASIGNADO = 'INGRESADO_ASIGNADO',
     LITIGIO = 'LITIGIO',
     CANCELADO = 'CANCELADO',
+    EN_BUSQUEDA = 'EN_BUSQUEDA',
 }
 export enum PartRequestType {
     NACIONAL = 'NACIONAL',
