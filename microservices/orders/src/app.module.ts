@@ -25,6 +25,7 @@ import { OrderExtrasModule } from './order-extras/order-extras.module';
 import { InvoicesModule } from './invoices/invoices.module';
 import { OrderPartRequestModule } from './order-part-request/order-part-request.module';
 import { OrderDiscountsModule } from './order-discounts/order-discounts.module';
+import { PrintEndpointsModule } from './print-endpoints/print-endpoints.module';
 
 @Module({
   imports: [
@@ -52,7 +53,7 @@ import { OrderDiscountsModule } from './order-discounts/order-discounts.module';
     OrderPartRequestModule,
 
     OrderDiscountsModule,
-
+    PrintEndpointsModule,
 
   ],
   controllers: [AppController],

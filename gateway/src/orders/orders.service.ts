@@ -424,4 +424,20 @@ export class OrdersGatewayService {
     listOrderPayments(query: ListOrderPaymentsGatewayDto, user: any) {
         return this.send('list_order_payments', { query, user });
     }
+
+    // ---------- Print endpoints ----------
+
+    registerPrintEndpoint(dto: any) {
+        return this.send('register_print_endpoint', { dto });
+    }
+
+    async getPrintEndpoint(user: any, code?: string) {
+        try {
+            return await this.send('get_print_endpoint', { user, code });
+        } catch (error: any) {
+            console.log('ERR print-endpoint:', error);
+            const status = Number(error?.status) || HttpStatus.INTERNAL_SERVER_ERROR;
+            throw new HttpException(error?.message || 'Error al obtener la URL de impresión', status);
+        }
+    }
 }
