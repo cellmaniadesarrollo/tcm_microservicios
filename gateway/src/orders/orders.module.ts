@@ -12,6 +12,7 @@ import { InvoicesController } from './invoices/invoices.controller';
 import { InvoicesGatewayService } from './invoices/invoices-gateway.service';
 import { OrderDiscountsController } from './order-discounts/order-discounts.controller';
 import { OrderDiscountsService } from './order-discounts/order-discounts.service';
+import { PrintEndpointsController } from './print-endpoints/print-endpoints.controller';
 
 @Module({
   imports: [
@@ -28,7 +29,7 @@ import { OrderDiscountsService } from './order-discounts/order-discounts.service
     ]),
     AuthModule
   ],
-  controllers: [OrdersController, PartRequestsController, InvoicesController, OrderDiscountsController],
+  controllers: [OrdersController, PartRequestsController, InvoicesController, OrderDiscountsController, PrintEndpointsController],
   providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient, InvoicesGatewayService, OrderDiscountsService]
 })
 export class OrdersModule { }
