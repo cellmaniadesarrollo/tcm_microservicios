@@ -30,6 +30,7 @@
     "@nestjs/microservices": "^11.1.21",
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/platform-fastify": "^11.1.23",
+    "@nestjs/schedule": "^5.0.1",
     "@nestjs/typeorm": "^11.0.1",
     "@types/web-push": "^3.6.4",
     "amqp-connection-manager": "^5.0.0",
