@@ -1,16 +1,14 @@
 // gateway/src/inventory-core/dto/create-product-gateway.dto.ts
 import { Type } from 'class-transformer';
 import {
-    ArrayUnique, IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsNumber,
+    ArrayUnique, IsArray, IsBoolean, IsEnum, IsInt, IsNumber,
     IsOptional, IsString, IsUUID, MaxLength, Min,
 } from 'class-validator';
 import { BillingMode, TrackingMode } from '../enums/product.enums';
 
 export class CreateProductGatewayDto {
-    @IsString({ message: 'El nombre debe ser un texto' })
-    @IsNotEmpty({ message: 'El nombre es obligatorio' })
-    @MaxLength(255)
-    name!: string;
+    @IsUUID('4', { message: 'El nombre del producto no es válido' })
+    productNameId!: string;
 
     @IsOptional()
     @IsString()
@@ -20,11 +18,6 @@ export class CreateProductGatewayDto {
     @IsString()
     @MaxLength(100)
     upc?: string;
-
-    @IsOptional()
-    @IsString()
-    @MaxLength(500)
-    imageUrl?: string;
 
     @IsUUID('4', { message: 'El tipo de producto no es válido' })
     productTypeId!: string;
@@ -58,6 +51,34 @@ export class CreateProductGatewayDto {
     @IsOptional()
     @IsBoolean()
     billableInRepairOrders?: boolean;
+
+    // ───────── Dónde puede usarse ─────────
+
+    @IsOptional()
+    @IsBoolean()
+    isSellable?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    isRepairPart?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    isCustomizable?: boolean;
+
+    // ───────── Inventario ─────────
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt({ message: 'El stock mínimo debe ser un entero' })
+    @Min(0)
+    minStock?: number;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt({ message: 'Los días de garantía deben ser un entero' })
+    @Min(0)
+    warrantyDays?: number;
 
     /** Modelos compatibles (models.models_id). Un DEVICE requiere exactamente uno. */
     @IsOptional()

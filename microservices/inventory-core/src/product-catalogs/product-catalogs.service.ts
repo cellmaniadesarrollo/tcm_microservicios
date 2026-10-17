@@ -10,8 +10,12 @@ import { Quality } from './entities/quality.entity';
 import productTypesSeed from './seeds/product-types.json';
 import colorsSeed from './seeds/colors.json';
 import qualitiesSeed from './seeds/qualities.json';
+import productNamesSeed from './seeds/product-names.json';
 import { Brand } from '../devices-replica/entities/brand.entity';
 import { Model } from '../devices-replica/entities/model.entity';
+import { cleanDisplayName, normalizeNameKey } from '../common/helpers/normalize-name';
+import { ProductName } from './entities/product-name.entity';
+import { WarehouseArea } from '../products/enums/product.enums';
 
 /** Clave del advisory lock: evita que varias instancias siembren a la vez. */
 const SEED_LOCK_KEY = 730_100_1;
@@ -26,6 +30,9 @@ export interface PartRequestFormOptions {
     colors: SelectOption[];
     qualities: SelectOption[];
     brands: SelectOption[];
+    names: SelectOption[];
+    kinds: SelectOption[];
+    usages: { key: 'isSellable' | 'isRepairPart' | 'isCustomizable'; name: string; area: WarehouseArea }[];
 }
 @Injectable()
 export class ProductCatalogsService implements OnApplicationBootstrap {
@@ -81,9 +88,17 @@ export class ProductCatalogsService implements OnApplicationBootstrap {
             qualitiesSeed.map((q) => ({ code: q.code, name: q.name, isSystem: q.isSystem })),
         );
 
+        const names = await this.insertMissing(
+            em, ProductName, companyIds,
+            productNamesSeed.map((n) => {
+                const name = cleanDisplayName(n.name);
+                return { name, normalizedKey: normalizeNameKey(name) };
+            }),
+        );
+
         this.logger.log(
             `Seed de catálogos (${companyIds.length} empresa/s): ` +
-            `+${types} tipos, +${colors} colores, +${qualities} calidades`,
+            `+${types} tipos, +${colors} colores, +${qualities} calidades, +${names} nombres`,
         );
     }
 
@@ -123,11 +138,11 @@ export class ProductCatalogsService implements OnApplicationBootstrap {
         const select = { id: true, name: true } as const;
         const order = { name: 'ASC' } as const;
 
-        const [types, colors, qualities, brands] = await Promise.all([
+        const [types, colors, qualities, brands, names] = await Promise.all([
             this.dataSource.getRepository(ProductType).find({ where, select, order }),
             this.dataSource.getRepository(Color).find({ where, select, order }),
             this.dataSource.getRepository(Quality).find({ where, select, order }),
-            // Brand es global (scraper), no tiene companyId y sus columnas tienen otro nombre
+            // 4. Ahora brands va en la posición 4
             this.dataSource
                 .getRepository(Brand)
                 .createQueryBuilder('b')
@@ -135,9 +150,19 @@ export class ProductCatalogsService implements OnApplicationBootstrap {
                 .addSelect('b.brands_name', 'name')
                 .orderBy('b.brands_name', 'ASC')
                 .getRawMany<SelectOption>(),
+            // 5. ProductName (nombres/modelos) va en la posición 5 para que coincida con 'names'
+            this.dataSource.getRepository(ProductName).find({ where, select, order }),
         ]);
 
-        return { types, colors, qualities, brands };
+        return {
+            types, colors, qualities, brands, names,
+            kinds: Object.values(ProductKind).map((k) => ({ id: k, name: k })),
+            usages: [
+                { key: 'isSellable', name: 'Ventas', area: WarehouseArea.SALES },
+                { key: 'isRepairPart', name: 'Repuesto de reparación', area: WarehouseArea.REPAIRS },
+                { key: 'isCustomizable', name: 'Personalizable', area: WarehouseArea.CUSTOMIZATION },
+            ],
+        };
     }
 
     async findModelsByBrand(brandId: number, search?: string): Promise<{ id: number; name: string }[]> {
