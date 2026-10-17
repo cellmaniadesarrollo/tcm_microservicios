@@ -9,6 +9,7 @@ import { DevicesReplicaModule } from './devices-replica/devices-replica.module';
 import { ProductCatalogsModule } from './product-catalogs/product-catalogs.module';
 import { ProductsModule } from './products/products.module';
 import { SequencesModule } from './common/sequences/sequences.module';
+import { AwsS3Module } from './aws-s3/aws-s3.module';
 
 @Module({
   imports: [
@@ -26,7 +27,10 @@ import { SequencesModule } from './common/sequences/sequences.module';
         synchronize: config.get('NODE_ENV') !== 'production', // en prod usar migraciones
       }),
     }),
-    HealthModule, KafkaModule, CompaniesModule, UsersEmployeesEventsModule, DevicesReplicaModule, ProductCatalogsModule, ProductsModule, SequencesModule
+    HealthModule, KafkaModule, CompaniesModule,
+    UsersEmployeesEventsModule, DevicesReplicaModule,
+    ProductCatalogsModule, ProductsModule, SequencesModule,
+    AwsS3Module
   ],
 })
 export class AppModule { }

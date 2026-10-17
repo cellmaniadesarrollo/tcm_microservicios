@@ -8,3 +8,8 @@ export enum BillingMode {
     NO = 'no',
     OPTIONAL = 'optional',
 }
+export enum WarehouseArea {
+    SALES = 'SALES',
+    REPAIRS = 'REPAIRS',
+    CUSTOMIZATION = 'CUSTOMIZATION',
+}

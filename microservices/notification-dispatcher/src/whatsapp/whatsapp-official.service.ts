@@ -108,8 +108,8 @@ export class WhatsappOfficialService {
         templateName: string,
         language: string,
         bodyParams: string[],
-        buttonParams?: { index: number; text: string }[],   // 👈 nuevo
-    ): Promise<void> {
+        buttonParams?: { index: number; text: string }[],
+    ): Promise<{ messageId: string | null }> {
         const apiVersion = session.apiVersion ?? 'v20.0';
         const url = `https://graph.facebook.com/${apiVersion}/${session.phoneNumberId}/messages`;
 
@@ -149,6 +149,10 @@ export class WhatsappOfficialService {
             this.logger.warn(`sendTemplate falló (${res.status}) para "${templateName}": ${body}`);
             throw new Error(`Meta rechazó el envío de plantilla "${templateName}" (${res.status})`);
         }
+
+        const data: any = await res.json().catch(() => null);
+        return { messageId: data?.messages?.[0]?.id ?? null };
+
     }
 
     private toE164(phone: string): string {

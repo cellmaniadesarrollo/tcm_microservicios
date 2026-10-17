@@ -11,15 +11,17 @@ import { WhatsappController } from './whatsapp.controller';
 import { WhatsappTemplate } from './entities/whatsapp-template.entity';
 import { WhatsappOfficialService } from './whatsapp-official.service';
 import { WhatsappTemplateService } from './whatsapp-template.service';
+import { WhatsappMessageLogService } from './whatsapp-message-log.service';
+import { WhatsappMessageLog } from './entities/whatsapp-message-log.entity';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([WhatsappSession, CompanyReplica, WhatsappRouting, WhatsappTemplate]),
+        TypeOrmModule.forFeature([WhatsappSession, CompanyReplica, WhatsappRouting, WhatsappTemplate, WhatsappMessageLog]),
         forwardRef(() => NotificationsModule), // ← forwardRef aquí
     ],
     controllers: [WhatsappController],
     providers: [
-        WhatsappService, WhatsappOfficialService, WhatsappTemplateService,
+        WhatsappService, WhatsappOfficialService, WhatsappTemplateService, WhatsappMessageLogService,
         { provide: CHANNEL_WHATSAPP, useClass: WhatsappChannel },
     ],
     exports: [WhatsappService, CHANNEL_WHATSAPP],
