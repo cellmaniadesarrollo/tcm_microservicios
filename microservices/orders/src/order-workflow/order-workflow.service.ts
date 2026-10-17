@@ -649,6 +649,7 @@ export class OrderWorkflowService {
     // ==================== Mapeo final ====================
     const mappedData = data.map((order) => ({
       ...order,
+      closure_observation: order.delivery?.closure_observation ?? null,
       payments: order.payments?.map((payment) => ({
         ...payment,
         has_attachments: paymentIdsWithAttachments.has(payment.id),
@@ -703,6 +704,7 @@ export class OrderWorkflowService {
       .leftJoinAndSelect('device.imeis', 'imei')
       .leftJoinAndSelect('device.model', 'deviceModel')
       .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
+      .leftJoinAndSelect('o.delivery', 'orderDelivery')
       .leftJoinAndSelect('o.payments', 'payments')
       .leftJoinAndSelect('payments.paymentType', 'paymentType')
       .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
@@ -764,25 +766,26 @@ export class OrderWorkflowService {
           { userId: user.userId },
         );
         qb.groupBy(`
-  o.id,
-  c.id,
-  contact.id,
-  type.id,
-  status.id,
-  priority.id,
-  technicians.id,
-  device.id,
-  deviceModel.id,
-  deviceBrand.id,
-  imei.id,
-  payments.id,
-  paymentType.id,
-  paymentMethod.id,
-  receivedBy.id,
-  potentialPurchase.id,
-  potentialMarkedBy.id,
-  discounts.id
-`);
+          o.id,
+          c.id,
+          contact.id,
+          type.id,
+          status.id,
+          priority.id,
+          technicians.id,
+          device.id,
+          deviceModel.id,
+          deviceBrand.id,
+          imei.id,
+          payments.id,
+          paymentType.id,
+          paymentMethod.id,
+          receivedBy.id,
+          potentialPurchase.id,
+          potentialMarkedBy.id,
+          discounts.id,
+          orderDelivery.id
+        `);
         qb.orderBy('o.entry_date', 'DESC');
         break;
 
@@ -964,6 +967,11 @@ export class OrderWorkflowService {
       // ── has_attachments para 'ejecutadas' ──────────────────────────────────
       const mappedData = await this.appendPaymentAttachmentFlag(data, pagedIds);
 
+      const withClosure = mappedData.map((o: any) => ({
+        ...o,
+        closure_observation: o.delivery?.closure_observation ?? null,
+      }));
+
       // ── resumen de solicitudes de repuesto ─────────────────────────────────
       const dataWithParts = await this.appendPartRequestsSummary(mappedData, pagedIds); // 👈 nuevo
 
@@ -994,6 +1002,7 @@ export class OrderWorkflowService {
         .createQueryBuilder('order')
         .leftJoinAndSelect('order.company', 'company')
         .leftJoinAndSelect('order.branch', 'branch')
+        .leftJoinAndSelect('order.delivery', 'delivery')
         .leftJoinAndSelect('order.customer', 'customer')
         .leftJoinAndSelect('customer.contacts', 'contacts')
         .leftJoinAndSelect('order.device', 'device')
