@@ -797,4 +797,11 @@ export class OrdersController {
       branchId: user.branchId,
     });
   }
+
+  // ---------- Impresora ----------
+
+  @Get('print-endpoint/current')
+  async getPrintEndpoint(@User() user: any, @Query('code') code?: string) {
+    return this.ordersGatewayService.getPrintEndpoint(toUserPayload(user), code);
+  }
 }
