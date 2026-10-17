@@ -31,6 +31,7 @@ services:
       - REDIS_URL=redis://redis-realtime:6379
       - RABBIT_URL=amqp://guest:guest@ms-notifications-rabbitmq:5672 
       - WHATSAPP_WEBHOOK_VERIFY_TOKEN=w4T3m_x9K2_pL8vN7_qR0mZ4
+      - PRINT_SECRET=${PRINT_SECRET}
     networks: [backend]
 
 networks:
