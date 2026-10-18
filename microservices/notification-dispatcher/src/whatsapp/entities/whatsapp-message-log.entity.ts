@@ -1,5 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Index } from 'typeorm';
-import { WhatsappProvider } from './whatsapp-session.entity';
+import type { WhatsappProvider } from './whatsapp-session.entity';
 
 export type WhatsappMessageType = 'TEXT' | 'TEMPLATE' | 'IMAGE' | 'DOCUMENT';
 export type WhatsappLogStatus = 'SENT' | 'FAILED';
