@@ -193,21 +193,40 @@ export class OrderPartRequestController {
   /** Listar solicitudes de repuesto listas para pago */
   @MessagePattern({ cmd: 'list_part_requests_para_pago' })
   async listParaPago(@Payload() data: any) {
+    // 📥 1. LO QUE LLEGA
+    console.log('📥 [MS Órdenes] INICIO - cmd: list_part_requests_para_pago');
+    console.log('📥 Payload recibido (data):', JSON.stringify(data, null, 2));
+
     try {
-      if (!data.dto || !data.user) {
+      // Validación de seguridad por si data llega null o undefined
+      if (!data || !data.dto || !data.user) {
+        console.warn('⚠️ Payload incompleto. Data recibida:', JSON.stringify(data, null, 2));
         throw new RpcException('Payload incompleto: falta dto o user');
       }
 
-      return await this.partRequestPaymentService.listParaPago(data.dto, data.user);
+      // Ejecución del servicio
+      const result = await this.partRequestPaymentService.listParaPago(data.dto, data.user);
+
+      // 📤 2. LO QUE SE DEVUELVE (Éxito)
+      console.log('📤 [MS Órdenes] RESPUESTA EXITOSA - list_part_requests_para_pago');
+      console.log('📤 Resultado devuelto:', JSON.stringify(result, null, 2));
+
+      return result;
+
     } catch (error: any) {
-      console.error('🔥 Error crítico en MS Órdenes (listParaPago):', error);
+      // ❌ 3. LO QUE SE DEVUELVE EN CASO DE ERROR
+      console.error('🔥 Error crítico en MS Órdenes (listParaPago):', error.message);
       if (error.stack) console.error(error.stack);
 
-      throw new RpcException({
+      const errorPayload = {
         status: 'error',
         message: error.message || 'Error interno en MS Órdenes',
         details: error.response || null,
-      });
+      };
+
+      console.log('📤 RpcException devuelta:', JSON.stringify(errorPayload, null, 2));
+
+      throw new RpcException(errorPayload);
     }
   }
 
