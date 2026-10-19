@@ -533,4 +533,21 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         if (!session) throw new Error(`Sesión ${sessionId} no encontrada`);
         return session;
     }
+
+    async sendTextTracked(
+        companyId: string,
+        purpose: MessagePurpose,
+        to: string,
+        text: string,
+    ): Promise<{ messageId: string | null; sessionId: string; fromNumber: string | null }> {
+        const rt = await this.resolveSession(companyId, purpose);
+        const msg = await this.enqueue(rt, (socket) =>
+            socket.sendMessage(toJid(to), { text }),
+        );
+        return {
+            messageId: msg?.key?.id ?? null,
+            sessionId: rt.sessionId,
+            fromNumber: rt.socket.user?.id?.split(':')[0] ?? null,
+        };
+    }
 }

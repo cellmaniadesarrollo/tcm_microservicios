@@ -4,17 +4,22 @@ import {
 } from 'typeorm';
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 import { ProductType } from '../../product-catalogs/entities/product-type.entity';
+import { ProductName } from '../../product-catalogs/entities/product-name.entity';
 import { Color } from '../../product-catalogs/entities/color.entity';
 import { Quality } from '../../product-catalogs/entities/quality.entity';
 import { ProductKind } from '../../common/enums/product-kind.enum';
 import { TrackingMode, BillingMode } from '../enums/product.enums';
 import { ProductModel } from './product-model.entity';
+import { ProductImage } from './product-image.entity';
 
 /**
  * Producto (SKU). No guarda existencias ni costos: eso vive en lotes, saldos y unidades.
  *
- * code -> correlativo numérico por empresa (lo que el usuario busca: 111). Inmutable.
- * sku  -> {KIND}-{TIPO}-{MARCA}-{code con ceros}, ej: REP-BAT-SAM-000111. Generado una vez. Inmutable.
+ * code -> correlativo numérico por empresa. Inmutable.
+ * sku  -> {KIND}-{TIPO}-{MARCA}-{code con ceros}, ej: REP-BAT-SAM-000111. Inmutable.
+ *
+ * Las banderas is_* indican PARA QUÉ puede usarse el producto (capacidad del catálogo).
+ * Dónde está una pieza y en qué estado vive en lote, saldo y unidad.
  */
 @Entity('products')
 @Index('uq_products_company_code', ['companyId', 'code'], { unique: true })
@@ -25,8 +30,14 @@ import { ProductModel } from './product-model.entity';
 })
 @Index('idx_products_company_type', ['companyId', 'productTypeId'])
 @Index('idx_products_company_kind', ['companyId', 'kind'])
+@Index('idx_products_company_name', ['companyId', 'productNameId'])
+@Index('idx_products_company_sellable', ['companyId', 'isSellable'])
+@Index('idx_products_company_repair', ['companyId', 'isRepairPart'])
+@Index('idx_products_company_custom', ['companyId', 'isCustomizable'])
 // Un equipo completo siempre es serializado
 @Check('chk_products_device_serial', `"kind" <> 'DEVICE' OR "tracking_mode" = 'SERIAL'`)
+// Todo producto debe servir al menos para un área
+@Check('chk_products_has_usage', `"is_sellable" OR "is_repair_part" OR "is_customizable"`)
 export class Product {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
@@ -40,18 +51,15 @@ export class Product {
     @Column({ length: 100, update: false })
     sku!: string;
 
-    /** Código de barras del fabricante (opcional). */
+    /** Código de barras del fabricante (si no viene, se usa el correlativo con ceros). */
     @Column({ length: 100, nullable: true })
     upc?: string;
 
-    @Column({ length: 255 })
-    name!: string;
+    @Column({ name: 'product_name_id', type: 'uuid' })
+    productNameId!: string;
 
     @Column({ type: 'text', nullable: true })
     description?: string;
-
-    @Column({ name: 'image_url', length: 500, nullable: true })
-    imageUrl?: string;
 
     /** Se copia del tipo al crear, para filtrar sin join. Debe coincidir con productType.kind. */
     @Column({ type: 'enum', enum: ProductKind })
@@ -68,6 +76,30 @@ export class Product {
 
     @Column({ name: 'quality_id', type: 'uuid', nullable: true })
     qualityId?: string;
+
+    // ───────── Dónde puede usarse (vistas por encargado) ─────────
+
+    /** Se puede vender directo (vista de ventas). */
+    @Column({ name: 'is_sellable', default: true })
+    isSellable!: boolean;
+
+    /** Se consume como pieza en una orden de reparación (vista de repuestos). */
+    @Column({ name: 'is_repair_part', default: false })
+    isRepairPart!: boolean;
+
+    /** Se puede personalizar (vista de personalizaciones). */
+    @Column({ name: 'is_customizable', default: false })
+    isCustomizable!: boolean;
+
+    // ───────── Inventario y comercial ─────────
+
+    /** Alerta de stock bajo. */
+    @Column({ name: 'min_stock', type: 'int', default: 0 })
+    minStock!: number;
+
+    /** Garantía en días (0 = sin garantía). */
+    @Column({ name: 'warranty_days', type: 'int', default: 0 })
+    warrantyDays!: number;
 
     /** Precio sugerido por defecto; cada lote puede definir el suyo. */
     @Column({ name: 'base_price', type: 'numeric', precision: 12, scale: 2, default: 0 })
@@ -86,9 +118,15 @@ export class Product {
     @Column({ default: true })
     status!: boolean;
 
+    // ───────── Relaciones ─────────
+
     @ManyToOne(() => CompanyReplica, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'company_id' })
     company!: CompanyReplica;
+
+    @ManyToOne(() => ProductName, { onDelete: 'RESTRICT' })
+    @JoinColumn({ name: 'product_name_id' })
+    productName!: ProductName;
 
     @ManyToOne(() => ProductType, { onDelete: 'RESTRICT' })
     @JoinColumn({ name: 'product_type_id' })
@@ -104,6 +142,9 @@ export class Product {
 
     @OneToMany(() => ProductModel, (pm) => pm.product, { cascade: true })
     compatibleModels!: ProductModel[];
+
+    @OneToMany(() => ProductImage, (img) => img.product)
+    images!: ProductImage[];
 
     @CreateDateColumn({ name: 'created_at' })
     createdAt!: Date;

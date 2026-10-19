@@ -9,10 +9,15 @@ export class ProductsController {
   @MessagePattern({ cmd: 'create_product' })
   async createProduct(@Payload() data: any) {
     try {
-      if (!data?.dto || !data?.user?.companyId) {
-        throw new RpcException('Payload incompleto: falta dto o user.companyId');
+      if (!data?.dto || !data?.user?.companyId || !data?.user?.userId) {
+        throw new RpcException('Payload incompleto: falta dto, user.companyId o user.userId');
       }
-      return await this.productsService.create(data.dto, data.user.companyId);
+      return await this.productsService.create(
+        data.dto,
+        data.user.companyId,
+        data.user.userId,
+        data.files ?? [],
+      );
     } catch (error: any) {
       console.error('🔥 Error en createProduct:', error);
       throw new RpcException({
