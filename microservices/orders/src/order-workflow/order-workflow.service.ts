@@ -422,6 +422,36 @@ export class OrderWorkflowService {
     })) as any;
   }
 
+  private isTransferMethod(method?: PaymentMethod | null): boolean {
+    if (!method) return false;
+    const normalize = (v?: string) =>
+      (v ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+    // Ajusta si tu catálogo usa otro nombre/código
+    return (
+      normalize((method as any).code).includes('TRANSFER') ||
+      normalize(method.name).includes('TRANSFER')
+    );
+  }
+
+  private assertTransferRequirements(
+    method: PaymentMethod | null,
+    transferNumber: string | undefined | null,
+    filesCount: number,
+  ) {
+    if (!this.isTransferMethod(method)) return;
+
+    if (!transferNumber?.trim()) {
+      throw new RpcException(
+        new BadRequestException('El número de transferencia es obligatorio para pagos por transferencia'),
+      );
+    }
+    if (filesCount === 0) {
+      throw new RpcException(
+        new BadRequestException('El comprobante (foto) es obligatorio para pagos por transferencia'),
+      );
+    }
+  }
+
   // ═══════════════════════════════════════════════════════════════════
   // REQUISITOS (una sola vez en el servicio de órdenes):
   //
@@ -1582,6 +1612,9 @@ export class OrderWorkflowService {
         }
       }
 
+      // 4.1 Transferencia: número + foto obligatorios
+      this.assertTransferRequirements(paymentMethod, dto.reference, files.length);
+
       // 5. El que recibe el dinero es el usuario autenticado (cajero / recepcionista)
       const receivedBy = await transactionalEntityManager.findOne(UserEmployeeCache, {
         where: { id: authenticatedUser.userId },
@@ -1606,7 +1639,7 @@ export class OrderWorkflowService {
         paid_at: new Date(),
         receivedBy,
         received_by_id: authenticatedUser.userId,       // ← del token
-        reference: dto.reference,
+        reference: dto.reference?.trim(),
         observation: dto.observation,
         company_id: authenticatedUser.companyId,
         branch_id: authenticatedUser.branchId,
@@ -1672,8 +1705,21 @@ export class OrderWorkflowService {
   ): Promise<OrderDelivery> {
     // ── Validación: comprobante obligatorio si no es EFECTIVO ─────────────
     const EFECTIVO_ID = 1;
-    if (dto.amount > 0 && dto.paymentMethodId && dto.paymentMethodId !== EFECTIVO_ID) {
-      if (!files || files.length === 0) {
+    if (dto.amount > 0 && dto.paymentMethodId) {
+      const method = await this.paymentMethodRepository.findOne({
+        where: { id: dto.paymentMethodId },
+      });
+
+      if (!method) {
+        throw new RpcException(new NotFoundException('Método de pago no encontrado'));
+      }
+
+      // Transferencia: número + foto obligatorios
+      this.assertTransferRequirements(method, dto.transferNumber, files?.length ?? 0);
+
+      // Otros métodos distintos de EFECTIVO: comprobante obligatorio
+      const EFECTIVO_ID = 1;
+      if (method.id !== EFECTIVO_ID && (!files || files.length === 0)) {
         throw new RpcException(
           new BadRequestException(
             'Se requiere al menos un comprobante de pago adjunto cuando el método de pago no es EFECTIVO',
@@ -1829,7 +1875,9 @@ export class OrderWorkflowService {
         payment_method_id: dto.paymentMethodId ?? null,
         paid_at: deliveredAt,
         received_by_id: user.userId,
-        reference: `ENTREGA-${order.order_number.toString().padStart(6, '0')}`,
+        reference: dto.transferNumber?.trim()
+          ? `ENTREGA-${order.order_number.toString().padStart(6, '0')} | TRF: ${dto.transferNumber.trim()}`
+          : `ENTREGA-${order.order_number.toString().padStart(6, '0')}`,
         observation: dto.closureObservation
           ? `Cierre de orden - ${dto.closureObservation}`
           : 'Cierre de orden y pago final',
@@ -3486,6 +3534,7 @@ export class OrderWorkflowService {
       };
     });
   }
+
   private async applyStatusChange(
     manager: EntityManager,
     order: Order,
