@@ -41,7 +41,7 @@ export class PartRequestPaymentService {
             filtro?: 'pendientes' | 'pagados' | 'todos';
             providerId?: number;
             llegada?: 'con_llegada' | 'sin_llegada';
-            revision?: 'por_revisar' | 'revisadas'; // NUEVO (solo aplica con llegada = con_llegada)
+            revision?: 'por_revisar' | 'revisadas'; // solo aplica con llegada = con_llegada
         },
         user: { companyId: string },
     ) {
@@ -113,6 +113,13 @@ export class PartRequestPaymentService {
                 return `EXISTS (${sb.where('p2.id = pago.id').andWhere(cond).getQuery()})`;
             };
 
+            // ¿la solicitud pr2 tuvo LLEGADO_ASIGNADO alguna vez? (según el historial)
+            const TUVO_LLEGADA = `EXISTS (
+            SELECT 1 FROM part_request_status_history h
+            WHERE h.part_request_id = pr2.id
+              AND h.estado_nuevo = :estadoLlegado
+        )`;
+
             const aplicarBusquedaPagados = (q: typeof qb) => {
                 if (orderNumberValue !== null) {
                     q.andWhere(existeSolicitud('o2.order_number = :orderNumber', true), {
@@ -145,23 +152,21 @@ export class PartRequestPaymentService {
                 }
             };
 
+            // con_llegada → alguna solicitud del pago tuvo LLEGADO_ASIGNADO alguna vez
+            // sin_llegada → alguna solicitud del pago nunca lo tuvo
             const aplicarFiltroLlegada = (q: typeof qb) => {
                 if (!dto.llegada) return;
-                const cond =
-                    dto.llegada === 'con_llegada'
-                        ? 'pr2.estado = :estadoLlegado'
-                        : 'pr2.estado <> :estadoLlegado';
+                const cond = dto.llegada === 'con_llegada' ? TUVO_LLEGADA : `NOT ${TUVO_LLEGADA}`;
                 q.andWhere(existeSolicitud(cond), { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO });
             };
-            // NUEVO: revisión (solo tiene sentido sobre solicitudes en LLEGADO_ASIGNADO)
-            //   por_revisar → al menos una solicitud llegada sin revisar
-            //   revisadas   → tiene solicitudes llegadas y ninguna sin revisar
+
+            // Revisión (solo sobre solicitudes que tuvieron llegada)
             const aplicarFiltroRevision = (q: typeof qb) => {
                 if (!dto.revision || dto.llegada !== 'con_llegada') return;
                 const cond =
                     dto.revision === 'por_revisar'
-                        ? 'pr2.estado = :estadoLlegado AND pr2.revisada_at IS NULL'
-                        : 'pr2.estado = :estadoLlegado AND pr2.revisada_at IS NOT NULL';
+                        ? `${TUVO_LLEGADA} AND pr2.revisada_at IS NULL`
+                        : `${TUVO_LLEGADA} AND pr2.revisada_at IS NOT NULL`;
                 q.andWhere(existeSolicitud(cond), { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO });
             };
 
@@ -191,15 +196,19 @@ export class PartRequestPaymentService {
                 .take(limit)
                 .getMany();
 
-            // NUEVO: contador de solicitudes pagadas, llegadas y aún sin revisar
-            // (respeta empresa y proveedor, ignora búsqueda para que el badge sea estable)
+            // Contador: solicitudes pagadas, que tuvieron llegada y aún sin revisar
+            // (respeta empresa y proveedor, ignora la búsqueda para que el badge sea estable)
             const porRevisarQb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .innerJoin('pago.provider', 'provider')
                 .innerJoin('pago.allocations', 'al')
                 .innerJoin('al.partRequest', 'prc')
                 .where('provider.company_id = :companyId', { companyId: user.companyId })
-                .andWhere('prc.estado = :estadoLlegado', { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO })
+                .andWhere(
+                    `EXISTS (SELECT 1 FROM part_request_status_history hh
+                         WHERE hh.part_request_id = prc.id AND hh.estado_nuevo = :estadoLlegado)`,
+                    { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO },
+                )
                 .andWhere('prc.revisada_at IS NULL');
 
             if (dto.providerId) {
@@ -208,6 +217,7 @@ export class PartRequestPaymentService {
             const porRevisarRaw = await porRevisarQb.select('COUNT(DISTINCT prc.id)', 'cnt').getRawOne();
             const porRevisar = Number(porRevisarRaw?.cnt ?? 0);
 
+            // Comprobantes
             const paymentIds = payments.map((p) => p.id);
             const attachments = paymentIds.length
                 ? await this.attachmentRepo.find({
@@ -220,10 +230,22 @@ export class PartRequestPaymentService {
                 : [];
             const tieneComprobante = new Set(attachments.map((a) => a.entity_id));
 
+            // Solicitudes de estos pagos que alguna vez tuvieron LLEGADO_ASIGNADO
+            const prIdsPagos = payments.flatMap((p) => (p.allocations ?? []).map((a) => a.part_request_id));
+            const filasLlegada = prIdsPagos.length
+                ? await this.partRequestRepo.manager
+                    .createQueryBuilder(PartRequestStatusHistory, 'h')
+                    .select('DISTINCT h.part_request_id', 'id')
+                    .where('h.part_request_id IN (:...ids)', { ids: prIdsPagos })
+                    .andWhere('h.estado_nuevo = :e', { e: PartRequestStatus.LLEGADO_ASIGNADO })
+                    .getRawMany()
+                : [];
+            const tuvoLlegada = new Set<number>(filasLlegada.map((r) => Number(r.id)));
+
             const data = payments.map((p) => {
                 // Solo las solicitudes que corresponden a la pestaña activa
                 const cubiertas = (p.allocations ?? []).filter((a) => {
-                    const llegada = a.partRequest?.estado === PartRequestStatus.LLEGADO_ASIGNADO;
+                    const llegada = tuvoLlegada.has(a.part_request_id);
                     const revisada = !!a.partRequest?.revisada_at;
 
                     if (dto.llegada === 'con_llegada') {
@@ -241,13 +263,13 @@ export class PartRequestPaymentService {
                     monto: Number(p.monto),
                     fecha_pago: p.fecha_pago,
                     notas: p.notas ?? null,
-                    cantidad_solicitudes_cubiertas: cubiertas.length, // antes: (p.allocations ?? []).length
+                    cantidad_solicitudes_cubiertas: cubiertas.length,
                     tiene_comprobante: tieneComprobante.has(p.id),
                     provider: p.provider
                         ? { id: p.provider.id, nombre: p.provider.nombre }
                         : null,
 
-                    solicitudes_cubiertas: cubiertas.map((a) => ({ // antes: (p.allocations ?? []).map
+                    solicitudes_cubiertas: cubiertas.map((a) => ({
                         id: a.part_request_id,
                         numero: a.partRequest?.numero ?? null,
                         numero_formateado: formatPartRequestNumber(a.partRequest?.numero),
@@ -269,7 +291,8 @@ export class PartRequestPaymentService {
                         fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
                         descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
 
-                        // Revisión de llegada
+                        // Llegada y revisión
+                        tuvo_llegada: tuvoLlegada.has(a.part_request_id),
                         revisada: !!a.partRequest?.revisada_at,
                         revisada_at: a.partRequest?.revisada_at ?? null,
                         revisada_por: mapUser(a.partRequest?.revisadaPor),
@@ -286,7 +309,7 @@ export class PartRequestPaymentService {
                     totalPages: Math.ceil(total / limit) || 0,
                 },
                 filtros: filtrosResponse,
-                contadores: { por_revisar: porRevisar }, // NUEVO
+                contadores: { por_revisar: porRevisar },
             };
         }
 
@@ -500,7 +523,6 @@ export class PartRequestPaymentService {
             filtros: filtrosResponse,
         };
     }
-
 
 
     async createPartRequestPayment(
