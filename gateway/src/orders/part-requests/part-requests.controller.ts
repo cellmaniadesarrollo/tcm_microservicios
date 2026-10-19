@@ -199,6 +199,7 @@ export class PartRequestsController {
         @Query('filtro') filtro: string,
         @Query('providerId') providerId: string, // NUEVO
         @Query('llegada') llegada: string, // NUEVO: 'con_llegada' | 'sin_llegada'
+        @Query('revision') revision: string, // NUEVO
         @User() user: any,
     ) {
         const dto = {
@@ -208,6 +209,7 @@ export class PartRequestsController {
             filtro: (filtro as 'pendientes' | 'pagados' | 'todos') || undefined,
             providerId: providerId ? Number(providerId) : undefined, // NUEVO
             llegada: (llegada as 'con_llegada' | 'sin_llegada') || undefined, // NUEVO
+            revision: (revision as 'por_revisar' | 'revisadas') || undefined,
         };
 
         return this.partRequestsGatewayService.listParaPago(dto, {

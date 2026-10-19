@@ -41,6 +41,7 @@ export class PartRequestPaymentService {
             filtro?: 'pendientes' | 'pagados' | 'todos';
             providerId?: number;
             llegada?: 'con_llegada' | 'sin_llegada';
+            revision?: 'por_revisar' | 'revisadas'; // NUEVO (solo aplica con llegada = con_llegada)
         },
         user: { companyId: string },
     ) {
@@ -50,7 +51,9 @@ export class PartRequestPaymentService {
 
         // Búsqueda:
         //   #123        → número de orden exacto
-        //   SR-42 / 42  → número de solicitud exacto (solo dígitos también busca por texto)
+        //   SR-42       → número de solicitud exacto
+        //   42          → número de solicitud, o texto
+        //   sam a13     → palabras sueltas (marca, modelo, descripción, proveedor...)
         const searchTerm = dto.search?.trim();
         const orderNumberMatch = searchTerm?.match(/^#(\d+)$/);
         const orderNumberValue = orderNumberMatch ? parseInt(orderNumberMatch[1], 10) : null;
@@ -58,6 +61,9 @@ export class PartRequestPaymentService {
         const requestNumberMatch = !orderNumberMatch ? searchTerm?.match(/^(?:SR-?)?(\d{1,9})$/i) : null;
         const numeroBuscado = requestNumberMatch ? parseInt(requestNumberMatch[1], 10) : null;
         const numeroConPrefijo = !!searchTerm && /^SR/i.test(searchTerm);
+
+        const escapar = (s: string) => s.replace(/[\\%_]/g, '\\$&'); // % y _ no actúan como comodín
+        const tokens = searchTerm ? searchTerm.split(/\s+/).filter(Boolean) : [];
 
         const filtrosResponse = {
             opciones: [
@@ -68,6 +74,10 @@ export class PartRequestPaymentService {
             opcionesLlegada: [
                 { value: 'con_llegada', label: 'Llegado asignado' },
                 { value: 'sin_llegada', label: 'Sin llegada asignada' },
+            ],
+            opcionesRevision: [
+                { value: 'por_revisar', label: 'Por revisar' },
+                { value: 'revisadas', label: 'Revisadas' },
             ],
         };
 
@@ -83,51 +93,90 @@ export class PartRequestPaymentService {
                 .leftJoinAndSelect('partRequest.technician', 'prTechnician')
                 .leftJoinAndSelect('partRequest.responsableBusqueda', 'prResponsable')
                 .leftJoinAndSelect('partRequest.arrival', 'prArrival')
-                .innerJoinAndSelect('pago.provider', 'provider')
                 .leftJoinAndSelect('partRequest.revisadaPor', 'prRevisadaPor')
+                .innerJoinAndSelect('pago.provider', 'provider')
                 .where('provider.company_id = :companyId', { companyId: user.companyId });
 
             if (dto.providerId) {
                 qb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
 
-            const aplicarBusquedaPagados = (q: typeof qb) => {
-                if (orderNumberValue !== null) {
-                    q.andWhere('prOrder.order_number = :orderNumber', { orderNumber: orderNumberValue });
-                } else if (numeroBuscado !== null && numeroConPrefijo) {
-                    q.andWhere('partRequest.numero = :numeroBuscado', { numeroBuscado });
-                } else if (numeroBuscado !== null) {
-                    q.andWhere(
-                        '(partRequest.numero = :numeroBuscado OR provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                        { numeroBuscado, search: `%${searchTerm}%` },
-                    );
-                } else if (searchTerm) {
-                    q.andWhere(
-                        '(provider.nombre ILIKE :search OR pago.notas ILIKE :search)',
-                        { search: `%${searchTerm}%` },
-                    );
-                }
-            };
-            const aplicarFiltroLlegada = (q: typeof qb) => {
-                if (!dto.llegada) return;
-
-                const sub = this.paymentRepo
+            // Subconsulta: ¿el pago tiene alguna solicitud que cumpla la condición?
+            // Se usa EXISTS (y no un andWhere sobre el join) para no recortar las allocations del pago.
+            const existeSolicitud = (cond: string, conOrden = false) => {
+                const sb = this.paymentRepo
                     .createQueryBuilder('p2')
                     .select('1')
                     .innerJoin('p2.allocations', 'a2')
-                    .innerJoin('a2.partRequest', 'pr2')
-                    .where('p2.id = pago.id')
-                    .andWhere('pr2.estado = :estadoLlegado')
-                    .getQuery();
+                    .innerJoin('a2.partRequest', 'pr2');
+                if (conOrden) sb.innerJoin('pr2.order', 'o2');
+                return `EXISTS (${sb.where('p2.id = pago.id').andWhere(cond).getQuery()})`;
+            };
+
+            const aplicarBusquedaPagados = (q: typeof qb) => {
+                if (orderNumberValue !== null) {
+                    q.andWhere(existeSolicitud('o2.order_number = :orderNumber', true), {
+                        orderNumber: orderNumberValue,
+                    });
+                } else if (numeroBuscado !== null && numeroConPrefijo) {
+                    q.andWhere(existeSolicitud('pr2.numero = :numeroBuscado'), { numeroBuscado });
+                } else {
+                    tokens.forEach((tok, i) => {
+                        const numeroSql =
+                            numeroBuscado !== null
+                                ? `OR ${existeSolicitud('pr2.numero = :numeroBuscado')}`
+                                : '';
+                        q.andWhere(
+                            `(provider.nombre ILIKE :t${i}
+                          OR pago.notas ILIKE :t${i}
+                          OR ${existeSolicitud(
+                                `(pr2.descripcion ILIKE :t${i}
+                                OR pr2.marca ILIKE :t${i}
+                                OR pr2.modelo ILIKE :t${i}
+                                OR pr2.modelo_tecnico ILIKE :t${i})`,
+                            )}
+                          ${numeroSql})`,
+                            {
+                                [`t${i}`]: `%${escapar(tok)}%`,
+                                ...(numeroBuscado !== null ? { numeroBuscado } : {}),
+                            },
+                        );
+                    });
+                }
+            };
+
+            const aplicarFiltroLlegada = (q: typeof qb) => {
+                if (!dto.llegada) return;
+                const cond = existeSolicitud('pr2.estado = :estadoLlegado');
+                q.andWhere(dto.llegada === 'con_llegada' ? cond : `NOT ${cond}`, {
+                    estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO,
+                });
+            };
+
+            // NUEVO: revisión (solo tiene sentido sobre solicitudes en LLEGADO_ASIGNADO)
+            //   por_revisar → al menos una solicitud llegada sin revisar
+            //   revisadas   → tiene solicitudes llegadas y ninguna sin revisar
+            const aplicarFiltroRevision = (q: typeof qb) => {
+                if (!dto.revision || dto.llegada !== 'con_llegada') return;
+
+                const sinRevisar = existeSolicitud(
+                    'pr2.estado = :estadoLlegado AND pr2.revisada_at IS NULL',
+                );
+                const conLlegada = existeSolicitud('pr2.estado = :estadoLlegado');
 
                 q.andWhere(
-                    dto.llegada === 'con_llegada' ? `EXISTS (${sub})` : `NOT EXISTS (${sub})`,
+                    dto.revision === 'por_revisar'
+                        ? sinRevisar
+                        : `(${conLlegada} AND NOT ${sinRevisar})`,
                     { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO },
                 );
             };
+
             aplicarBusquedaPagados(qb);
             aplicarFiltroLlegada(qb);
-            // totalQb necesita los mismos joins/condiciones para que el conteo coincida con los datos
+            aplicarFiltroRevision(qb);
+
+            // totalQb usa exactamente las mismas condiciones (ya no dependen de joins)
             const totalQb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .innerJoin('pago.provider', 'provider')
@@ -136,17 +185,9 @@ export class PartRequestPaymentService {
             if (dto.providerId) {
                 totalQb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
-
-            if (orderNumberValue !== null || numeroBuscado !== null) {
-                totalQb
-                    .leftJoin('pago.allocations', 'allocations')
-                    .leftJoin('allocations.partRequest', 'partRequest');
-                if (orderNumberValue !== null) {
-                    totalQb.leftJoin('partRequest.order', 'prOrder');
-                }
-            }
             aplicarBusquedaPagados(totalQb);
             aplicarFiltroLlegada(totalQb);
+            aplicarFiltroRevision(totalQb);
 
             const totalRaw = await totalQb.select('COUNT(DISTINCT pago.id)', 'cnt').getRawOne();
             const total = Number(totalRaw?.cnt ?? 0);
@@ -156,6 +197,23 @@ export class PartRequestPaymentService {
                 .skip((page - 1) * limit)
                 .take(limit)
                 .getMany();
+
+            // NUEVO: contador de solicitudes pagadas, llegadas y aún sin revisar
+            // (respeta empresa y proveedor, ignora búsqueda para que el badge sea estable)
+            const porRevisarQb = this.paymentRepo
+                .createQueryBuilder('pago')
+                .innerJoin('pago.provider', 'provider')
+                .innerJoin('pago.allocations', 'al')
+                .innerJoin('al.partRequest', 'prc')
+                .where('provider.company_id = :companyId', { companyId: user.companyId })
+                .andWhere('prc.estado = :estadoLlegado', { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO })
+                .andWhere('prc.revisada_at IS NULL');
+
+            if (dto.providerId) {
+                porRevisarQb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
+            }
+            const porRevisarRaw = await porRevisarQb.select('COUNT(DISTINCT prc.id)', 'cnt').getRawOne();
+            const porRevisar = Number(porRevisarRaw?.cnt ?? 0);
 
             const paymentIds = payments.map((p) => p.id);
             const attachments = paymentIds.length
@@ -187,9 +245,9 @@ export class PartRequestPaymentService {
                     order_id: a.partRequest?.order_id ?? null,
                     order_number: a.partRequest?.order?.order_number ?? null,
                     descripcion: a.partRequest?.descripcion ?? null,
-                    marca: a.partRequest?.marca ?? null,                       // <-- nuevo
-                    modelo: a.partRequest?.modelo ?? null,                     // <-- nuevo
-                    modelo_tecnico: a.partRequest?.modelo_tecnico ?? null,     // <-- nuevo
+                    marca: a.partRequest?.marca ?? null,
+                    modelo: a.partRequest?.modelo ?? null,
+                    modelo_tecnico: a.partRequest?.modelo_tecnico ?? null,
                     fecha_solicitud: a.partRequest?.createdAt ?? null,
                     estado: a.partRequest?.estado ?? null,
                     technician: mapUser(a.partRequest?.technician),
@@ -201,6 +259,11 @@ export class PartRequestPaymentService {
                     litigio_resuelto: a.partRequest?.arrival?.resuelto ?? false,
                     fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
                     descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
+
+                    // Revisión de llegada
+                    revisada: !!a.partRequest?.revisada_at,
+                    revisada_at: a.partRequest?.revisada_at ?? null,
+                    revisada_por: mapUser(a.partRequest?.revisadaPor),
                 })),
             }));
 
@@ -213,6 +276,7 @@ export class PartRequestPaymentService {
                     totalPages: Math.ceil(total / limit) || 0,
                 },
                 filtros: filtrosResponse,
+                contadores: { por_revisar: porRevisar }, // NUEVO
             };
         }
 
@@ -239,16 +303,21 @@ export class PartRequestPaymentService {
             qb.andWhere('order.order_number = :orderNumber', { orderNumber: orderNumberValue });
         } else if (numeroBuscado !== null && numeroConPrefijo) {
             qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
-        } else if (numeroBuscado !== null) {
-            qb.andWhere(
-                '(pr.numero = :numeroBuscado OR pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { numeroBuscado, search: `%${searchTerm}%` },
-            );
-        } else if (searchTerm) {
-            qb.andWhere(
-                '(pr.descripcion ILIKE :search OR provider.nombre ILIKE :search)',
-                { search: `%${searchTerm}%` },
-            );
+        } else {
+            tokens.forEach((tok, i) => {
+                const numeroSql = numeroBuscado !== null ? 'pr.numero = :numeroBuscado OR ' : '';
+                qb.andWhere(
+                    `(${numeroSql}pr.descripcion ILIKE :t${i}
+                  OR pr.marca ILIKE :t${i}
+                  OR pr.modelo ILIKE :t${i}
+                  OR pr.modelo_tecnico ILIKE :t${i}
+                  OR provider.nombre ILIKE :t${i})`,
+                    {
+                        [`t${i}`]: `%${escapar(tok)}%`,
+                        ...(numeroBuscado !== null ? { numeroBuscado } : {}),
+                    },
+                );
+            });
         }
 
         const partRequests = await qb.orderBy('pr.updatedAt', 'DESC').getMany();
@@ -385,12 +454,12 @@ export class PartRequestPaymentService {
                     order_id: pr.order_id,
                     order_number: pr.order?.order_number ?? null,
                     fecha_solicitud: pr.createdAt,
-                    fecha_solicitud_pago: fechaSolicitudPago,       // <-- nuevo
-                    solicitado_por: mapUser(solicitadoPor),         // <-- nuevo
+                    fecha_solicitud_pago: fechaSolicitudPago,
+                    solicitado_por: mapUser(solicitadoPor),
                     descripcion: pr.descripcion,
-                    marca: pr.marca,                                // <-- nuevo
-                    modelo: pr.modelo,                              // <-- nuevo
-                    modelo_tecnico: pr.modelo_tecnico ?? null,      // <-- nuevo
+                    marca: pr.marca,
+                    modelo: pr.modelo,
+                    modelo_tecnico: pr.modelo_tecnico ?? null,
                     tipo: pr.tipo,
                     estado: pr.estado,
                     technician: mapUser(pr.technician),

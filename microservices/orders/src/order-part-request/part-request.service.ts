@@ -16,6 +16,7 @@ import { PartRequestTravelItem } from './entities/part-request-travel-item.entit
 import { formatPartRequestNumber, nextCompanyNumber } from './helpers/company-numbering.helper';
 import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 import { buildProgress } from './utils/part-request-progress.util';
+import { SelectQueryBuilder } from 'typeorm/browser';
 
 /**
  * Dueño del ciclo de vida base de PartRequest: creación, listados, lectura
@@ -25,6 +26,17 @@ import { buildProgress } from './utils/part-request-progress.util';
  * pagos (ver PartRequestPaymentService), ni envío/llegada/validación
  * (ver PartRequestArrivalService).
  */
+
+// Estados que se muestran en "Todos" (los demás son residuos)
+const ESTADOS_VISIBLES: PartRequestStatus[] = [
+    PartRequestStatus.SOLICITADO,
+    PartRequestStatus.ESPERA_DE_PAGO,
+    PartRequestStatus.EN_PROCESO_DE_PEDIDO,
+    PartRequestStatus.LLEGADO_PENDIENTE_VALIDACION,
+    PartRequestStatus.LLEGADO_ASIGNADO,
+    PartRequestStatus.LITIGIO,
+    PartRequestStatus.CANCELADO,
+];
 @Injectable()
 export class PartRequestService {
     constructor(
@@ -264,6 +276,24 @@ export class PartRequestService {
 
     // ───────────────────────── listPartRequests ─────────────────────────
 
+    /**
+     * Búsqueda por palabras: cada palabra debe aparecer en descripción, marca,
+     * modelo o modelo técnico. El orden de las palabras no importa.
+     */
+    private aplicarBusquedaTexto(qb: SelectQueryBuilder<PartRequest>, texto: string, alias = 'pr') {
+        const tokens = texto.split(/\s+/).filter(Boolean);
+        tokens.forEach((tok, i) => {
+            const escaped = tok.replace(/[\\%_]/g, '\\$&'); // % y _ no funcionan como comodín
+            qb.andWhere(
+                `(${alias}.descripcion ILIKE :t${i}
+              OR ${alias}.marca ILIKE :t${i}
+              OR ${alias}.modelo ILIKE :t${i}
+              OR ${alias}.modelo_tecnico ILIKE :t${i})`,
+                { [`t${i}`]: `%${escaped}%` },
+            );
+        });
+    }
+
     async listPartRequests(
         dto: ListPartRequestsDto,
         user: { userId: string; companyId: string },
@@ -308,20 +338,28 @@ export class PartRequestService {
                     // Con prefijo SR: solo por número
                     qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
                 } else {
-                    // Solo dígitos: por número, o por descripción (ej. "iPhone 13")
+                    // Solo dígitos: por número, o por texto (ej. "13" en "A13")
+                    const escaped = searchTerm.replace(/[\\%_]/g, '\\$&');
                     qb.andWhere(
-                        '(pr.numero = :numeroBuscado OR pr.descripcion ILIKE :search)',
-                        { numeroBuscado, search: `%${searchTerm}%` },
+                        `(pr.numero = :numeroBuscado
+                      OR pr.descripcion ILIKE :search
+                      OR pr.marca ILIKE :search
+                      OR pr.modelo ILIKE :search
+                      OR pr.modelo_tecnico ILIKE :search)`,
+                        { numeroBuscado, search: `%${escaped}%` },
                     );
                 }
             } else {
-                // Búsqueda normal por descripción
-                qb.andWhere('pr.descripcion ILIKE :search', { search: `%${searchTerm}%` });
+                // Búsqueda por palabras: "sam a13", "a13 sam", "samsung galaxy a13"
+                this.aplicarBusquedaTexto(qb, searchTerm);
             }
         }
 
         if (dto.estado) {
             qb.andWhere('pr.estado = :estado', { estado: dto.estado });
+        } else {
+            // "Todos": solo los estados vigentes, sin residuos
+            qb.andWhere('pr.estado IN (:...estadosVisibles)', { estadosVisibles: ESTADOS_VISIBLES });
         }
 
         // Prioridad: coincidencia exacta por número primero (si se buscó por número)
@@ -359,7 +397,7 @@ export class PartRequestService {
                 order_id: pr.order_id,
                 historial,
                 arrival: pr.arrival,
-                orderStatusName: pr.order?.currentStatus?.name ?? null,   // 👈 esta
+                orderStatusName: pr.order?.currentStatus?.name ?? null,
             });
 
             return {
@@ -374,7 +412,6 @@ export class PartRequestService {
                 fecha_resolucion_litigio: pr.arrival?.fecha_resolucion ?? null,
                 descripcion_resolucion_litigio: pr.arrival?.descripcion_resolucion ?? null,
 
-                // ─── Nuevo ───
                 historial,
                 progreso,
                 estado_visual: progreso.estado_visual,
