@@ -535,9 +535,27 @@ export class OrderPartRequestController {
       console.error('🔥 Error en litigarDesdeProductoPendiente:', error);
       throw new RpcException({ status: 'error', message: error.message || 'Error interno en MS Órdenes', details: error.response || null });
     }
+
   }
 
 
-
+  /** Marcar solicitud (llegada asignada) como revisada */
+  @MessagePattern({ cmd: 'marcar_part_request_revisada' })
+  async marcarRevisada(@Payload() data: any) {
+    try {
+      if (!data.partRequestId || !data.user) {
+        throw new RpcException('Payload incompleto: falta partRequestId o user');
+      }
+      return await this.partRequestPaymentService.marcarRevisada(data.partRequestId, data.user);
+    } catch (error: any) {
+      console.error('🔥 Error en MS Órdenes (marcarRevisada):', error);
+      if (error instanceof RpcException) throw error;
+      throw new RpcException({
+        status: 'error',
+        message: error.message || 'Error interno en MS Órdenes',
+        details: error.response || null,
+      });
+    }
+  }
 
 }

@@ -133,4 +133,7 @@ export class PartRequestsGatewayService {
     resolveTravelItem(id: number, dto: ResolveTravelItemGatewayDto, files: any[], user: any) {
         return this.orderServiceClient.send('resolve_part_request_travel_item', { id, dto, files, user });
     }
+    async marcarRevisada(partRequestId: number, user: any) {
+        return this.orderServiceClient.send('marcar_part_request_revisada', { partRequestId, user });
+    }
 } 
