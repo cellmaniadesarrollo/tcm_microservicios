@@ -330,9 +330,9 @@ export class OrdersController {
       receivedByName: formData.receivedByName || undefined,
       signatureCollected: formData.signatureCollected === 'true',
       closureObservation: formData.closureObservation || undefined,
-      billing: formData.billingId    // 👈 NUEVO: solo arma el objeto si viene el id
+      billing: formData.billingId
         ? {
-          id: formData.billingId,
+          id: Number(formData.billingId),
           name: formData.billingName || '',
           idNumber: formData.billingIdNumber || '',
         }
