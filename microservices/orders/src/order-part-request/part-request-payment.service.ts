@@ -15,6 +15,7 @@ import { mapUser, enrichPartRequestAttachmentsWithSignedUrls } from './helpers/p
 import { PartRequestPaymentAllocation } from './entities/part-request-payment-allocation.entity';
 import { formatPartRequestNumber } from './helpers/company-numbering.helper';
 import { precioParaOrden, resolverPrecioOrden } from './helpers/pricing.helper';
+import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 
 /**
  * Dueño de la etapa de pago: listado agrupado por proveedor (cola de pago),
@@ -30,6 +31,8 @@ export class PartRequestPaymentService {
         @InjectRepository(PartRequestPayment) private readonly paymentRepo: Repository<PartRequestPayment>,
         private readonly awsS3Service: AwsS3Service,
     ) { }
+
+
     async listParaPago(
         dto: {
             page?: number;
@@ -37,6 +40,7 @@ export class PartRequestPaymentService {
             search?: string;
             filtro?: 'pendientes' | 'pagados' | 'todos';
             providerId?: number;
+            llegada?: 'con_llegada' | 'sin_llegada';
         },
         user: { companyId: string },
     ) {
@@ -55,6 +59,18 @@ export class PartRequestPaymentService {
         const numeroBuscado = requestNumberMatch ? parseInt(requestNumberMatch[1], 10) : null;
         const numeroConPrefijo = !!searchTerm && /^SR/i.test(searchTerm);
 
+        const filtrosResponse = {
+            opciones: [
+                { value: 'todos', label: 'Todos' },
+                { value: 'pendientes', label: 'Pendientes de pago' },
+                { value: 'pagados', label: 'Pagados' },
+            ],
+            opcionesLlegada: [
+                { value: 'con_llegada', label: 'Llegado asignado' },
+                { value: 'sin_llegada', label: 'Sin llegada asignada' },
+            ],
+        };
+
         // ═══════════════════════════════════════════════════════════
         // CASO 1: PAGADOS → listar por PAGO (no agrupar por proveedor)
         // ═══════════════════════════════════════════════════════════
@@ -68,6 +84,7 @@ export class PartRequestPaymentService {
                 .leftJoinAndSelect('partRequest.responsableBusqueda', 'prResponsable')
                 .leftJoinAndSelect('partRequest.arrival', 'prArrival')
                 .innerJoinAndSelect('pago.provider', 'provider')
+                .leftJoinAndSelect('partRequest.revisadaPor', 'prRevisadaPor')
                 .where('provider.company_id = :companyId', { companyId: user.companyId });
 
             if (dto.providerId) {
@@ -91,8 +108,25 @@ export class PartRequestPaymentService {
                     );
                 }
             };
-            aplicarBusquedaPagados(qb);
+            const aplicarFiltroLlegada = (q: typeof qb) => {
+                if (!dto.llegada) return;
 
+                const sub = this.paymentRepo
+                    .createQueryBuilder('p2')
+                    .select('1')
+                    .innerJoin('p2.allocations', 'a2')
+                    .innerJoin('a2.partRequest', 'pr2')
+                    .where('p2.id = pago.id')
+                    .andWhere('pr2.estado = :estadoLlegado')
+                    .getQuery();
+
+                q.andWhere(
+                    dto.llegada === 'con_llegada' ? `EXISTS (${sub})` : `NOT EXISTS (${sub})`,
+                    { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO },
+                );
+            };
+            aplicarBusquedaPagados(qb);
+            aplicarFiltroLlegada(qb);
             // totalQb necesita los mismos joins/condiciones para que el conteo coincida con los datos
             const totalQb = this.paymentRepo
                 .createQueryBuilder('pago')
@@ -112,6 +146,7 @@ export class PartRequestPaymentService {
                 }
             }
             aplicarBusquedaPagados(totalQb);
+            aplicarFiltroLlegada(totalQb);
 
             const totalRaw = await totalQb.select('COUNT(DISTINCT pago.id)', 'cnt').getRawOne();
             const total = Number(totalRaw?.cnt ?? 0);
@@ -147,11 +182,14 @@ export class PartRequestPaymentService {
 
                 solicitudes_cubiertas: (p.allocations ?? []).map((a) => ({
                     id: a.part_request_id,
-                    numero: a.partRequest?.numero ?? null,                                   // <-- nuevo
-                    numero_formateado: formatPartRequestNumber(a.partRequest?.numero),       // <-- nuevo
+                    numero: a.partRequest?.numero ?? null,
+                    numero_formateado: formatPartRequestNumber(a.partRequest?.numero),
                     order_id: a.partRequest?.order_id ?? null,
                     order_number: a.partRequest?.order?.order_number ?? null,
                     descripcion: a.partRequest?.descripcion ?? null,
+                    marca: a.partRequest?.marca ?? null,                       // <-- nuevo
+                    modelo: a.partRequest?.modelo ?? null,                     // <-- nuevo
+                    modelo_tecnico: a.partRequest?.modelo_tecnico ?? null,     // <-- nuevo
                     fecha_solicitud: a.partRequest?.createdAt ?? null,
                     estado: a.partRequest?.estado ?? null,
                     technician: mapUser(a.partRequest?.technician),
@@ -174,13 +212,7 @@ export class PartRequestPaymentService {
                     total,
                     totalPages: Math.ceil(total / limit) || 0,
                 },
-                filtros: {
-                    opciones: [
-                        { value: 'todos', label: 'Todos' },
-                        { value: 'pendientes', label: 'Pendientes de pago' },
-                        { value: 'pagados', label: 'Pagados' },
-                    ],
-                },
+                filtros: filtrosResponse,
             };
         }
 
@@ -242,17 +274,67 @@ export class PartRequestPaymentService {
             return true;
         });
 
+        // ─── Fecha y responsable de la solicitud de pago ────────────────
+        // = último cambio de estado hacia ESPERA_DE_PAGO (encontrado nacional)
+        const manager = this.partRequestRepo.manager;
+        const prIds = filtered.map((e) => e.pr.id);
+
+        const historiales = prIds.length
+            ? await manager
+                .createQueryBuilder(PartRequestStatusHistory, 'h')
+                .where('h.part_request_id IN (:...prIds)', { prIds })
+                .andWhere('h.estado_nuevo = :estado', { estado: PartRequestStatus.ESPERA_DE_PAGO })
+                .orderBy('h.fecha', 'DESC')
+                .getMany()
+            : [];
+
+        // Quedarse con el más reciente por solicitud (ya vienen ordenados DESC)
+        const solicitudPagoPorPr = new Map<number, PartRequestStatusHistory>();
+        for (const h of historiales) {
+            if (!solicitudPagoPorPr.has(h.part_request_id)) {
+                solicitudPagoPorPr.set(h.part_request_id, h);
+            }
+        }
+
+        // Resolver quién lo hizo (actor_id no tiene relación en la entidad)
+        const actorIds = [...new Set([...solicitudPagoPorPr.values()].map((h) => h.actor_id))];
+        const actores = actorIds.length
+            ? await manager.find(UserEmployeeCache, { where: { id: In(actorIds) } })
+            : [];
+        const actorPorId = new Map(actores.map((u) => [u.id, u]));
+
+        const conSolicitudPago = filtered.map((e) => {
+            const h = solicitudPagoPorPr.get(e.pr.id);
+            return {
+                ...e,
+                fechaSolicitudPago: h?.fecha ?? null,
+                solicitadoPor: h ? actorPorId.get(h.actor_id) : undefined,
+            };
+        });
+
+        // ─── Orden por fecha de solicitud de pago ───────────────────────
+        // 'DESC' = más reciente primero | 'ASC' = la que lleva más tiempo esperando primero
+        const ORDEN_FECHA_PAGO: 'ASC' | 'DESC' = 'DESC';
+        const factor = ORDEN_FECHA_PAGO === 'DESC' ? -1 : 1;
+        // Las que no tienen historial (datos antiguos) siempre al final
+        const cmpFecha = (a: Date | null, b: Date | null) => {
+            if (!a && !b) return 0;
+            if (!a) return 1;
+            if (!b) return -1;
+            return (a.getTime() - b.getTime()) * factor;
+        };
+
         // Agrupar por proveedor
         const porProveedor = new Map<
             number,
             {
                 provider: { id: number; nombre: string };
-                solicitudes: typeof filtered;
+                solicitudes: typeof conSolicitudPago;
                 montoTotalPendiente: number;
             }
         >();
 
-        for (const item of filtered) {
+        for (const item of conSolicitudPago) {
             const provider = item.pr.sourcing!.provider!;
             const grupo = porProveedor.get(provider.id) ?? {
                 provider: { id: provider.id, nombre: provider.nombre },
@@ -264,9 +346,19 @@ export class PartRequestPaymentService {
             porProveedor.set(provider.id, grupo);
         }
 
-        const grupos = Array.from(porProveedor.values()).sort(
-            (a, b) => b.montoTotalPendiente - a.montoTotalPendiente,
-        );
+        // Ordenar solicitudes dentro de cada proveedor
+        for (const g of porProveedor.values()) {
+            g.solicitudes.sort((a, b) => cmpFecha(a.fechaSolicitudPago, b.fechaSolicitudPago));
+        }
+
+        // Ordenar proveedores por su solicitud más relevante (la primera ya ordenada)
+        const grupos = Array.from(porProveedor.values()).sort((a, b) => {
+            const c = cmpFecha(
+                a.solicitudes[0]?.fechaSolicitudPago ?? null,
+                b.solicitudes[0]?.fechaSolicitudPago ?? null,
+            );
+            return c !== 0 ? c : b.montoTotalPendiente - a.montoTotalPendiente; // desempate
+        });
 
         const total = grupos.length;
         const skip = (page - 1) * limit;
@@ -277,14 +369,28 @@ export class PartRequestPaymentService {
             cantidadSolicitudes: g.solicitudes.length,
             montoTotalPendiente: Number(g.montoTotalPendiente.toFixed(2)),
             solicitudes: g.solicitudes.map(
-                ({ pr, montoProducto, montoTransporte, totalPagado, saldoPendiente, estadoPago }) => ({
+                ({
+                    pr,
+                    montoProducto,
+                    montoTransporte,
+                    totalPagado,
+                    saldoPendiente,
+                    estadoPago,
+                    fechaSolicitudPago,
+                    solicitadoPor,
+                }) => ({
                     id: pr.id,
-                    numero: pr.numero ?? null,                                  // <-- nuevo
-                    numero_formateado: formatPartRequestNumber(pr.numero),      // <-- nuevo
+                    numero: pr.numero ?? null,
+                    numero_formateado: formatPartRequestNumber(pr.numero),
                     order_id: pr.order_id,
                     order_number: pr.order?.order_number ?? null,
                     fecha_solicitud: pr.createdAt,
+                    fecha_solicitud_pago: fechaSolicitudPago,       // <-- nuevo
+                    solicitado_por: mapUser(solicitadoPor),         // <-- nuevo
                     descripcion: pr.descripcion,
+                    marca: pr.marca,                                // <-- nuevo
+                    modelo: pr.modelo,                              // <-- nuevo
+                    modelo_tecnico: pr.modelo_tecnico ?? null,      // <-- nuevo
                     tipo: pr.tipo,
                     estado: pr.estado,
                     technician: mapUser(pr.technician),
@@ -312,15 +418,12 @@ export class PartRequestPaymentService {
                 total,
                 totalPages: Math.ceil(total / limit) || 0,
             },
-            filtros: {
-                opciones: [
-                    { value: 'todos', label: 'Todos' },
-                    { value: 'pendientes', label: 'Pendientes de pago' },
-                    { value: 'pagados', label: 'Pagados' },
-                ],
-            },
+            filtros: filtrosResponse,
         };
     }
+
+
+
     async createPartRequestPayment(
         dto: CreatePartRequestPaymentDto,
         files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
@@ -807,5 +910,37 @@ export class PartRequestPaymentService {
             createdAt: payment.createdAt,
         };
     }
+    async marcarRevisada(partRequestId: number, user: { userId: string; companyId: string }) {
+        const pr = await this.partRequestRepo.findOne({
+            where: { id: partRequestId, company_id: user.companyId },
+        });
 
+        if (!pr) {
+            throw new RpcException({ status: 404, message: 'Solicitud no encontrada' });
+        }
+        if (pr.estado !== PartRequestStatus.LLEGADO_ASIGNADO) {
+            throw new RpcException({
+                status: 400,
+                message: 'Solo se pueden marcar como revisadas las solicitudes en estado LLEGADO_ASIGNADO',
+            });
+        }
+        if (pr.revisada_at) {
+            throw new RpcException({ status: 409, message: 'La solicitud ya fue marcada como revisada' });
+        }
+
+        pr.revisada_at = new Date();
+        pr.revisada_por_id = user.userId;
+        await this.partRequestRepo.save(pr);
+
+        const actor = await this.partRequestRepo.manager.findOne(UserEmployeeCache, {
+            where: { id: user.userId },
+        });
+
+        return {
+            id: pr.id,
+            revisada: true,
+            revisada_at: pr.revisada_at,
+            revisada_por: mapUser(actor),
+        };
+    }
 }

@@ -137,4 +137,15 @@ export class PartRequest {
 
     @UpdateDateColumn()
     updatedAt!: Date;
+
+    // ─── Revisión (post llegada asignada) ───
+    @Column({ type: 'timestamp', nullable: true })
+    revisada_at?: Date | null;
+
+    @Column({ type: 'uuid', nullable: true })
+    revisada_por_id?: string | null;
+
+    @ManyToOne(() => UserEmployeeCache, { nullable: true })
+    @JoinColumn({ name: 'revisada_por_id' })
+    revisadaPor?: UserEmployeeCache | null;
 }

@@ -198,6 +198,7 @@ export class PartRequestsController {
         @Query('search') search: string,
         @Query('filtro') filtro: string,
         @Query('providerId') providerId: string, // NUEVO
+        @Query('llegada') llegada: string, // NUEVO: 'con_llegada' | 'sin_llegada'
         @User() user: any,
     ) {
         const dto = {
@@ -206,6 +207,7 @@ export class PartRequestsController {
             search: search || undefined,
             filtro: (filtro as 'pendientes' | 'pagados' | 'todos') || undefined,
             providerId: providerId ? Number(providerId) : undefined, // NUEVO
+            llegada: (llegada as 'con_llegada' | 'sin_llegada') || undefined, // NUEVO
         };
 
         return this.partRequestsGatewayService.listParaPago(dto, {
@@ -642,5 +644,18 @@ export class PartRequestsController {
             serializeFilesForMicroservice(processedFiles),
             { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
         );
+    }
+
+    @Groups('ORDER_AUDIT', 'LOGISTICA_REPUESTOS')
+    @Patch('para-pago/solicitudes/:id/revisar')
+    async marcarRevisada(
+        @Param('id', ParseIntPipe) id: number,
+        @User() user: any,
+    ) {
+        return this.partRequestsGatewayService.marcarRevisada(id, {
+            userId: user.sub,
+            companyId: user.companyId,
+            branchId: user.branchId,
+        });
     }
 }
