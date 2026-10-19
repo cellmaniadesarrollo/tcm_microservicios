@@ -1,10 +1,9 @@
+import { Type } from 'class-transformer';
 import { IsEmail, IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean } from 'class-validator';
 import { IsValidIdNumber } from '../../common/validators/is-valid-id-number.decorator';
 
 export class CreateBillingDto {
-  // ❌ customerId ya no aplica: ahora se resuelve/crea por idNumber+companyId,
-  // igual que el legacy (upsertCustomerAndBillingData).
-
+  @Type(() => Number)
   @IsNumber()
   @IsNotEmpty()
   idTypeId: number;
@@ -14,61 +13,41 @@ export class CreateBillingDto {
   @IsValidIdNumber()
   idNumber: string;
 
+  @Type(() => Number)
   @IsNumber()
   @IsNotEmpty()
-  personTypeId: number;                // natural / jurídica
+  personTypeId: number;
+
+  @IsOptional() @IsString() businessName?: string;
+  @IsOptional() @IsString() tradeName?: string;
+  @IsOptional() @IsString() firstName?: string;
+  @IsOptional() @IsString() lastName?: string;
 
   @IsOptional()
-  @IsString()
-  businessName?: string;               // ← ahora opcional: solo fallback para first/lastName si es jurídica
-
-  @IsOptional()
-  @IsString()
-  tradeName?: string;
-
-  @IsOptional()
-  @IsString()
-  firstName?: string;
-
-  @IsOptional()
-  @IsString()
-  lastName?: string;
-
-  @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   genderId?: number;
 
-  @IsOptional()
-  @IsString()
-  birthdate?: string;                  // 'YYYY-MM-DD'
+  @IsOptional() @IsString() birthdate?: string;
 
   @IsString()
   @IsNotEmpty()
   @IsEmail()
   mainEmail: string;
 
-  @IsOptional()
-  @IsString()
-  cellphone?: string;
-
-  @IsOptional()
-  @IsString()
-  phone?: string;
+  @IsOptional() @IsString() cellphone?: string;
+  @IsOptional() @IsString() phone?: string;
 
   @IsString()
   @IsNotEmpty()
   address: string;
 
-  @IsOptional()
-  @IsString()
-  city?: string;
+  @IsOptional() @IsString() city?: string;
 
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   cityId?: number;
 
-
-  @IsOptional()
-  @IsBoolean()
-  isCompanyClient?: boolean;
+  @IsOptional() @IsBoolean() isCompanyClient?: boolean;
 }

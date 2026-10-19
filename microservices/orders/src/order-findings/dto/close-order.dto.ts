@@ -1,3 +1,5 @@
+import { IsOptional, IsString, MaxLength } from 'class-validator';
+
 export class BillingSnapshotDto {
     id: string;
     name: string;
@@ -12,5 +14,10 @@ export class CloseOrderDto {
     receivedByName?: string;
     signatureCollected?: boolean;
     closureObservation?: string;
-    billing?: BillingSnapshotDto;   // 👈 objeto agrupado
+    billing?: BillingSnapshotDto;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(60)
+    transferNumber?: string; // 👈 nuevo: obligatorio si el método es TRANSFERENCIA (se valida en el service)
 }
