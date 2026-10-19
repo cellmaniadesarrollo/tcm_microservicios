@@ -51,7 +51,18 @@ export class PartRequestsGatewayService {
     async getDatosPrevios(id: number, user: { companyId: string }) {
         return this.orderServiceClient.send('get_part_request_datos_previos', { dto: { id }, user });
     }
-    async listParaPago(dto: ListPartRequestsGatewayDto, user: any) {
+    async listParaPago(
+        dto: {
+            page?: number;
+            limit?: number;
+            search?: string;
+            filtro?: 'pendientes' | 'pagados' | 'todos';
+            providerId?: number;
+            llegada?: 'con_llegada' | 'sin_llegada';
+            revision?: 'por_revisar' | 'revisadas';
+        },
+        user: any,
+    ) {
         return this.orderServiceClient.send('list_part_requests_para_pago', { dto, user });
     }
     async createPartRequestPayment(dto: CreatePartRequestPaymentGatewayDto, files: any[], user: any) {
