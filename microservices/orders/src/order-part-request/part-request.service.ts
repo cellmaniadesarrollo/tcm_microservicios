@@ -16,7 +16,7 @@ import { PartRequestTravelItem } from './entities/part-request-travel-item.entit
 import { formatPartRequestNumber, nextCompanyNumber } from './helpers/company-numbering.helper';
 import { UserEmployeeCache } from '../users-employees-events/entities/user_employee_cache.entity';
 import { buildProgress } from './utils/part-request-progress.util';
-import { SelectQueryBuilder } from 'typeorm/browser';
+import { SelectQueryBuilder } from 'typeorm'; // Correcto
 
 /**
  * Dueño del ciclo de vida base de PartRequest: creación, listados, lectura
