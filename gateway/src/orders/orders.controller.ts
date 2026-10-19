@@ -320,6 +320,7 @@ export class OrdersController {
       orderId: Number(formData.orderId),
       amount: Number(formData.amount),
       paymentMethodId: formData.paymentMethodId ? Number(formData.paymentMethodId) : undefined,
+      transferNumber: formData.transferNumber || undefined,
       receivedByCustomerId: formData.receivedByCustomerId ? Number(formData.receivedByCustomerId) : undefined,
       receivedByName: formData.receivedByName || undefined,
       signatureCollected: formData.signatureCollected === 'true',

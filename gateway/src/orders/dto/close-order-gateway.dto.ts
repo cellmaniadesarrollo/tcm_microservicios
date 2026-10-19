@@ -4,22 +4,12 @@ import {
     IsOptional,
     IsString,
     IsBoolean,
+    IsNumber,
+    MaxLength,
     Min,
     ValidateNested,
-    IsDefined
 } from 'class-validator';
 import { Type } from 'class-transformer';
-
-export class BillingSnapshotDto {
-    @IsString()
-    id: string;
-
-    @IsString()
-    name: string;
-
-    @IsString()
-    idNumber: string;
-}
 
 export class CloseOrderGatewayDto {
     @IsInt()
@@ -28,11 +18,11 @@ export class CloseOrderGatewayDto {
 
     @IsOptional()
     @IsInt()
-    receivedByCustomerId?: number; // ID del cliente si está registrado en cache
+    receivedByCustomerId?: number;
 
     @IsOptional()
     @IsString()
-    receivedByName?: string; // Nombre manual si no es cliente registrado
+    receivedByName?: string;
 
     @IsOptional()
     @IsBoolean()
@@ -42,6 +32,14 @@ export class CloseOrderGatewayDto {
     @IsInt()
     paymentMethodId?: number;
 
+    // 👇 NUEVO
+    @IsOptional()
+    @IsString()
+    @MaxLength(60)
+    transferNumber?: string;
+
+    @IsOptional()
+    @IsNumber()
     @Min(0, { message: 'El monto final debe ser mayor o igual a cero' })
     amount?: number;
 
@@ -52,5 +50,5 @@ export class CloseOrderGatewayDto {
     @IsOptional()
     @ValidateNested()
     @Type(() => BillingSnapshotDto)
-    billing?: BillingSnapshotDto; // 👈 Objeto agrupado con validación anidada
+    billing?: BillingSnapshotDto;
 }
