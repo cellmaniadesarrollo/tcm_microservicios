@@ -147,29 +147,22 @@ export class PartRequestPaymentService {
 
             const aplicarFiltroLlegada = (q: typeof qb) => {
                 if (!dto.llegada) return;
-                const cond = existeSolicitud('pr2.estado = :estadoLlegado');
-                q.andWhere(dto.llegada === 'con_llegada' ? cond : `NOT ${cond}`, {
-                    estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO,
-                });
+                const cond =
+                    dto.llegada === 'con_llegada'
+                        ? 'pr2.estado = :estadoLlegado'
+                        : 'pr2.estado <> :estadoLlegado';
+                q.andWhere(existeSolicitud(cond), { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO });
             };
-
             // NUEVO: revisión (solo tiene sentido sobre solicitudes en LLEGADO_ASIGNADO)
             //   por_revisar → al menos una solicitud llegada sin revisar
             //   revisadas   → tiene solicitudes llegadas y ninguna sin revisar
             const aplicarFiltroRevision = (q: typeof qb) => {
                 if (!dto.revision || dto.llegada !== 'con_llegada') return;
-
-                const sinRevisar = existeSolicitud(
-                    'pr2.estado = :estadoLlegado AND pr2.revisada_at IS NULL',
-                );
-                const conLlegada = existeSolicitud('pr2.estado = :estadoLlegado');
-
-                q.andWhere(
+                const cond =
                     dto.revision === 'por_revisar'
-                        ? sinRevisar
-                        : `(${conLlegada} AND NOT ${sinRevisar})`,
-                    { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO },
-                );
+                        ? 'pr2.estado = :estadoLlegado AND pr2.revisada_at IS NULL'
+                        : 'pr2.estado = :estadoLlegado AND pr2.revisada_at IS NOT NULL';
+                q.andWhere(existeSolicitud(cond), { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO });
             };
 
             aplicarBusquedaPagados(qb);
@@ -227,45 +220,62 @@ export class PartRequestPaymentService {
                 : [];
             const tieneComprobante = new Set(attachments.map((a) => a.entity_id));
 
-            const data = payments.map((p) => ({
-                id: p.id,
-                monto: Number(p.monto),
-                fecha_pago: p.fecha_pago,
-                notas: p.notas ?? null,
-                cantidad_solicitudes_cubiertas: (p.allocations ?? []).length,
-                tiene_comprobante: tieneComprobante.has(p.id),
-                provider: p.provider
-                    ? { id: p.provider.id, nombre: p.provider.nombre }
-                    : null,
+            const data = payments.map((p) => {
+                // Solo las solicitudes que corresponden a la pestaña activa
+                const cubiertas = (p.allocations ?? []).filter((a) => {
+                    const llegada = a.partRequest?.estado === PartRequestStatus.LLEGADO_ASIGNADO;
+                    const revisada = !!a.partRequest?.revisada_at;
 
-                solicitudes_cubiertas: (p.allocations ?? []).map((a) => ({
-                    id: a.part_request_id,
-                    numero: a.partRequest?.numero ?? null,
-                    numero_formateado: formatPartRequestNumber(a.partRequest?.numero),
-                    order_id: a.partRequest?.order_id ?? null,
-                    order_number: a.partRequest?.order?.order_number ?? null,
-                    descripcion: a.partRequest?.descripcion ?? null,
-                    marca: a.partRequest?.marca ?? null,
-                    modelo: a.partRequest?.modelo ?? null,
-                    modelo_tecnico: a.partRequest?.modelo_tecnico ?? null,
-                    fecha_solicitud: a.partRequest?.createdAt ?? null,
-                    estado: a.partRequest?.estado ?? null,
-                    technician: mapUser(a.partRequest?.technician),
-                    responsableBusqueda: mapUser(a.partRequest?.responsableBusqueda),
-                    monto_asignado: Number(a.monto_asignado),
-                    fecha_litigio: a.partRequest?.arrival?.fecha_validacion ?? null,
-                    motivo_litigio: a.partRequest?.arrival?.motivo_rechazo ?? null,
+                    if (dto.llegada === 'con_llegada') {
+                        if (!llegada) return false;
+                        if (dto.revision === 'por_revisar') return !revisada;
+                        if (dto.revision === 'revisadas') return revisada;
+                        return true;
+                    }
+                    if (dto.llegada === 'sin_llegada') return !llegada;
+                    return true;
+                });
 
-                    litigio_resuelto: a.partRequest?.arrival?.resuelto ?? false,
-                    fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
-                    descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
+                return {
+                    id: p.id,
+                    monto: Number(p.monto),
+                    fecha_pago: p.fecha_pago,
+                    notas: p.notas ?? null,
+                    cantidad_solicitudes_cubiertas: cubiertas.length, // antes: (p.allocations ?? []).length
+                    tiene_comprobante: tieneComprobante.has(p.id),
+                    provider: p.provider
+                        ? { id: p.provider.id, nombre: p.provider.nombre }
+                        : null,
 
-                    // Revisión de llegada
-                    revisada: !!a.partRequest?.revisada_at,
-                    revisada_at: a.partRequest?.revisada_at ?? null,
-                    revisada_por: mapUser(a.partRequest?.revisadaPor),
-                })),
-            }));
+                    solicitudes_cubiertas: cubiertas.map((a) => ({ // antes: (p.allocations ?? []).map
+                        id: a.part_request_id,
+                        numero: a.partRequest?.numero ?? null,
+                        numero_formateado: formatPartRequestNumber(a.partRequest?.numero),
+                        order_id: a.partRequest?.order_id ?? null,
+                        order_number: a.partRequest?.order?.order_number ?? null,
+                        descripcion: a.partRequest?.descripcion ?? null,
+                        marca: a.partRequest?.marca ?? null,
+                        modelo: a.partRequest?.modelo ?? null,
+                        modelo_tecnico: a.partRequest?.modelo_tecnico ?? null,
+                        fecha_solicitud: a.partRequest?.createdAt ?? null,
+                        estado: a.partRequest?.estado ?? null,
+                        technician: mapUser(a.partRequest?.technician),
+                        responsableBusqueda: mapUser(a.partRequest?.responsableBusqueda),
+                        monto_asignado: Number(a.monto_asignado),
+                        fecha_litigio: a.partRequest?.arrival?.fecha_validacion ?? null,
+                        motivo_litigio: a.partRequest?.arrival?.motivo_rechazo ?? null,
+
+                        litigio_resuelto: a.partRequest?.arrival?.resuelto ?? false,
+                        fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
+                        descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
+
+                        // Revisión de llegada
+                        revisada: !!a.partRequest?.revisada_at,
+                        revisada_at: a.partRequest?.revisada_at ?? null,
+                        revisada_por: mapUser(a.partRequest?.revisadaPor),
+                    })),
+                };
+            });
 
             return {
                 data,
