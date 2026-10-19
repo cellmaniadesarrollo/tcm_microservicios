@@ -10,6 +10,7 @@ import {
     ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { BillingSnapshotDto } from './billing-snapshot.dto';
 
 export class CloseOrderGatewayDto {
     @IsInt()
@@ -32,7 +33,6 @@ export class CloseOrderGatewayDto {
     @IsInt()
     paymentMethodId?: number;
 
-    // 👇 NUEVO
     @IsOptional()
     @IsString()
     @MaxLength(60)
