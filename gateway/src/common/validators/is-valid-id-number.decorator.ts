@@ -20,51 +20,26 @@ export function IsValidIdNumber(validationOptions?: ValidationOptions) {
             options: validationOptions,
             validator: {
                 validate(value: any, args: ValidationArguments) {
-                    const dto = args.object as any;
-                    const cleanValue = typeof value === 'string' ? value.trim() : value;
-                    const typeId = Number(dto.idTypeId);
+                const dto = args.object as any;
+                const typeId = Number(dto.idTypeId);
 
-                    let result = false;
-                    let rule = 'sin regla (idTypeId desconocido)';
+                // Si falta el tipo, lo reporta @IsNotEmpty/@IsNumber de idTypeId
+                if (!typeId) return true;
 
-                    if (typeof value !== 'string') {
-                        rule = 'value no es string';
-                    } else {
-                        switch (typeId) {
-                            case ID_TYPE.CEDULA:
-                                rule = 'CÉDULA -> /^\\d{10}$/';
-                                result = /^\d{10}$/.test(cleanValue);
-                                break;
-                            case ID_TYPE.RUC:
-                                rule = 'RUC -> /^\\d{13}$/';
-                                result = /^\d{13}$/.test(cleanValue);
-                                break;
-                            case ID_TYPE.CONSUMIDOR_FINAL:
-                                rule = 'CONSUMIDOR FINAL -> /^\\d{10,13}$/';
-                                result = /^\d{10,13}$/.test(cleanValue);
-                                break;
-                            case ID_TYPE.PASAPORTE:
-                            case ID_TYPE.EXTERIOR:
-                                rule = 'PASAPORTE/EXTERIOR -> length >= 3';
-                                result = cleanValue.length >= 3;
-                                break;
-                        }
-                    }
+                if (typeof value !== 'string') return false;
+                const cleanValue = value.trim();
 
-                    if (DEBUG) {
-                        console.log('>>> [IsValidIdNumber]', {
-                            property: args.property,
-                            value: cleanValue,
-                            length: typeof cleanValue === 'string' ? cleanValue.length : null,
-                            'dto.idTypeId (raw)': dto.idTypeId,
-                            'typeId (Number)': typeId,
-                            'typeof idTypeId': typeof dto.idTypeId,
-                            rule,
-                            result,
-                        });
-                    }
+                let result = false;
+                switch (typeId) {
+                    case ID_TYPE.CEDULA:           result = /^\d{10}$/.test(cleanValue); break;
+                    case ID_TYPE.RUC:              result = /^\d{13}$/.test(cleanValue); break;
+                    case ID_TYPE.CONSUMIDOR_FINAL: result = /^\d{10,13}$/.test(cleanValue); break;
+                    case ID_TYPE.PASAPORTE:
+                    case ID_TYPE.EXTERIOR:         result = cleanValue.length >= 3; break;
+                }
 
-                    return result;
+                if (DEBUG) console.log('>>> [IsValidIdNumber]', { value: cleanValue, typeId, result });
+                return result;
                 },
                 defaultMessage(args: ValidationArguments) {
                     const typeId = Number((args.object as any).idTypeId);
