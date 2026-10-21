@@ -8,6 +8,7 @@ import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { KafkaProducerService } from '../kafka/kafka.producer';
+import { AuditService } from '../audit/audit.service'; // 👈 NUEVO
 
 @Injectable()
 export class CustomersService {
@@ -22,8 +23,33 @@ export class CustomersService {
         @InjectRepository(Address)
         private readonly addressRepo: Repository<Address>,
         private readonly broadcast: BroadcastService,
-
+        private readonly audit: AuditService, // 👈 NUEVO
     ) { }
+
+    // 📸 NUEVO: foto del cliente para comparar antes/después
+    private snapshot(c: Customer) {
+        return {
+            firstName: c.firstName,
+            lastName: c.lastName,
+            birthDate: c.birthDate,
+            genderId: c.gender?.id ?? null,
+            contacts: c.contacts?.map(x => ({
+                id: x.id,
+                value: x.value,
+                isPrimary: x.isPrimary,
+            })),
+            addresses: c.addresses?.map(a => ({
+                id: a.id,
+                zone: a.zone,
+                sector: a.sector,
+                locality: a.locality,
+                mainStreet: a.mainStreet,
+                secondaryStreet: a.secondaryStreet,
+                reference: a.reference,
+                postalCode: a.postalCode,
+            })),
+        };
+    }
 
     async create(data: any) {
         try {
@@ -102,6 +128,14 @@ export class CustomersService {
             // 3️⃣ Guardar
             const customerSaved = await this.customerRepo.save(customer);
 
+            // 📝 NUEVO: registrar quién creó el cliente
+            await this.audit.log({
+                entity: 'Customer',
+                entityId: customerSaved.id,
+                action: 'CREATE',
+                user: data.user,
+            });
+
             // 4️⃣ Cargar relaciones
             const customerWithRelations = await this.customerRepo.findOne({
                 where: { id: customerSaved.id },
@@ -169,11 +203,13 @@ export class CustomersService {
             throw new Error('Customer not found');
         }
 
+        // 📸 NUEVO: foto ANTES de modificar nada
+        const before = this.snapshot(customer);
+
         // NO permitir modificar DNI ni tipo de identificación
         delete updates.idNumber;
         delete updates.idTypeId;
 
-        // Actualizar datos simples
         // Actualizar datos simples
         if (updates.firstName !== undefined)
             customer.firstName = updates.firstName.trim().toUpperCase();
@@ -219,6 +255,16 @@ export class CustomersService {
         }
 
         const customersave = await this.customerRepo.save(customer);
+
+        // 📝 NUEVO: registrar quién editó y qué cambió
+        await this.audit.log({
+            entity: 'Customer',
+            entityId: id,
+            action: 'UPDATE',
+            user,
+            changes: this.audit.diff(before, this.snapshot(customersave)),
+        });
+
         const customersavedata = await this.customerRepo.findOne({
             where: { id: customersave.id },
             relations: {
@@ -306,8 +352,6 @@ export class CustomersService {
             items,
         };
     }
-
-
 
     async getCustomersUpdatedAfter(lastUpdatedAt: Date | null) {
         // 👉 Si es null, devolver TODOS
