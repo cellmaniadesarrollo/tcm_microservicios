@@ -1,5 +1,4 @@
-// src/legacy/legacy.controller.ts
-import { Controller, Post, Put, Body, UseGuards, HttpCode, Request, Param } from '@nestjs/common';
+import { Controller, Post, Put, Body, UseGuards, HttpCode, Request, Param, Headers } from '@nestjs/common';
 import { LegacyAuthGuard } from './legacy-auth/legacy-auth.guard';
 import { LegacyService } from './legacy.service';
 
@@ -9,21 +8,24 @@ export class LegacyController {
 
     @Post('billing')
     @UseGuards(LegacyAuthGuard)
-    @HttpCode(200)  // 👈 200 porque ahora sí responde con datos
-    async syncLegacyData(@Body() payload: any, @Request() req: any) {
-        const tokenData = req.user;
-        const result = await this.legacyService.publishLegacyBilling(payload, tokenData);
-        return result;
+    @HttpCode(200)
+    async syncLegacyData(
+        @Body() payload: any,
+        @Request() req: any,
+        @Headers('x-signer-token') signerToken?: string,   // 🆕
+    ) {
+        return this.legacyService.publishLegacyBilling(payload, req.user, signerToken);
     }
+
     @Put('billing/:id')
     @UseGuards(LegacyAuthGuard)
     @HttpCode(200)
     async updateLegacyBilling(
-        @Param('id') id: string,        // 👈 capturar el id
+        @Param('id') id: string,
         @Body() payload: any,
         @Request() req: any,
+        @Headers('x-signer-token') signerToken?: string,   // 🆕
     ) {
-        const tokenData = req.user;
-        return this.legacyService.publishLegacyBillingUpdate(id, payload, tokenData);
+        return this.legacyService.publishLegacyBillingUpdate(id, payload, req.user, signerToken);
     }
 }

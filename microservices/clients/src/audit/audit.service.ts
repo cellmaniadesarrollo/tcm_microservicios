@@ -39,6 +39,7 @@ export class AuditService {
     user: any;
     source?: 'BILLING' | 'ORDERS';
     changes?: Record<string, { old: any; new: any }> | null;
+    signer?: { id: string; username: string } | null;
   }) {
     try {
       // El JWT trae el ID del usuario como `sub`
@@ -55,6 +56,8 @@ export class AuditService {
             p.user?.username ?? p.user?.name ?? p.user?.fullName ?? p.user?.email ?? null,
           companyId: p.user?.companyId != null ? String(p.user.companyId) : null,
           changes: p.changes ?? null,
+          signedByUserId: p.signer?.id ?? null,
+          signedByUsername: p.signer?.username ?? null,
         }),
       );
     } catch (e) {

@@ -11,6 +11,7 @@ import { User } from '../common/auth/decorators/user.decorator';
 import { Groups } from '../common/auth/decorators/groups.decorator';
 import { Features } from '../common/auth/decorators/features.decorator';
 import { CreateCustomerWithBillingDto } from './dto/create-customer-with-billing.dto';
+import { UpdateCustomerRequestDto } from './dto/update-customer-request.dto';
 
 @Controller('customers')
 @Features('orders')
@@ -64,37 +65,41 @@ export class CustomersController {
   @Post('save')
 
   async SaveCustomers(@Body() customerDto: CreateCustomerDto, @User() user: any,) {
-    //console.log(user)
+    // 🔐 El PIN viaja aparte, a nivel superior del payload, y no dentro del cliente
+    const { pin, ...customer } = customerDto as CreateCustomerDto & { pin?: string };
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'save_one_customer' },
         {
           internalToken: process.env.INTERNAL_SECRET,
-          customer: customerDto,   // 👈 enviar DTO validado
-          user
+          customer,   // 👈 DTO validado, sin el PIN
+          user,
+          pin,
         }
       )
     );
   }
 
-
   @Post('update')
-
-  async updateCustomer(@Body() body: { id: number; data: UpdateCustomerDto }, @User() user: any) {
-    console.log(body)
+  async updateCustomer(
+    @Body() body: UpdateCustomerRequestDto,
+    @User() user: any,
+  ) {
+    // ⚠️ No imprimir `body`: contiene el PIN
     return firstValueFrom(
-
       this.CustomerService.send(
         { cmd: 'update_one_customer' },
         {
           internalToken: process.env.INTERNAL_SECRET,
           id: body.id,
           updates: body.data,
-          user
-        }
-      )
+          user,
+          pin: body.pin,
+        },
+      ),
     );
   }
+
   @Post('list')
 
   @Groups('CASHIERS')
@@ -155,10 +160,11 @@ export class CustomersController {
   /** Crear BillingData nuevo y vincularlo al cliente */
   @Post('billing')
   async createBilling(@Body() dto: CreateBillingDto, @User() user: any) {
+    const { pin, ...data } = dto; // 🔐 el PIN va aparte
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'create_billing' },
-        { internalToken: process.env.INTERNAL_SECRET, ...dto, user },
+        { internalToken: process.env.INTERNAL_SECRET, ...data, user, pin },
       ),
     );
   }
@@ -184,10 +190,11 @@ export class CustomersController {
     @Body() dto: UpdateBillingDto,
     @User() user: any,
   ) {
+    const { pin, ...updates } = dto; // 🔐 el PIN no viaja dentro de updates
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'update_billing' },
-        { internalToken: process.env.INTERNAL_SECRET, id, updates: dto, user }, // Ya no necesitas el +id
+        { internalToken: process.env.INTERNAL_SECRET, id, updates, user, pin },
       ),
     );
   }
@@ -207,10 +214,11 @@ export class CustomersController {
   }
   @Post('with-billing')
   async saveCustomerWithBilling(@Body() dto: CreateCustomerWithBillingDto, @User() user: any) {
+    const { pin, ...data } = dto; // 🔐 el PIN va aparte
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'create_customer_with_billing' },
-        { internalToken: process.env.INTERNAL_SECRET, ...dto, user },
+        { internalToken: process.env.INTERNAL_SECRET, ...data, user, pin },
       ),
     );
   }
