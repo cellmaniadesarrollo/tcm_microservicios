@@ -1,21 +1,22 @@
 import { Type } from 'class-transformer';
-import { 
-  IsArray, 
-  IsDateString, 
-  IsNotEmpty, 
-  IsNumber, 
-  IsOptional, 
-  IsString, 
-  ValidateNested 
+import {
+  IsArray,
+  IsDateString,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Matches,
+  ValidateNested
 } from 'class-validator';
 
 class CreateContactDto {
   @IsNumber()
-  contactTypeId: number;
+  contactTypeId!: number;
 
   @IsString()
   @IsNotEmpty()
-  value: string;
+  value!: string;
 
   @IsOptional()
   isPrimary?: boolean = false;
@@ -57,16 +58,16 @@ class CreateAddressDto {
 
 export class CreateCustomerDto {
   @IsNumber()
-  idTypeId: number;
+  idTypeId!: number;
 
   @IsString()
-  idNumber: string;
+  idNumber!: string;
 
   @IsString()
-  firstName: string;
+  firstName!: string;
 
   @IsString()
-  lastName: string;
+  lastName!: string;
 
   @IsOptional()
   @IsDateString()
@@ -75,14 +76,21 @@ export class CreateCustomerDto {
   @IsOptional()
   @IsNumber()
   genderId?: number;
- 
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateContactDto)
-  contacts: CreateContactDto[];
+  contacts!: CreateContactDto[];
 
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateAddressDto)
-  addresses: CreateAddressDto[];
+  addresses!: CreateAddressDto[];
+
+  // 🔐 PIN de quien firma (solo si la cuenta lo exige).
+  // El controller lo separa del cliente antes de reenviarlo al MS.
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'El PIN debe tener 6 dígitos' })
+  pin?: string;
 }

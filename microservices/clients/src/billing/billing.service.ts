@@ -38,6 +38,7 @@ interface BillingUpsertInput {
     cityId?: number;
     isCompanyClient?: boolean;
     user?: any; // 👈 NUEVO: quién ejecuta la acción (para auditoría)
+    signer?: { id: string; username: string } | null;
     source?: 'BILLING' | 'ORDERS';
 }
 @Injectable()
@@ -174,6 +175,7 @@ export class BillingService {
                     cityId: data.cityId,
                     isCompanyClient: data.isCompanyClient ?? false,
                     user: data.user, // 👈 NUEVO
+                    signer: data.signer,
                 },
                 logger,
             );
@@ -287,6 +289,7 @@ export class BillingService {
                 entityId: billing.id,
                 action: 'UPDATE',
                 user: data.user,
+                signer: data.signer,
                 changes: this.audit.diff(billingBefore, this.billingSnapshot(billing)),
             });
 
@@ -342,6 +345,7 @@ export class BillingService {
                         entityId: customer.id,
                         action: 'UPDATE',
                         user: data.user,
+                        signer: data.signer,
                         changes: this.audit.diff(customerBefore, {
                             firstName: customer.firstName ?? null,
                             lastName: customer.lastName ?? null,
@@ -517,7 +521,7 @@ export class BillingService {
         const user = { ...raw.user, companyId };
         const normalized = await this.normalizeLegacyPayload(raw, user);
 
-        return this.createFromLegacy(normalized);
+        return this.createFromLegacy({ ...normalized, signer: raw.signer ?? null });
     }
 
     async createFromLegacy(data: any) {
@@ -551,6 +555,7 @@ export class BillingService {
                     city: data.city,
                     isCompanyClient: data.isCompanyClient ?? false,
                     user: this.legacyUser(data.user), // 👈 NUEVO
+                    signer: data.signer ?? null,
                 },
                 logger,
             );
@@ -572,7 +577,7 @@ export class BillingService {
         const user = { ...raw.user, companyId };
         const normalized = await this.normalizeLegacyPayload(raw, user);
 
-        return this.updateFromLegacy({ ...normalized, billingId: raw.billingId }); // 👈 pasa el id
+            return this.updateFromLegacy({ ...normalized, billingId: raw.billingId, signer: raw.signer ?? null }); // 🆕
     }
 
     async updateFromLegacy(data: any) {
@@ -649,6 +654,7 @@ export class BillingService {
                     entityId: existingBilling.id,
                     action: 'UPDATE',
                     user: this.legacyUser(data.user),
+                    signer: data.signer,
                     changes: this.audit.diff(legacyBefore, this.billingSnapshot(result)),
                 });
             }
@@ -827,6 +833,9 @@ export class BillingService {
             if (!data?.user?.companyId)
                 throw new RpcException(new BadRequestException('companyId es requerido'));
 
+            if (!data?.signer?.id)
+                throw new RpcException(new BadRequestException('Firmante no resuelto'));
+
             const c = data.customer;
             if (!c?.idNumber)
                 throw new RpcException(new BadRequestException('idNumber del cliente es requerido'));
@@ -868,6 +877,8 @@ export class BillingService {
                             reference: a.reference,
                             postalCode: a.postalCode,
                         })),
+                        createdByUserId: data.signer.id,
+                        createdByUsername: data.signer.username,
                     });
 
                     const saved = await customerRepo.save(newCustomer);
@@ -1093,6 +1104,7 @@ export class BillingService {
             entityId: billingSaved.id,
             action: 'CREATE',
             user: input.user,
+            signer: input.signer,
             changes: this.billingCreateSnapshot(billingSaved),
         });
 
@@ -1181,6 +1193,8 @@ export class BillingService {
                 birthDate: input.birthdate ? new Date(input.birthdate) : undefined,
                 isActive: true,
                 contacts,
+                createdByUserId: input.signer?.id ?? null,
+                createdByUsername: input.signer?.username ?? null,
             });
 
             customer = await this.customerRepo.save(newCustomer);
@@ -1192,6 +1206,7 @@ export class BillingService {
                 entityId: customer.id,
                 action: 'CREATE',
                 user: input.user,
+                signer: input.signer,
                 changes: this.customerCreateSnapshot(customer),
             });
 
