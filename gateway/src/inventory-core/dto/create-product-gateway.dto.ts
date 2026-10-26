@@ -1,6 +1,7 @@
 // gateway/src/inventory-core/dto/create-product-gateway.dto.ts
 import { Type } from 'class-transformer';
 import {
+    ArrayMinSize,
     ArrayUnique, IsArray, IsBoolean, IsEnum, IsInt, IsNumber,
     IsOptional, IsString, IsUUID, MaxLength, Min,
 } from 'class-validator';
@@ -54,17 +55,11 @@ export class CreateProductGatewayDto {
 
     // ───────── Dónde puede usarse ─────────
 
-    @IsOptional()
-    @IsBoolean()
-    isSellable?: boolean;
-
-    @IsOptional()
-    @IsBoolean()
-    isRepairPart?: boolean;
-
-    @IsOptional()
-    @IsBoolean()
-    isCustomizable?: boolean;
+    @IsArray({ message: 'Los usos deben ser una lista' })
+    @ArrayMinSize(1, { message: 'Selecciona al menos un uso' })
+    @ArrayUnique()
+    @IsUUID('4', { each: true, message: 'Cada uso debe ser un UUID válido' })
+    usageIds!: string[];
 
     // ───────── Inventario ─────────
 

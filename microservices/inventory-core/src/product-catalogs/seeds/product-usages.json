@@ -1,0 +1,5 @@
+[
+  { "code": "SELLABLE",     "name": "Ventas",                 "area": "SALES",         "isSystem": true },
+  { "code": "REPAIR_PART",  "name": "Repuesto de reparación", "area": "REPAIRS",       "isSystem": true },
+  { "code": "CUSTOMIZABLE", "name": "Personalizable",         "area": "CUSTOMIZATION", "isSystem": true }
+]

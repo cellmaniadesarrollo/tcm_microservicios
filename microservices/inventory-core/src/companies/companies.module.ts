@@ -6,6 +6,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CompanyReplica } from './entities/company-replica.entity';
 import { BranchReplica } from './entities/branch-replica.entity';
 import { ClientsModule, Transport } from '@nestjs/microservices';
+import { MainBranchService } from './main-branch.service';
 
 
 @Module({
@@ -28,7 +29,7 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
     ]),
   ],
   controllers: [CompaniesController],
-  providers: [CompaniesService, CompaniesEventsListener],
-  exports: [CompaniesEventsListener]
+  providers: [CompaniesService, CompaniesEventsListener, MainBranchService],
+  exports: [CompaniesEventsListener, MainBranchService]
 })
 export class CompaniesModule { }
