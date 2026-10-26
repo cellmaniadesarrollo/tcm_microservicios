@@ -700,19 +700,24 @@ export class OrdersController {
     const { files, formData } = await parseMultipartRequest(request);
 
     const cedulaCount = Number(formData.cedulaCount);
-    const imeiCount = Number(formData.imeiCount);
+    const imeiCount = Number(formData.imeiCount ?? 0);
+
     if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
       throw new BadRequestException('cedulaCount inválido');
     }
     if (!Number.isInteger(imeiCount) || imeiCount < 0) {
       throw new BadRequestException('imeiCount inválido');
     }
+
     const deviceCount = files.length - cedulaCount - imeiCount;
+    if (deviceCount < 0) {
+      throw new BadRequestException('Cantidad de archivos inconsistente con los conteos');
+    }
+
+    // Mínimos comunes a todos los tipos de dispositivo.
+    // El mínimo de IMEI (ARCOTEL) solo aplica a CELLPHONE y lo valida el MS.
     if (cedulaCount < 2) {
       throw new BadRequestException('Debes adjuntar mínimo 2 fotos de la cédula');
-    }
-    if (imeiCount < 2) {
-      throw new BadRequestException('Debes adjuntar mínimo 2 fotos del IMEI (ARCOTEL)');
     }
     if (deviceCount < 2) {
       throw new BadRequestException('Debes adjuntar mínimo 2 fotos del dispositivo');
