@@ -10,12 +10,16 @@ import { ProductImagesService } from './images/product-images.service';
 import { ProductModel } from './entities/product-model.entity';
 import { Product } from './entities/product.entity';
 import { ProductName } from '../product-catalogs/entities/product-name.entity';
+import { AuditLogModule } from '../audit-log/audit-log.module';
+import { ProductUsage } from '../product-catalogs/entities/product-usage.entity';
+import { ProductUsageLink } from './entities/product-usage-link.entity';
 
 @Module({
   imports: [
     ProductCatalogsModule,
     AwsS3Module,
-    TypeOrmModule.forFeature([ProductImage, ProductModel, Product, ProductName]), // registra la entidad si usas autoLoadEntities
+    TypeOrmModule.forFeature([ProductImage, ProductModel, Product, ProductName, ProductUsageLink]), // registra la entidad si usas autoLoadEntities
+    AuditLogModule
   ],
   controllers: [ProductsController, ProductImagesController],
   providers: [ProductsService, ProductImagesService],

@@ -4,6 +4,10 @@ import { InventoryCoreController } from './inventory-core.controller';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AuthModule } from '../common/auth/auth.module';
 import { InventoryCoreServiceClient } from '../common/microservices/inventory-core-service-client';
+import { SuppliersController } from './suppliers/suppliers.controller';
+import { SuppliersService } from './suppliers/suppliers.service';
+import { ReceiptsController } from './receipts/receipts.controller';
+import { ReceiptsService } from './receipts/receipts.service';
 
 @Module({
   imports: [
@@ -20,7 +24,7 @@ import { InventoryCoreServiceClient } from '../common/microservices/inventory-co
     ]),
     AuthModule,
   ],
-  controllers: [InventoryCoreController],
-  providers: [InventoryCoreService, InventoryCoreServiceClient,],
+  controllers: [InventoryCoreController, SuppliersController, ReceiptsController],
+  providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService],
 })
 export class InventoryCoreModule { }

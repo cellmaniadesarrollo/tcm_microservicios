@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InventoryCoreServiceClient } from '../common/microservices/inventory-core-service-client';
 import { CreateProductGatewayDto } from './dto/create-product-gateway.dto';
+import { ListProductsQueryDto } from './dto/list-products-query.dto';
+import { UpdateProductGatewayDto } from './dto/update-product-gateway.dto';
 type UserCtx = { userId: string; companyId: string; branchId?: string };
 @Injectable()
 export class InventoryCoreService {
@@ -32,5 +34,28 @@ export class InventoryCoreService {
     }
     removeProductImage(productId: string, imageId: string, user: UserCtx) {
         return this.inventoryClient.send('remove_product_image', { productId, imageId, user });
+    }
+
+    listProducts(query: ListProductsQueryDto, user: UserCtx) {
+        return this.inventoryClient.send('list_products', { query, user });
+    }
+    getProductFilters(user: UserCtx) {
+        return this.inventoryClient.send('get_product_filters', { user });
+    }
+
+    updateProduct(id: string, dto: UpdateProductGatewayDto, user: UserCtx) {
+        return this.inventoryClient.send('update_product', { id, dto, user });
+    }
+
+    deleteProduct(id: string, user: UserCtx) {
+        return this.inventoryClient.send('delete_product', { id, user });
+    }
+    getProduct(id: string, user: UserCtx) {
+        console.log(id)
+        return this.inventoryClient.send('get_product', { id, user });
+    }
+
+    getProductHistory(id: string, page: number, limit: number, user: UserCtx) {
+        return this.inventoryClient.send('get_product_history', { id, page, limit, user });
     }
 }

@@ -8,18 +8,27 @@ import { ProductName } from '../../product-catalogs/entities/product-name.entity
 import { Color } from '../../product-catalogs/entities/color.entity';
 import { Quality } from '../../product-catalogs/entities/quality.entity';
 import { ProductKind } from '../../common/enums/product-kind.enum';
-import { TrackingMode, BillingMode } from '../enums/product.enums';
+import { TrackingMode } from '../enums/product.enums';
 import { ProductModel } from './product-model.entity';
 import { ProductImage } from './product-image.entity';
+import { ProductUsageLink } from './product-usage-link.entity';
 
 /**
- * Producto (SKU). No guarda existencias ni costos: eso vive en lotes, saldos y unidades.
+ * Producto (SKU) = ficha de catálogo. No guarda existencias, costos ni
+ * condiciones fiscales reales: eso vive en el lote, los saldos y las unidades.
  *
  * code -> correlativo numérico por empresa. Inmutable.
  * sku  -> {KIND}-{TIPO}-{MARCA}-{code con ceros}, ej: REP-BAT-SAM-000111. Inmutable.
  *
- * Las banderas is_* indican PARA QUÉ puede usarse el producto (capacidad del catálogo).
- * Dónde está una pieza y en qué estado vive en lote, saldo y unidad.
+ * Los campos de la sección "Valores por defecto" solo PRECARGAN el ingreso.
+ * Al confirmar un ingreso se copian al lote y desde ahí el lote manda.
+ * Cambiarlos aquí no afecta lotes ya ingresados.
+ *
+ * Validaciones que se hacen en el servicio (no se pueden con CHECK):
+ *  - Debe tener al menos un uso (usages).
+ *  - kind debe coincidir con productType.kind.
+ *  - Un DEVICE tiene exactamente un modelo compatible.
+ *  - billableInRepairOrders = true exige billableInSales = true.
  */
 @Entity('products')
 @Index('uq_products_company_code', ['companyId', 'code'], { unique: true })
@@ -31,13 +40,8 @@ import { ProductImage } from './product-image.entity';
 @Index('idx_products_company_type', ['companyId', 'productTypeId'])
 @Index('idx_products_company_kind', ['companyId', 'kind'])
 @Index('idx_products_company_name', ['companyId', 'productNameId'])
-@Index('idx_products_company_sellable', ['companyId', 'isSellable'])
-@Index('idx_products_company_repair', ['companyId', 'isRepairPart'])
-@Index('idx_products_company_custom', ['companyId', 'isCustomizable'])
 // Un equipo completo siempre es serializado
 @Check('chk_products_device_serial', `"kind" <> 'DEVICE' OR "tracking_mode" = 'SERIAL'`)
-// Todo producto debe servir al menos para un área
-@Check('chk_products_has_usage', `"is_sellable" OR "is_repair_part" OR "is_customizable"`)
 export class Product {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
@@ -79,39 +83,40 @@ export class Product {
 
     // ───────── Dónde puede usarse (vistas por encargado) ─────────
 
-    /** Se puede vender directo (vista de ventas). */
-    @Column({ name: 'is_sellable', default: true })
-    isSellable!: boolean;
+    /** Áreas/usos para los que sirve el producto (ventas, reparaciones, etc.). Mínimo uno. */
+    @OneToMany(() => ProductUsageLink, (l) => l.product, { cascade: true })
+    usages!: ProductUsageLink[];
 
-    /** Se consume como pieza en una orden de reparación (vista de repuestos). */
-    @Column({ name: 'is_repair_part', default: false })
-    isRepairPart!: boolean;
-
-    /** Se puede personalizar (vista de personalizaciones). */
-    @Column({ name: 'is_customizable', default: false })
-    isCustomizable!: boolean;
-
-    // ───────── Inventario y comercial ─────────
+    // ───────── Inventario ─────────
 
     /** Alerta de stock bajo. */
     @Column({ name: 'min_stock', type: 'int', default: 0 })
     minStock!: number;
 
-    /** Garantía en días (0 = sin garantía). */
+    // ───────── Valores por defecto para nuevos lotes ─────────
+    // Solo precargan el ingreso. El lote guarda su propia copia (snapshot).
+
+    /** Garantía por defecto en días (0 = sin garantía). */
     @Column({ name: 'warranty_days', type: 'int', default: 0 })
     warrantyDays!: number;
 
-    /** Precio sugerido por defecto; cada lote puede definir el suyo. */
+    /** Precio de venta sugerido por defecto; cada lote define el suyo. */
     @Column({ name: 'base_price', type: 'numeric', precision: 12, scale: 2, default: 0 })
     basePrice!: string;
 
+    /** Por defecto: el producto lleva impuesto. La tarifa la decide facturación. */
     @Column({ name: 'has_tax', default: true })
     hasTax!: boolean;
 
-    @Column({ name: 'billing_mode', type: 'enum', enum: BillingMode, default: BillingMode.NO })
-    billingMode!: BillingMode;
+    /** Por defecto: el precio de venta ya incluye el impuesto. */
+    @Column({ name: 'price_includes_tax', default: true })
+    priceIncludesTax!: boolean;
 
-    /** Facturable específicamente al consumirse en una orden de reparación. */
+    /** Por defecto: se vende bajo factura (si es true, la venta se factura sí o sí). */
+    @Column({ name: 'billable_in_sales', default: false })
+    billableInSales!: boolean;
+
+    /** Por defecto: facturable al consumirse en una orden de reparación. Exige billableInSales. */
     @Column({ name: 'billable_in_repair_orders', default: false })
     billableInRepairOrders!: boolean;
 

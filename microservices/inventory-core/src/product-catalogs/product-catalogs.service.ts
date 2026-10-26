@@ -9,6 +9,7 @@ import { Quality } from './entities/quality.entity';
 
 import productTypesSeed from './seeds/product-types.json';
 import colorsSeed from './seeds/colors.json';
+import productUsagesSeed from './seeds/product-usages.json';
 import qualitiesSeed from './seeds/qualities.json';
 import productNamesSeed from './seeds/product-names.json';
 import { Brand } from '../devices-replica/entities/brand.entity';
@@ -16,6 +17,7 @@ import { Model } from '../devices-replica/entities/model.entity';
 import { cleanDisplayName, normalizeNameKey } from '../common/helpers/normalize-name';
 import { ProductName } from './entities/product-name.entity';
 import { WarehouseArea } from '../products/enums/product.enums';
+import { ProductUsage } from './entities/product-usage.entity';
 
 /** Clave del advisory lock: evita que varias instancias siembren a la vez. */
 const SEED_LOCK_KEY = 730_100_1;
@@ -24,7 +26,12 @@ export interface SelectOption {
     id: string | number;
     name: string;
 }
-
+export interface UsageOption {
+    id: string;          // UUID de product_usages (es lo que se envía al crear el producto)
+    code: string;        // SELLABLE, REPAIR_PART, CUSTOMIZABLE...
+    name: string;
+    area: WarehouseArea;
+}
 export interface PartRequestFormOptions {
     types: SelectOption[];
     colors: SelectOption[];
@@ -32,7 +39,7 @@ export interface PartRequestFormOptions {
     brands: SelectOption[];
     names: SelectOption[];
     kinds: SelectOption[];
-    usages: { key: 'isSellable' | 'isRepairPart' | 'isCustomizable'; name: string; area: WarehouseArea }[];
+    usages: UsageOption[];
 }
 @Injectable()
 export class ProductCatalogsService implements OnApplicationBootstrap {
@@ -95,7 +102,15 @@ export class ProductCatalogsService implements OnApplicationBootstrap {
                 return { name, normalizedKey: normalizeNameKey(name) };
             }),
         );
-
+        const usages = await this.insertMissing(
+            em, ProductUsage, companyIds,
+            productUsagesSeed.map((u) => ({
+                code: u.code,
+                name: u.name,
+                area: u.area as WarehouseArea,
+                isSystem: u.isSystem,
+            })),
+        );
         this.logger.log(
             `Seed de catálogos (${companyIds.length} empresa/s): ` +
             `+${types} tipos, +${colors} colores, +${qualities} calidades, +${names} nombres`,
@@ -138,11 +153,10 @@ export class ProductCatalogsService implements OnApplicationBootstrap {
         const select = { id: true, name: true } as const;
         const order = { name: 'ASC' } as const;
 
-        const [types, colors, qualities, brands, names] = await Promise.all([
+        const [types, colors, qualities, brands, names, usages] = await Promise.all([
             this.dataSource.getRepository(ProductType).find({ where, select, order }),
             this.dataSource.getRepository(Color).find({ where, select, order }),
             this.dataSource.getRepository(Quality).find({ where, select, order }),
-            // 4. Ahora brands va en la posición 4
             this.dataSource
                 .getRepository(Brand)
                 .createQueryBuilder('b')
@@ -150,18 +164,18 @@ export class ProductCatalogsService implements OnApplicationBootstrap {
                 .addSelect('b.brands_name', 'name')
                 .orderBy('b.brands_name', 'ASC')
                 .getRawMany<SelectOption>(),
-            // 5. ProductName (nombres/modelos) va en la posición 5 para que coincida con 'names'
             this.dataSource.getRepository(ProductName).find({ where, select, order }),
+            this.dataSource.getRepository(ProductUsage).find({
+                where,
+                select: { id: true, code: true, name: true, area: true },
+                order,
+            }),
         ]);
 
         return {
             types, colors, qualities, brands, names,
             kinds: Object.values(ProductKind).map((k) => ({ id: k, name: k })),
-            usages: [
-                { key: 'isSellable', name: 'Ventas', area: WarehouseArea.SALES },
-                { key: 'isRepairPart', name: 'Repuesto de reparación', area: WarehouseArea.REPAIRS },
-                { key: 'isCustomizable', name: 'Personalizable', area: WarehouseArea.CUSTOMIZATION },
-            ],
+            usages,
         };
     }
 

@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Repository, SelectQueryBuilder } from 'typeorm';
 import { RpcException } from '@nestjs/microservices';
 import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { PartRequest } from './entities/part-request.entity';
@@ -41,7 +41,7 @@ export class PartRequestPaymentService {
             filtro?: 'pendientes' | 'pagados' | 'todos';
             providerId?: number;
             llegada?: 'con_llegada' | 'sin_llegada';
-            revision?: 'por_revisar' | 'revisadas'; // solo aplica con llegada = con_llegada
+            revision?: 'por_revisar' | 'revisadas';
         },
         user: { companyId: string },
     ) {
@@ -49,11 +49,6 @@ export class PartRequestPaymentService {
         const limit = dto.limit && dto.limit > 0 ? Math.min(dto.limit, 100) : 20;
         const filtro = dto.filtro ?? 'todos';
 
-        // Búsqueda:
-        //   #123        → número de orden exacto
-        //   SR-42       → número de solicitud exacto
-        //   42          → número de solicitud, o texto
-        //   sam a13     → palabras sueltas (marca, modelo, descripción, proveedor...)
         const searchTerm = dto.search?.trim();
         const orderNumberMatch = searchTerm?.match(/^#(\d+)$/);
         const orderNumberValue = orderNumberMatch ? parseInt(orderNumberMatch[1], 10) : null;
@@ -62,7 +57,7 @@ export class PartRequestPaymentService {
         const numeroBuscado = requestNumberMatch ? parseInt(requestNumberMatch[1], 10) : null;
         const numeroConPrefijo = !!searchTerm && /^SR/i.test(searchTerm);
 
-        const escapar = (s: string) => s.replace(/[\\%_]/g, '\\$&'); // % y _ no actúan como comodín
+        const escapar = (s: string) => s.replace(/[\\%_]/g, '\\$&');
         const tokens = searchTerm ? searchTerm.split(/\s+/).filter(Boolean) : [];
 
         const filtrosResponse = {
@@ -82,7 +77,158 @@ export class PartRequestPaymentService {
         };
 
         // ═══════════════════════════════════════════════════════════
-        // CASO 1: PAGADOS → listar por PAGO (no agrupar por proveedor)
+        // HELPERS COMPARTIDOS
+        // ═══════════════════════════════════════════════════════════
+
+        // ¿el pago tiene alguna solicitud que cumpla la condición? (EXISTS para no recortar allocations)
+        const existeSolicitud = (cond: string, conOrden = false) => {
+            const sb = this.paymentRepo
+                .createQueryBuilder('p2')
+                .select('1')
+                .innerJoin('p2.allocations', 'a2')
+                .innerJoin('a2.partRequest', 'pr2');
+            if (conOrden) sb.innerJoin('pr2.order', 'o2');
+            return `EXISTS (${sb.where('p2.id = pago.id').andWhere(cond).getQuery()})`;
+        };
+
+        // ¿la solicitud pr2 tuvo LLEGADO_ASIGNADO alguna vez?
+        const TUVO_LLEGADA = `EXISTS (
+        SELECT 1 FROM part_request_status_history h
+        WHERE h.part_request_id = pr2.id
+          AND h.estado_nuevo = :estadoLlegado
+    )`;
+
+        // Búsqueda sobre PAGOS (alias: pago, provider)
+        const aplicarBusquedaPagados = (q: SelectQueryBuilder<any>) => {
+            if (orderNumberValue !== null) {
+                q.andWhere(existeSolicitud('o2.order_number = :orderNumber', true), {
+                    orderNumber: orderNumberValue,
+                });
+            } else if (numeroBuscado !== null && numeroConPrefijo) {
+                q.andWhere(existeSolicitud('pr2.numero = :numeroBuscado'), { numeroBuscado });
+            } else {
+                tokens.forEach((tok, i) => {
+                    const numeroSql =
+                        numeroBuscado !== null
+                            ? `OR ${existeSolicitud('pr2.numero = :numeroBuscado')}`
+                            : '';
+                    q.andWhere(
+                        `(provider.nombre ILIKE :t${i}
+                      OR pago.notas ILIKE :t${i}
+                      OR ${existeSolicitud(
+                            `(pr2.descripcion ILIKE :t${i}
+                            OR pr2.marca ILIKE :t${i}
+                            OR pr2.modelo ILIKE :t${i}
+                            OR pr2.modelo_tecnico ILIKE :t${i})`,
+                        )}
+                      ${numeroSql})`,
+                        {
+                            [`t${i}`]: `%${escapar(tok)}%`,
+                            ...(numeroBuscado !== null ? { numeroBuscado } : {}),
+                        },
+                    );
+                });
+            }
+        };
+
+        // Búsqueda sobre SOLICITUDES pendientes (alias: pr, order, provider)
+        const aplicarBusquedaPendientes = (q: SelectQueryBuilder<any>) => {
+            if (orderNumberValue !== null) {
+                q.andWhere('order.order_number = :orderNumber', { orderNumber: orderNumberValue });
+            } else if (numeroBuscado !== null && numeroConPrefijo) {
+                q.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
+            } else {
+                tokens.forEach((tok, i) => {
+                    const numeroSql = numeroBuscado !== null ? 'pr.numero = :numeroBuscado OR ' : '';
+                    q.andWhere(
+                        `(${numeroSql}pr.descripcion ILIKE :t${i}
+                      OR pr.marca ILIKE :t${i}
+                      OR pr.modelo ILIKE :t${i}
+                      OR pr.modelo_tecnico ILIKE :t${i}
+                      OR provider.nombre ILIKE :t${i})`,
+                        {
+                            [`t${i}`]: `%${escapar(tok)}%`,
+                            ...(numeroBuscado !== null ? { numeroBuscado } : {}),
+                        },
+                    );
+                });
+            }
+        };
+
+        // ═══════════════════════════════════════════════════════════
+        // CONTEOS DE LA BÚSQUEDA EN LAS OTRAS VISTAS
+        // ═══════════════════════════════════════════════════════════
+        let conteosBusqueda: {
+            pendientes: number;
+            pagados: number;
+            pagados_con_llegada: number;
+            pagados_sin_llegada: number;
+        } | null = null;
+
+        if (searchTerm) {
+            const contarPagados = async (llegada?: 'con_llegada' | 'sin_llegada') => {
+                const q = this.paymentRepo
+                    .createQueryBuilder('pago')
+                    .innerJoin('pago.provider', 'provider')
+                    .where('provider.company_id = :companyId', { companyId: user.companyId });
+
+                if (dto.providerId) {
+                    q.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
+                }
+                aplicarBusquedaPagados(q);
+
+                if (llegada) {
+                    const cond = llegada === 'con_llegada' ? TUVO_LLEGADA : `NOT ${TUVO_LLEGADA}`;
+                    q.andWhere(existeSolicitud(cond), { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO });
+                }
+
+                const raw = await q.select('COUNT(DISTINCT pago.id)', 'cnt').getRawOne();
+                return Number(raw?.cnt ?? 0);
+            };
+
+            const contarPendientes = async () => {
+                const q = this.partRequestRepo
+                    .createQueryBuilder('pr')
+                    .innerJoinAndSelect('pr.sourcing', 'sourcing')
+                    .innerJoin('sourcing.provider', 'provider')
+                    .leftJoin('pr.order', 'order')
+                    .leftJoinAndSelect('pr.pagoAllocations', 'allocations')
+                    .where('pr.company_id = :companyId', { companyId: user.companyId })
+                    .andWhere('pr.estado != :cancelado', { cancelado: PartRequestStatus.CANCELADO });
+
+                if (dto.providerId) q.andWhere('provider.id = :providerId', { providerId: dto.providerId });
+                aplicarBusquedaPendientes(q);
+
+                const rows = await q.getMany();
+                return rows.filter((pr) => {
+                    const precio =
+                        Number(pr.sourcing?.precio ?? 0) * Number(pr.sourcing?.cantidad ?? 1) +
+                        Number(pr.sourcing?.precio_transporte ?? 0);
+                    const pagado = (pr.pagoAllocations ?? []).reduce(
+                        (s, a) => s + Number(a.monto_asignado),
+                        0,
+                    );
+                    return Number((precio - pagado).toFixed(2)) > 0;
+                }).length;
+            };
+
+            const [pendientes, pagados, pagadosCon, pagadosSin] = await Promise.all([
+                contarPendientes(),
+                contarPagados(),
+                contarPagados('con_llegada'),
+                contarPagados('sin_llegada'),
+            ]);
+
+            conteosBusqueda = {
+                pendientes,
+                pagados,
+                pagados_con_llegada: pagadosCon,
+                pagados_sin_llegada: pagadosSin,
+            };
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // CASO 1: PAGADOS → listar por PAGO
         // ═══════════════════════════════════════════════════════════
         if (filtro === 'pagados') {
             const qb = this.paymentRepo
@@ -101,67 +247,13 @@ export class PartRequestPaymentService {
                 qb.andWhere('pago.provider_id = :providerId', { providerId: dto.providerId });
             }
 
-            // Subconsulta: ¿el pago tiene alguna solicitud que cumpla la condición?
-            // Se usa EXISTS (y no un andWhere sobre el join) para no recortar las allocations del pago.
-            const existeSolicitud = (cond: string, conOrden = false) => {
-                const sb = this.paymentRepo
-                    .createQueryBuilder('p2')
-                    .select('1')
-                    .innerJoin('p2.allocations', 'a2')
-                    .innerJoin('a2.partRequest', 'pr2');
-                if (conOrden) sb.innerJoin('pr2.order', 'o2');
-                return `EXISTS (${sb.where('p2.id = pago.id').andWhere(cond).getQuery()})`;
-            };
-
-            // ¿la solicitud pr2 tuvo LLEGADO_ASIGNADO alguna vez? (según el historial)
-            const TUVO_LLEGADA = `EXISTS (
-            SELECT 1 FROM part_request_status_history h
-            WHERE h.part_request_id = pr2.id
-              AND h.estado_nuevo = :estadoLlegado
-        )`;
-
-            const aplicarBusquedaPagados = (q: typeof qb) => {
-                if (orderNumberValue !== null) {
-                    q.andWhere(existeSolicitud('o2.order_number = :orderNumber', true), {
-                        orderNumber: orderNumberValue,
-                    });
-                } else if (numeroBuscado !== null && numeroConPrefijo) {
-                    q.andWhere(existeSolicitud('pr2.numero = :numeroBuscado'), { numeroBuscado });
-                } else {
-                    tokens.forEach((tok, i) => {
-                        const numeroSql =
-                            numeroBuscado !== null
-                                ? `OR ${existeSolicitud('pr2.numero = :numeroBuscado')}`
-                                : '';
-                        q.andWhere(
-                            `(provider.nombre ILIKE :t${i}
-                          OR pago.notas ILIKE :t${i}
-                          OR ${existeSolicitud(
-                                `(pr2.descripcion ILIKE :t${i}
-                                OR pr2.marca ILIKE :t${i}
-                                OR pr2.modelo ILIKE :t${i}
-                                OR pr2.modelo_tecnico ILIKE :t${i})`,
-                            )}
-                          ${numeroSql})`,
-                            {
-                                [`t${i}`]: `%${escapar(tok)}%`,
-                                ...(numeroBuscado !== null ? { numeroBuscado } : {}),
-                            },
-                        );
-                    });
-                }
-            };
-
-            // con_llegada → alguna solicitud del pago tuvo LLEGADO_ASIGNADO alguna vez
-            // sin_llegada → alguna solicitud del pago nunca lo tuvo
-            const aplicarFiltroLlegada = (q: typeof qb) => {
+            const aplicarFiltroLlegada = (q: SelectQueryBuilder<any>) => {
                 if (!dto.llegada) return;
                 const cond = dto.llegada === 'con_llegada' ? TUVO_LLEGADA : `NOT ${TUVO_LLEGADA}`;
                 q.andWhere(existeSolicitud(cond), { estadoLlegado: PartRequestStatus.LLEGADO_ASIGNADO });
             };
 
-            // Revisión (solo sobre solicitudes que tuvieron llegada)
-            const aplicarFiltroRevision = (q: typeof qb) => {
+            const aplicarFiltroRevision = (q: SelectQueryBuilder<any>) => {
                 if (!dto.revision || dto.llegada !== 'con_llegada') return;
                 const cond =
                     dto.revision === 'por_revisar'
@@ -174,7 +266,6 @@ export class PartRequestPaymentService {
             aplicarFiltroLlegada(qb);
             aplicarFiltroRevision(qb);
 
-            // totalQb usa exactamente las mismas condiciones (ya no dependen de joins)
             const totalQb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .innerJoin('pago.provider', 'provider')
@@ -196,8 +287,7 @@ export class PartRequestPaymentService {
                 .take(limit)
                 .getMany();
 
-            // Contador: solicitudes pagadas, que tuvieron llegada y aún sin revisar
-            // (respeta empresa y proveedor, ignora la búsqueda para que el badge sea estable)
+            // Contador de "por revisar" (ignora la búsqueda para que el badge sea estable)
             const porRevisarQb = this.paymentRepo
                 .createQueryBuilder('pago')
                 .innerJoin('pago.provider', 'provider')
@@ -230,7 +320,7 @@ export class PartRequestPaymentService {
                 : [];
             const tieneComprobante = new Set(attachments.map((a) => a.entity_id));
 
-            // Solicitudes de estos pagos que alguna vez tuvieron LLEGADO_ASIGNADO
+            // Solicitudes que alguna vez tuvieron LLEGADO_ASIGNADO
             const prIdsPagos = payments.flatMap((p) => (p.allocations ?? []).map((a) => a.part_request_id));
             const filasLlegada = prIdsPagos.length
                 ? await this.partRequestRepo.manager
@@ -243,7 +333,6 @@ export class PartRequestPaymentService {
             const tuvoLlegada = new Set<number>(filasLlegada.map((r) => Number(r.id)));
 
             const data = payments.map((p) => {
-                // Solo las solicitudes que corresponden a la pestaña activa
                 const cubiertas = (p.allocations ?? []).filter((a) => {
                     const llegada = tuvoLlegada.has(a.part_request_id);
                     const revisada = !!a.partRequest?.revisada_at;
@@ -265,9 +354,7 @@ export class PartRequestPaymentService {
                     notas: p.notas ?? null,
                     cantidad_solicitudes_cubiertas: cubiertas.length,
                     tiene_comprobante: tieneComprobante.has(p.id),
-                    provider: p.provider
-                        ? { id: p.provider.id, nombre: p.provider.nombre }
-                        : null,
+                    provider: p.provider ? { id: p.provider.id, nombre: p.provider.nombre } : null,
 
                     solicitudes_cubiertas: cubiertas.map((a) => ({
                         id: a.part_request_id,
@@ -291,7 +378,6 @@ export class PartRequestPaymentService {
                         fecha_resolucion_litigio: a.partRequest?.arrival?.fecha_resolucion ?? null,
                         descripcion_resolucion_litigio: a.partRequest?.arrival?.descripcion_resolucion ?? null,
 
-                        // Llegada y revisión
                         tuvo_llegada: tuvoLlegada.has(a.part_request_id),
                         revisada: !!a.partRequest?.revisada_at,
                         revisada_at: a.partRequest?.revisada_at ?? null,
@@ -310,6 +396,7 @@ export class PartRequestPaymentService {
                 },
                 filtros: filtrosResponse,
                 contadores: { por_revisar: porRevisar },
+                conteos_busqueda: conteosBusqueda,
             };
         }
 
@@ -332,26 +419,7 @@ export class PartRequestPaymentService {
             qb.andWhere('provider.id = :providerId', { providerId: dto.providerId });
         }
 
-        if (orderNumberValue !== null) {
-            qb.andWhere('order.order_number = :orderNumber', { orderNumber: orderNumberValue });
-        } else if (numeroBuscado !== null && numeroConPrefijo) {
-            qb.andWhere('pr.numero = :numeroBuscado', { numeroBuscado });
-        } else {
-            tokens.forEach((tok, i) => {
-                const numeroSql = numeroBuscado !== null ? 'pr.numero = :numeroBuscado OR ' : '';
-                qb.andWhere(
-                    `(${numeroSql}pr.descripcion ILIKE :t${i}
-                  OR pr.marca ILIKE :t${i}
-                  OR pr.modelo ILIKE :t${i}
-                  OR pr.modelo_tecnico ILIKE :t${i}
-                  OR provider.nombre ILIKE :t${i})`,
-                    {
-                        [`t${i}`]: `%${escapar(tok)}%`,
-                        ...(numeroBuscado !== null ? { numeroBuscado } : {}),
-                    },
-                );
-            });
-        }
+        aplicarBusquedaPendientes(qb);
 
         const partRequests = await qb.orderBy('pr.updatedAt', 'DESC').getMany();
 
@@ -370,14 +438,12 @@ export class PartRequestPaymentService {
             return { pr, montoProducto, montoTransporte, precio, totalPagado, saldoPendiente, estadoPago };
         });
 
-        // pendientes = no PAGADO; todos = todo
         const filtered = enriched.filter((e) => {
             if (filtro === 'pendientes') return e.estadoPago !== 'PAGADO';
             return true;
         });
 
-        // ─── Fecha y responsable de la solicitud de pago ────────────────
-        // = último cambio de estado hacia ESPERA_DE_PAGO (encontrado nacional)
+        // Fecha y responsable de la solicitud de pago
         const manager = this.partRequestRepo.manager;
         const prIds = filtered.map((e) => e.pr.id);
 
@@ -390,7 +456,6 @@ export class PartRequestPaymentService {
                 .getMany()
             : [];
 
-        // Quedarse con el más reciente por solicitud (ya vienen ordenados DESC)
         const solicitudPagoPorPr = new Map<number, PartRequestStatusHistory>();
         for (const h of historiales) {
             if (!solicitudPagoPorPr.has(h.part_request_id)) {
@@ -398,7 +463,6 @@ export class PartRequestPaymentService {
             }
         }
 
-        // Resolver quién lo hizo (actor_id no tiene relación en la entidad)
         const actorIds = [...new Set([...solicitudPagoPorPr.values()].map((h) => h.actor_id))];
         const actores = actorIds.length
             ? await manager.find(UserEmployeeCache, { where: { id: In(actorIds) } })
@@ -414,11 +478,8 @@ export class PartRequestPaymentService {
             };
         });
 
-        // ─── Orden por fecha de solicitud de pago ───────────────────────
-        // 'DESC' = más reciente primero | 'ASC' = la que lleva más tiempo esperando primero
         const ORDEN_FECHA_PAGO: 'ASC' | 'DESC' = 'DESC';
         const factor = ORDEN_FECHA_PAGO === 'DESC' ? -1 : 1;
-        // Las que no tienen historial (datos antiguos) siempre al final
         const cmpFecha = (a: Date | null, b: Date | null) => {
             if (!a && !b) return 0;
             if (!a) return 1;
@@ -426,7 +487,6 @@ export class PartRequestPaymentService {
             return (a.getTime() - b.getTime()) * factor;
         };
 
-        // Agrupar por proveedor
         const porProveedor = new Map<
             number,
             {
@@ -448,18 +508,16 @@ export class PartRequestPaymentService {
             porProveedor.set(provider.id, grupo);
         }
 
-        // Ordenar solicitudes dentro de cada proveedor
         for (const g of porProveedor.values()) {
             g.solicitudes.sort((a, b) => cmpFecha(a.fechaSolicitudPago, b.fechaSolicitudPago));
         }
 
-        // Ordenar proveedores por su solicitud más relevante (la primera ya ordenada)
         const grupos = Array.from(porProveedor.values()).sort((a, b) => {
             const c = cmpFecha(
                 a.solicitudes[0]?.fechaSolicitudPago ?? null,
                 b.solicitudes[0]?.fechaSolicitudPago ?? null,
             );
-            return c !== 0 ? c : b.montoTotalPendiente - a.montoTotalPendiente; // desempate
+            return c !== 0 ? c : b.montoTotalPendiente - a.montoTotalPendiente;
         });
 
         const total = grupos.length;
@@ -521,6 +579,7 @@ export class PartRequestPaymentService {
                 totalPages: Math.ceil(total / limit) || 0,
             },
             filtros: filtrosResponse,
+            conteos_busqueda: conteosBusqueda,
         };
     }
 
@@ -780,7 +839,7 @@ export class PartRequestPaymentService {
     }
 
     async getDatosPago(id: number, user: { companyId: string }) {
-        console.log('ddddddd')
+
         const partRequest = await this.partRequestRepo
             .createQueryBuilder('pr')
             .leftJoin('pr.order', 'order')
