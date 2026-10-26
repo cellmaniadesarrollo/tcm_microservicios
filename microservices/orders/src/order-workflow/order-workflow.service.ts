@@ -3402,6 +3402,7 @@ export class OrderWorkflowService {
     });
   }
   private readonly ESTADO_BODEGA = 9;
+  private readonly DEVICE_TYPE_CELLPHONE_ID = 1;
 
   async pasarABodega(
     dto: { orderId: number; observation?: string; cedulaCount: number; imeiCount: number },
@@ -3410,7 +3411,7 @@ export class OrderWorkflowService {
   ) {
     const MIN_FOTOS = 2;
 
-    // ── Validación de mínimos (antes de abrir la transacción) ──
+    // ── Validación de consistencia (no depende del dispositivo) ──
     const cedulaCount = Number(dto.cedulaCount ?? 0);
     const imeiCount = Number(dto.imeiCount ?? 0);
 
@@ -3423,30 +3424,33 @@ export class OrderWorkflowService {
     }
     const deviceCount = files.length - cedulaCount - imeiCount;
 
-    if (cedulaCount < MIN_FOTOS) {
-      throw new RpcException(
-        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos de la cédula del cliente`),
-      );
-    }
-    if (imeiCount < MIN_FOTOS) {
-      throw new RpcException(
-        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del IMEI (ARCOTEL)`),
-      );
-    }
-    if (deviceCount < MIN_FOTOS) {
-      throw new RpcException(
-        new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del dispositivo`),
-      );
-    }
-
     return this.orderRepo.manager.transaction(async (manager) => {
       const order = await manager.findOne(Order, {
         where: { id: dto.orderId, company_id: user.companyId },
-        relations: ['currentStatus'],
+        relations: ['currentStatus', 'device', 'device.type'],
       });
 
       if (!order) {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // ── ARCOTEL (IMEI) obligatorio solo para CELLPHONE ──
+      const isCellphone = order.device?.type?.id === this.DEVICE_TYPE_CELLPHONE_ID;
+
+      if (cedulaCount < MIN_FOTOS) {
+        throw new RpcException(
+          new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos de la cédula del cliente`),
+        );
+      }
+      if (isCellphone && imeiCount < MIN_FOTOS) {
+        throw new RpcException(
+          new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del IMEI (ARCOTEL) para celulares`),
+        );
+      }
+      if (deviceCount < MIN_FOTOS) {
+        throw new RpcException(
+          new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del dispositivo`),
+        );
       }
 
       await this.orderValidationLockService.assertEditable(order.id, ['PASAR A BODEGA']);
@@ -3457,7 +3461,7 @@ export class OrderWorkflowService {
       const { toStatus, history, fromStatusId, fromStatusName } =
         await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);
 
-      // 📎 Adjuntos obligatorios (orden fijo: cédula → imei → dispositivo):
+      // 📎 Adjuntos (orden fijo: cédula → imei → dispositivo):
       //   - Los primeros `cedulaCount` archivos → cédula del cliente (WAREHOUSE_HANDOVER)
       //   - Los siguientes `imeiCount` archivos → IMEI para ARCOTEL (WAREHOUSE_HANDOVER_IMEI)
       //   - El resto → fotos del dispositivo (WAREHOUSE_HANDOVER_DEVICE)
