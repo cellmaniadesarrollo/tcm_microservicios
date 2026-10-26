@@ -23,44 +23,44 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 export class Customer {
 
   @PrimaryGeneratedColumn()
-  id: number;
+  id!: number;
 
   @ManyToOne(() => CompanyReplica, { eager: true, nullable: false })
-  company: CompanyReplica;
+  company!: CompanyReplica;
 
   @ManyToOne(() => IdType, { eager: true })
-  idType: IdType;
+  idType!: IdType;
 
   @Column({ type: 'varchar', length: 30 })
-  idNumber: string;
+  idNumber!: string;
 
   @Column({ type: 'varchar', length: 100 })
-  firstName: string;
+  firstName!: string;
 
   @Column({ type: 'varchar', length: 100 })
-  lastName: string;
+  lastName!: string;
 
   @Column({ type: 'date', nullable: true })
-  birthDate: Date;
+  birthDate!: Date;
 
   @ManyToOne(() => Gender, { eager: true, nullable: true })
-  gender: Gender;
+  gender!: Gender;
 
   @Column({ type: 'boolean', default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @OneToMany(() => Contact, (contact) => contact.customer, { cascade: true })
-  contacts: Contact[];
+  contacts!: Contact[];
 
   @OneToMany(() => Address, (address) => address.customer, { cascade: true })
-  addresses: Address[];
+  addresses!: Address[];
 
   @OneToMany(() => BillingData, (billing) => billing.customer)
-  billings: BillingData[];
+  billings!: BillingData[];
 
   // Nueva relación con la tabla pivote
   @OneToMany(() => CustomerBillingData, (cbd) => cbd.customer, { cascade: true })
-  billingDataLinks: CustomerBillingData[];
+  billingDataLinks!: CustomerBillingData[];
 
   @BeforeInsert()
   @BeforeUpdate()
@@ -69,10 +69,17 @@ export class Customer {
     this.lastName = this.lastName?.trim().toUpperCase();
   }
 
+  // customer.entity.ts
+  @Column({ name: 'created_by_user_id', type: 'varchar', length: 64, nullable: true })
+  createdByUserId!: string | null;
+
+  @Column({ name: 'created_by_username', type: 'varchar', length: 100, nullable: true })
+  createdByUsername!: string | null;
+
   @CreateDateColumn({ type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 
 }

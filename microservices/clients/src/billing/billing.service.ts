@@ -17,6 +17,7 @@ import { Gender } from '../catalogs/entities/gender.entity';
 import { backfillMissingCustomerPersonalData } from './helpers/customer-personal-data.helper';
 import { Contact } from '../customers/entities/contact.entity';
 import { City } from '../catalogs/entities/city.entity';
+import { AuditService } from '../audit/audit.service'; // 👈 NUEVO
 
 interface BillingUpsertInput {
     companyId: string;
@@ -36,6 +37,9 @@ interface BillingUpsertInput {
     city?: string;
     cityId?: number;
     isCompanyClient?: boolean;
+    user?: any; // 👈 NUEVO: quién ejecuta la acción (para auditoría)
+    signer?: { id: string; username: string } | null;
+    source?: 'BILLING' | 'ORDERS';
 }
 @Injectable()
 export class BillingService {
@@ -68,7 +72,8 @@ export class BillingService {
 
         @InjectRepository(Contact)
         private readonly contactRepo: Repository<Contact>,
-        private readonly dataSource: DataSource
+        private readonly dataSource: DataSource,
+        private readonly audit: AuditService, // 👈 NUEVO
     ) { }
     async onModuleInit() {
         try {
@@ -77,6 +82,49 @@ export class BillingService {
             this.logger.error('Error en backfill de customers (gender/birthDate):', err);
         }
     }
+
+    private billingCreateSnapshot(b: BillingData) {
+        return this.audit.snapshot({ idNumber: b.idNumber, ...this.billingSnapshot(b) });
+    }
+
+    private customerCreateSnapshot(c: Customer) {
+        return this.audit.snapshot({
+            idNumber: c.idNumber,
+            idTypeId: c.idType?.id ?? null,
+            firstName: c.firstName,
+            lastName: c.lastName,
+            genderId: c.gender?.id ?? null,
+            birthDate: c.birthDate,
+        });
+    }
+
+    // 📸 NUEVO: foto de un BillingData para comparar antes/después
+    // (todo con `?? null` para que undefined y null no se detecten como cambio)
+    private billingSnapshot(b: BillingData) {
+        return {
+            idTypeId: b.idType?.id ?? null,
+            personTypeId: b.personType?.id ?? null,
+            genderId: b.gender?.id ?? null,
+            firstName: b.firstName ?? null,
+            lastName: b.lastName ?? null,
+            tradeName: b.tradeName ?? null,
+            mainEmail: b.mainEmail ?? null,
+            cellphone: b.cellphone ?? null,
+            phone: b.phone ?? null,
+            birthdate: b.birthdate ?? null,
+            address: b.address ?? null,
+            city: b.city ?? null,
+            cityId: b.cityRef?.id ?? null,
+            isCompanyClient: b.isCompanyClient ?? null,
+            isActive: b.isActive ?? null,
+        };
+    }
+
+    // 👈 NUEVO: usuario para acciones que vienen del sistema legacy (no traen id)
+    private legacyUser(user: any) {
+        return { ...user, name: user?.name ?? 'LEGACY', source: 'BILLING' as const };
+    }
+
     // ─── Crear BillingData y vincularlo al cliente ───────────────────────────
     async create(data: any) {
         //  console.log(data)
@@ -126,6 +174,8 @@ export class BillingService {
                     city,
                     cityId: data.cityId,
                     isCompanyClient: data.isCompanyClient ?? false,
+                    user: data.user, // 👈 NUEVO
+                    signer: data.signer,
                 },
                 logger,
             );
@@ -141,7 +191,6 @@ export class BillingService {
     }
 
     // ─── Editar BillingData ──────────────────────────────────────────────────
-    // ─── Editar BillingData ──────────────────────────────────────────────────
     async update(data: any) {
         const logger = new Logger('BillingUpdate');
         try {
@@ -151,12 +200,17 @@ export class BillingService {
             if (!data?.user?.companyId)
                 throw new RpcException(new BadRequestException('companyId es requerido'));
 
+            // 👈 CAMBIO: cargar relaciones para que el snapshot "antes" sea correcto
             const billing = await this.billingRepo.findOne({
                 where: { id: data.id, company: { id: data.user.companyId } },
+                relations: { idType: true, personType: true, gender: true, cityRef: true },
             });
 
             if (!billing)
                 throw new RpcException(new BadRequestException('Dato de facturación no encontrado'));
+
+            // 📸 foto ANTES de modificar nada
+            const billingBefore = this.billingSnapshot(billing);
 
             // ── Resolver cityId (si viene) — estricto, igual que en create ────
             let cityEntity: City | null = null;
@@ -229,18 +283,34 @@ export class BillingService {
 
             await this.billingRepo.save(billing);
 
+            // 📝 registrar quién editó el BillingData y qué cambió
+            await this.audit.log({
+                entity: 'BillingData',
+                entityId: billing.id,
+                action: 'UPDATE',
+                user: data.user,
+                signer: data.signer,
+                changes: this.audit.diff(billingBefore, this.billingSnapshot(billing)),
+            });
+
             // ── Sincronizar datos personales al Customer vinculado ──────────
-            // Relación billing↔customer es 1:1 a nivel de código (la tabla
-            // pivote customer_billing_data no lo restringe a nivel de BD por
-            // datos legacy). Se toma el primer vínculo encontrado.
+            // 👈 CAMBIO: cargar gender del customer para que el snapshot sea correcto
             const pivot = await this.pivotRepo.findOne({
                 where: { billingData: { id: billing.id } },
-                relations: { customer: true },
+                relations: { customer: { gender: true } },
             });
 
             if (pivot?.customer) {
                 const customer = pivot.customer;
                 let customerChanged = false;
+
+                // 📸 foto del customer ANTES de sincronizarlo
+                const customerBefore = {
+                    firstName: customer.firstName ?? null,
+                    lastName: customer.lastName ?? null,
+                    genderId: customer.gender?.id ?? null,
+                    birthDate: customer.birthDate ?? null,
+                };
 
                 if (customer.firstName !== billing.firstName) {
                     customer.firstName = billing.firstName;
@@ -268,6 +338,21 @@ export class BillingService {
                 if (customerChanged) {
                     await this.customerRepo.save(customer);
                     logger.log(`Customer ${customer.id} sincronizado desde BillingData ${billing.id}`);
+
+                    // 📝 registrar el cambio en el Customer (originado desde billing)
+                    await this.audit.log({
+                        entity: 'Customer',
+                        entityId: customer.id,
+                        action: 'UPDATE',
+                        user: data.user,
+                        signer: data.signer,
+                        changes: this.audit.diff(customerBefore, {
+                            firstName: customer.firstName ?? null,
+                            lastName: customer.lastName ?? null,
+                            genderId: customer.gender?.id ?? null,
+                            birthDate: customer.birthDate ?? null,
+                        }),
+                    });
                 }
             }
 
@@ -310,7 +395,25 @@ export class BillingService {
                 isDefault: data.isDefault ?? false,
             });
 
-            return await this.pivotRepo.save(pivot);
+            const saved = await this.pivotRepo.save(pivot);
+
+            // 📝 NUEVO: registrar el vínculo en el historial del cliente y del billing
+            await this.audit.log({
+                entity: 'Customer',
+                entityId: data.customerId,
+                action: 'UPDATE',
+                user: data.user,
+                changes: { billingLink: { old: null, new: data.billingDataId } },
+            });
+            await this.audit.log({
+                entity: 'BillingData',
+                entityId: data.billingDataId,
+                action: 'UPDATE',
+                user: data.user,
+                changes: { customerLink: { old: null, new: data.customerId } },
+            });
+
+            return saved;
 
         } catch (error) {
             if (error instanceof RpcException) throw error;
@@ -332,6 +435,22 @@ export class BillingService {
                 throw new RpcException(new BadRequestException('Vínculo no encontrado'));
 
             await this.pivotRepo.remove(pivot);
+
+            // 📝 NUEVO: registrar la desvinculación en el historial del cliente y del billing
+            await this.audit.log({
+                entity: 'Customer',
+                entityId: data.customerId,
+                action: 'UPDATE',
+                user: data.user,
+                changes: { billingLink: { old: data.billingDataId, new: null } },
+            });
+            await this.audit.log({
+                entity: 'BillingData',
+                entityId: data.billingDataId,
+                action: 'UPDATE',
+                user: data.user,
+                changes: { customerLink: { old: data.customerId, new: null } },
+            });
 
             return { message: 'Dato de facturación desvinculado correctamente' };
 
@@ -399,10 +518,10 @@ export class BillingService {
             throw new RpcException(new BadRequestException('companyId ausente en payload legacy'));
 
         const companyId = raw.company_id ?? raw.user?.companyId;
+        const user = { ...raw.user, companyId };
+        const normalized = await this.normalizeLegacyPayload(raw, user);
 
-        const normalized = await this.normalizeLegacyPayload(raw, { companyId });
-
-        return this.createFromLegacy(normalized);
+        return this.createFromLegacy({ ...normalized, signer: raw.signer ?? null });
     }
 
     async createFromLegacy(data: any) {
@@ -435,6 +554,8 @@ export class BillingService {
                     address: data.address,
                     city: data.city,
                     isCompanyClient: data.isCompanyClient ?? false,
+                    user: this.legacyUser(data.user), // 👈 NUEVO
+                    signer: data.signer ?? null,
                 },
                 logger,
             );
@@ -453,9 +574,10 @@ export class BillingService {
             throw new RpcException(new BadRequestException('billingId ausente en payload'));
 
         const companyId = raw.company_id ?? raw.user?.companyId;
-        const normalized = await this.normalizeLegacyPayload(raw, { companyId });
+        const user = { ...raw.user, companyId };
+        const normalized = await this.normalizeLegacyPayload(raw, user);
 
-        return this.updateFromLegacy({ ...normalized, billingId: raw.billingId }); // 👈 pasa el id
+            return this.updateFromLegacy({ ...normalized, billingId: raw.billingId, signer: raw.signer ?? null }); // 🆕
     }
 
     async updateFromLegacy(data: any) {
@@ -475,11 +597,13 @@ export class BillingService {
                 throw new RpcException(new BadRequestException('personTypeId es requerido'));
 
             // ── Buscar billing por id — 404 si no existe ──────────────────
+            // 👈 CAMBIO: cargar relaciones para el snapshot "antes"
             const existingBilling = await this.billingRepo.findOne({
                 where: {
                     id: data.billingId,
                     company: { id: data.user.companyId },
                 },
+                relations: { idType: true, personType: true, gender: true, cityRef: true },
             });
 
             if (!existingBilling)
@@ -488,6 +612,9 @@ export class BillingService {
                 );
 
             logger.log(`Actualizando BillingData id: ${existingBilling.id}`);
+
+            // 📸 foto ANTES de actualizar
+            const legacyBefore = this.billingSnapshot(existingBilling);
 
             // ── Actualizar todos los campos editables ─────────────────────
             await this.billingRepo.update(existingBilling.id, {
@@ -508,10 +635,29 @@ export class BillingService {
             });
 
             // ── Retornar resultado actualizado ────────────────────────────
+            // 👈 CAMBIO: agregar gender y cityRef para el snapshot "después"
             const result = await this.billingRepo.findOne({
                 where: { id: existingBilling.id },
-                relations: { idType: true, personType: true, customerLinks: { customer: { gender: true } } },
+                relations: {
+                    idType: true,
+                    personType: true,
+                    gender: true,
+                    cityRef: true,
+                    customerLinks: { customer: { gender: true } },
+                },
             });
+
+            // 📝 registrar el cambio hecho desde el sistema legacy
+            if (result) {
+                await this.audit.log({
+                    entity: 'BillingData',
+                    entityId: existingBilling.id,
+                    action: 'UPDATE',
+                    user: this.legacyUser(data.user),
+                    signer: data.signer,
+                    changes: this.audit.diff(legacyBefore, this.billingSnapshot(result)),
+                });
+            }
 
             // 👇 Completa inline gender/birthDate en los customers vinculados (sin helper)
             if (result?.customerLinks?.length) {
@@ -575,7 +721,7 @@ export class BillingService {
     };
 
     // ── Adaptador: convierte el payload legacy al contrato de createFromLegacy ────
-    async normalizeLegacyPayload(raw: any, user: { companyId: string }) {
+    async normalizeLegacyPayload(raw: any, user: { companyId: string; [k: string]: any }) {
         const logger = new Logger('LegacyAdapter');
 
         // 1. Resolver IdType
@@ -687,6 +833,9 @@ export class BillingService {
             if (!data?.user?.companyId)
                 throw new RpcException(new BadRequestException('companyId es requerido'));
 
+            if (!data?.signer?.id)
+                throw new RpcException(new BadRequestException('Firmante no resuelto'));
+
             const c = data.customer;
             if (!c?.idNumber)
                 throw new RpcException(new BadRequestException('idNumber del cliente es requerido'));
@@ -728,6 +877,8 @@ export class BillingService {
                             reference: a.reference,
                             postalCode: a.postalCode,
                         })),
+                        createdByUserId: data.signer.id,
+                        createdByUsername: data.signer.username,
                     });
 
                     const saved = await customerRepo.save(newCustomer);
@@ -762,7 +913,6 @@ export class BillingService {
                     if (b.tradeName) b.tradeName = b.tradeName.trim().toUpperCase();
                     if (b.addressOverride) b.addressOverride = b.addressOverride.trim().toUpperCase();
                     if (b.cityOverride) b.cityOverride = b.cityOverride.trim().toUpperCase();
-
 
                     const existingBilling = await billingRepo.findOne({
                         where: { idNumber: c.idNumber, company: { id: data.user.companyId } },
@@ -841,6 +991,27 @@ export class BillingService {
                 return { customer, billing: billingSaved };
             });
 
+            // 📝 auditoría SOLO después del commit (si la transacción falla, no se registra nada)
+            // 👈 CAMBIO: ahora ambos CREATE llevan `changes`
+            if (shouldPublishClientCreated) {
+                await this.audit.log({
+                    entity: 'Customer',
+                    entityId: result.customer.id,
+                    action: 'CREATE',
+                    user: data.user,
+                    changes: this.customerCreateSnapshot(result.customer),
+                });
+            }
+            if (shouldPublishBillingCreated && result.billing) {
+                await this.audit.log({
+                    entity: 'BillingData',
+                    entityId: result.billing.id,
+                    action: 'CREATE',
+                    user: data.user,
+                    changes: this.billingCreateSnapshot(result.billing),
+                });
+            }
+
             // ── Eventos: solo DESPUÉS de que la transacción hizo commit ────
             if (shouldPublishClientCreated) {
                 try {
@@ -872,8 +1043,6 @@ export class BillingService {
             throw new RpcException(new InternalServerErrorException('Error creando cliente con facturación'));
         }
     }
-
-
 
     private async upsertCustomerAndBillingData(input: BillingUpsertInput, logger: Logger) {
         let somethingWasCreated = false;
@@ -928,6 +1097,16 @@ export class BillingService {
         billingSaved = await this.billingRepo.save(billing);
         somethingWasCreated = true;
         logger.log(`BillingData creado id: ${billingSaved.id}`);
+
+        // 📝 NUEVO: registrar quién creó el BillingData
+        await this.audit.log({
+            entity: 'BillingData',
+            entityId: billingSaved.id,
+            action: 'CREATE',
+            user: input.user,
+            signer: input.signer,
+            changes: this.billingCreateSnapshot(billingSaved),
+        });
 
         // ── Resolver ContactTypes una sola vez ───────────────────
         const emailContactType = await this.contactTypeRepo.findOne({ where: { name: 'EMAIL' } });
@@ -1014,10 +1193,23 @@ export class BillingService {
                 birthDate: input.birthdate ? new Date(input.birthdate) : undefined,
                 isActive: true,
                 contacts,
+                createdByUserId: input.signer?.id ?? null,
+                createdByUsername: input.signer?.username ?? null,
             });
 
             customer = await this.customerRepo.save(newCustomer);
             somethingWasCreated = true;
+
+            // 📝 NUEVO: registrar quién creó el cliente mínimo
+            await this.audit.log({
+                entity: 'Customer',
+                entityId: customer.id,
+                action: 'CREATE',
+                user: input.user,
+                signer: input.signer,
+                changes: this.customerCreateSnapshot(customer),
+            });
+
             await this.publishMinimalCustomerCreated(customer.id);
             logger.log(`Cliente mínimo creado id: ${customer.id}`);
         }
@@ -1059,4 +1251,3 @@ export class BillingService {
         return result;
     }
 }
-

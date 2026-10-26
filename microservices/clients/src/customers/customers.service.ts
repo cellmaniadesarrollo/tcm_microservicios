@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { Customer } from './entities/customer.entity';
 import { Contact } from './entities/contact.entity';
 import { Address } from './entities/address.entity';
@@ -8,6 +8,7 @@ import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { KafkaProducerService } from '../kafka/kafka.producer';
+import { AuditService } from '../audit/audit.service'; // 👈 NUEVO
 
 @Injectable()
 export class CustomersService {
@@ -22,8 +23,33 @@ export class CustomersService {
         @InjectRepository(Address)
         private readonly addressRepo: Repository<Address>,
         private readonly broadcast: BroadcastService,
-
+        private readonly audit: AuditService, // 👈 NUEVO
     ) { }
+
+    // 📸 NUEVO: foto del cliente para comparar antes/después
+    private snapshot(c: Customer) {
+        return {
+            firstName: c.firstName,
+            lastName: c.lastName,
+            birthDate: c.birthDate,
+            genderId: c.gender?.id ?? null,
+            contacts: c.contacts?.map(x => ({
+                id: x.id,
+                value: x.value,
+                isPrimary: x.isPrimary,
+            })),
+            addresses: c.addresses?.map(a => ({
+                id: a.id,
+                zone: a.zone,
+                sector: a.sector,
+                locality: a.locality,
+                mainStreet: a.mainStreet,
+                secondaryStreet: a.secondaryStreet,
+                reference: a.reference,
+                postalCode: a.postalCode,
+            })),
+        };
+    }
 
     async create(data: any) {
         try {
@@ -38,6 +64,11 @@ export class CustomersService {
                 throw new RpcException(
                     new BadRequestException('idNumber es requerido'),
                 );
+            }
+
+            const signer = data.signer;
+            if (!signer?.id) {
+                throw new RpcException(new BadRequestException('Firmante no resuelto'));
             }
 
             // ── Normalización ────────────────────────────────────────
@@ -97,10 +128,21 @@ export class CustomersService {
                     reference: a.reference,
                     postalCode: a.postalCode,
                 })),
+                createdByUserId: signer.id,
+                createdByUsername: signer.username,
             });
 
             // 3️⃣ Guardar
             const customerSaved = await this.customerRepo.save(customer);
+
+            // 📝 NUEVO: registrar quién creó el cliente
+            await this.audit.log({
+                entity: 'Customer',
+                entityId: customerSaved.id,
+                action: 'CREATE',
+                user: data.user,
+                signer,
+            });
 
             // 4️⃣ Cargar relaciones
             const customerWithRelations = await this.customerRepo.findOne({
@@ -154,40 +196,36 @@ export class CustomersService {
         }
     }
 
-    async update(id: number, updates: any, user: any) {
-
+    async update(
+        id: number,
+        updates: any,
+        user: any,
+        signer: { id: string; username: string },
+    ) {
         const customer = await this.customerRepo.findOne({
-            where: {
-                id,
-                company: {
-                    id: user.companyId,
-                },
-            },
+            where: { id, company: { id: user.companyId } },
             relations: ['contacts', 'addresses'],
         });
         if (!customer) {
-            throw new Error('Customer not found');
+            throw new RpcException(new NotFoundException('Cliente no encontrado'));
         }
+
+        // 📸 foto ANTES de modificar nada
+        const before = this.snapshot(customer);
 
         // NO permitir modificar DNI ni tipo de identificación
         delete updates.idNumber;
         delete updates.idTypeId;
 
-        // Actualizar datos simples
-        // Actualizar datos simples
         if (updates.firstName !== undefined)
             customer.firstName = updates.firstName.trim().toUpperCase();
-
         if (updates.lastName !== undefined)
             customer.lastName = updates.lastName.trim().toUpperCase();
-
         if (updates.birthDate !== undefined)
             customer.birthDate = updates.birthDate;
-
         if (updates.genderId !== undefined)
             customer.gender = { id: updates.genderId } as any;
 
-        // CONTACTOS (si vienen)
         if (updates.contacts) {
             customer.contacts = updates.contacts.map(c => ({
                 id: c.id ?? undefined,
@@ -195,14 +233,13 @@ export class CustomersService {
                 value: c.contactTypeId === 1
                     ? this.normalizeMobilePhone(c.value)
                     : typeof c.value === 'string'
-                        ? c.value.trim().toLowerCase()   // EMAIL en minúsculas
+                        ? c.value.trim().toLowerCase()
                         : c.value,
                 isPrimary: c.isPrimary ?? false,
                 customer: { id } as any,
             }));
         }
 
-        // DIRECCIONES (si vienen)
         if (updates.addresses) {
             customer.addresses = updates.addresses.map(a => ({
                 id: a.id ?? undefined,
@@ -219,18 +256,25 @@ export class CustomersService {
         }
 
         const customersave = await this.customerRepo.save(customer);
+
+        // 📝 sesión (user) + quien firmó (signer)
+        await this.audit.log({
+            entity: 'Customer',
+            entityId: id,
+            action: 'UPDATE',
+            user,
+            signer, // 🆕
+            changes: this.audit.diff(before, this.snapshot(customersave)),
+        });
+
         const customersavedata = await this.customerRepo.findOne({
             where: { id: customersave.id },
             relations: {
                 idType: true,
                 gender: true,
-                contacts: {
-                    contactType: true,
-                },
-                addresses: {
-                    city: true,
-                }
-            }
+                contacts: { contactType: true },
+                addresses: { city: true },
+            },
         });
 
         await this.broadcast.publishClientUpdated(customersavedata);
@@ -306,8 +350,6 @@ export class CustomersService {
             items,
         };
     }
-
-
 
     async getCustomersUpdatedAfter(lastUpdatedAt: Date | null) {
         // 👉 Si es null, devolver TODOS

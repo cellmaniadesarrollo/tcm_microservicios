@@ -52,4 +52,85 @@ export class UsersService {
       ),
     );
   }
+
+  // ===============================================
+  // 🔐 PIN
+  // ===============================================
+
+  /** Envía un patrón RPC al MS users agregando siempre el token interno */
+  private sendPin<T = any>(cmd: string, payload: Record<string, any>): Promise<T> {
+    return firstValueFrom(
+      this.userService.send<T>(
+        { cmd },
+        { ...payload, internalToken: process.env.INTERNAL_SECRET },
+      ),
+    );
+  }
+
+  /** Los grupos del JWT pueden venir como strings o como { id, name } */
+  private groupNames(user: any): string[] {
+    return (user?.groups ?? [])
+      .map((g: any) => (typeof g === 'string' ? g : g?.name))
+      .filter(Boolean);
+  }
+
+  /** Datos de sesión: SIEMPRE salen del JWT, nunca del body */
+  private session(user: any) {
+    return {
+      userId: String(user?.sub ?? user?.userId ?? user?.id),
+      companyId: String(user?.companyId),
+      groups: this.groupNames(user),
+    };
+  }
+
+  setMyPin(user: any, dto: { currentPassword: string; newPin: string }, ip?: string) {
+    const s = this.session(user);
+    return this.sendPin('pin_set_mine', {
+      userId: s.userId,
+      currentPassword: dto.currentPassword,
+      newPin: dto.newPin,
+      ip,
+    });
+  }
+
+  getPinStatus(user: any) {
+    return this.sendPin('pin_status', { userId: this.session(user).userId });
+  }
+
+  async isPinRequired(user: any) {
+    const pinRequired = await this.sendPin<boolean>('pin_is_required', {
+      sessionUserId: this.session(user).userId,
+    });
+    return { pinRequired };
+  }
+
+  resetPinByAdmin(user: any, targetUserId: string, newPin: string, ip?: string) {
+    const s = this.session(user);
+    return this.sendPin('pin_reset_by_admin', {
+      adminId: s.userId,
+      adminCompanyId: s.companyId,
+      adminGroups: s.groups,
+      userId: targetUserId,
+      newPin,
+      ip,
+    });
+  }
+
+  listUsersPinStatus(user: any) {
+    const s = this.session(user);
+    return this.sendPin('pin_list_users', {
+      adminCompanyId: s.companyId,
+      adminGroups: s.groups,
+    });
+  }
+
+  setPinRequired(user: any, targetUserId: string, required: boolean) {
+    const s = this.session(user);
+    return this.sendPin('pin_set_required', {
+      adminCompanyId: s.companyId,
+      adminGroups: s.groups,
+      userId: targetUserId,
+      required,
+    });
+  }
 }

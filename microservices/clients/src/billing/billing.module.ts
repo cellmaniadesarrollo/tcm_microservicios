@@ -13,10 +13,11 @@ import { PersonType } from '../catalogs/entities/person-type.entity';
 import { Gender } from '../catalogs/entities/gender.entity';
 import { Contact } from '../customers/entities/contact.entity';
 import { City } from '../catalogs/entities/city.entity';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([BillingData, Customer, IdentificationType, CustomerBillingData, ContactType,
-    IdType, PersonType, Gender, Contact, City]), BroadcastModule],
+    IdType, PersonType, Gender, Contact, City]), BroadcastModule, CustomersModule],
   providers: [BillingService],
   controllers: [BillingController]
 })
