@@ -10,6 +10,12 @@ import { ProductCatalogsModule } from './product-catalogs/product-catalogs.modul
 import { ProductsModule } from './products/products.module';
 import { SequencesModule } from './common/sequences/sequences.module';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
+import { AuditLogModule } from './audit-log/audit-log.module';
+import { StockModule } from './stock/stock.module';
+import { ReceiptsModule } from './receipts/receipts.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
+import { CatalogsModule } from './catalogs/catalogs.module';
+import { StockModule } from './stock/stock.module';
 
 @Module({
   imports: [
@@ -30,7 +36,12 @@ import { AwsS3Module } from './aws-s3/aws-s3.module';
     HealthModule, KafkaModule, CompaniesModule,
     UsersEmployeesEventsModule, DevicesReplicaModule,
     ProductCatalogsModule, ProductsModule, SequencesModule,
-    AwsS3Module
+    AwsS3Module,
+    AuditLogModule,
+    StockModule,
+    CatalogsModule,
+    SuppliersModule,
+    ReceiptsModule
   ],
 })
 export class AppModule { }
