@@ -33,6 +33,12 @@ export class AuditLog {
   @Column({ type: 'jsonb', nullable: true })
   changes!: Record<string, { old: any; new: any }> | null;
 
+  @Column({ name: 'signed_by_user_id', type: 'varchar', length: 64, nullable: true })
+  signedByUserId!: string | null;
+
+  @Column({ name: 'signed_by_username', type: 'varchar', length: 100, nullable: true })
+  signedByUsername!: string | null;
+
   @CreateDateColumn({ type: 'timestamp' })
   createdAt!: Date;
 }

@@ -1,4 +1,4 @@
-import { IsEmail, IsNumber, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { IsEmail, IsNumber, IsOptional, IsString, IsBoolean, Matches } from 'class-validator';
 
 export class UpdateBillingDto {
   @IsOptional()
@@ -64,4 +64,10 @@ export class UpdateBillingDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  // 🔐 PIN de quien firma (solo si la cuenta lo exige)
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'El PIN debe tener 6 dígitos' })
+  pin?: string;
 }

@@ -69,6 +69,13 @@ export class Customer {
     this.lastName = this.lastName?.trim().toUpperCase();
   }
 
+  // customer.entity.ts
+  @Column({ name: 'created_by_user_id', type: 'varchar', length: 64, nullable: true })
+  createdByUserId!: string | null;
+
+  @Column({ name: 'created_by_username', type: 'varchar', length: 100, nullable: true })
+  createdByUsername!: string | null;
+
   @CreateDateColumn({ type: 'timestamp' })
   createdAt!: Date;
 

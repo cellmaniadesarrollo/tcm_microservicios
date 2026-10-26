@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEmail, IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsNumber, IsOptional, IsString, IsBoolean, Matches } from 'class-validator';
 import { IsValidIdNumber } from '../../common/validators/is-valid-id-number.decorator';
 
 export class CreateBillingDto {
@@ -50,4 +50,9 @@ export class CreateBillingDto {
   cityId?: number;
 
   @IsOptional() @IsBoolean() isCompanyClient?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{6}$/, { message: 'El PIN debe tener 6 dígitos' })
+  pin?: string;
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { Customer } from './entities/customer.entity';
 import { Contact } from './entities/contact.entity';
 import { Address } from './entities/address.entity';
@@ -66,6 +66,11 @@ export class CustomersService {
                 );
             }
 
+            const signer = data.signer;
+            if (!signer?.id) {
+                throw new RpcException(new BadRequestException('Firmante no resuelto'));
+            }
+
             // ── Normalización ────────────────────────────────────────
             const c = data.customer;
             if (c.firstName) c.firstName = c.firstName.trim().toUpperCase();
@@ -123,6 +128,8 @@ export class CustomersService {
                     reference: a.reference,
                     postalCode: a.postalCode,
                 })),
+                createdByUserId: signer.id,
+                createdByUsername: signer.username,
             });
 
             // 3️⃣ Guardar
@@ -134,6 +141,7 @@ export class CustomersService {
                 entityId: customerSaved.id,
                 action: 'CREATE',
                 user: data.user,
+                signer,
             });
 
             // 4️⃣ Cargar relaciones
@@ -188,42 +196,36 @@ export class CustomersService {
         }
     }
 
-    async update(id: number, updates: any, user: any) {
-
+    async update(
+        id: number,
+        updates: any,
+        user: any,
+        signer: { id: string; username: string },
+    ) {
         const customer = await this.customerRepo.findOne({
-            where: {
-                id,
-                company: {
-                    id: user.companyId,
-                },
-            },
+            where: { id, company: { id: user.companyId } },
             relations: ['contacts', 'addresses'],
         });
         if (!customer) {
-            throw new Error('Customer not found');
+            throw new RpcException(new NotFoundException('Cliente no encontrado'));
         }
 
-        // 📸 NUEVO: foto ANTES de modificar nada
+        // 📸 foto ANTES de modificar nada
         const before = this.snapshot(customer);
 
         // NO permitir modificar DNI ni tipo de identificación
         delete updates.idNumber;
         delete updates.idTypeId;
 
-        // Actualizar datos simples
         if (updates.firstName !== undefined)
             customer.firstName = updates.firstName.trim().toUpperCase();
-
         if (updates.lastName !== undefined)
             customer.lastName = updates.lastName.trim().toUpperCase();
-
         if (updates.birthDate !== undefined)
             customer.birthDate = updates.birthDate;
-
         if (updates.genderId !== undefined)
             customer.gender = { id: updates.genderId } as any;
 
-        // CONTACTOS (si vienen)
         if (updates.contacts) {
             customer.contacts = updates.contacts.map(c => ({
                 id: c.id ?? undefined,
@@ -231,14 +233,13 @@ export class CustomersService {
                 value: c.contactTypeId === 1
                     ? this.normalizeMobilePhone(c.value)
                     : typeof c.value === 'string'
-                        ? c.value.trim().toLowerCase()   // EMAIL en minúsculas
+                        ? c.value.trim().toLowerCase()
                         : c.value,
                 isPrimary: c.isPrimary ?? false,
                 customer: { id } as any,
             }));
         }
 
-        // DIRECCIONES (si vienen)
         if (updates.addresses) {
             customer.addresses = updates.addresses.map(a => ({
                 id: a.id ?? undefined,
@@ -256,12 +257,13 @@ export class CustomersService {
 
         const customersave = await this.customerRepo.save(customer);
 
-        // 📝 NUEVO: registrar quién editó y qué cambió
+        // 📝 sesión (user) + quien firmó (signer)
         await this.audit.log({
             entity: 'Customer',
             entityId: id,
             action: 'UPDATE',
             user,
+            signer, // 🆕
             changes: this.audit.diff(before, this.snapshot(customersave)),
         });
 
@@ -270,13 +272,9 @@ export class CustomersService {
             relations: {
                 idType: true,
                 gender: true,
-                contacts: {
-                    contactType: true,
-                },
-                addresses: {
-                    city: true,
-                }
-            }
+                contacts: { contactType: true },
+                addresses: { city: true },
+            },
         });
 
         await this.broadcast.publishClientUpdated(customersavedata);

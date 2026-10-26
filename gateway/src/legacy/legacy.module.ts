@@ -1,5 +1,6 @@
 // src/legacy/legacy.module.ts
 import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { LegacyController } from './legacy.controller';
 import { LegacyService } from './legacy.service';
@@ -7,6 +8,7 @@ import { LegacyJwtStrategy } from './legacy-jwt.strategy/legacy-jwt.strategy';
 
 @Module({
   imports: [
+    JwtModule.register({}),
     ClientsModule.register([
       {
         name: 'CUSTOMERS_SERVICE',
