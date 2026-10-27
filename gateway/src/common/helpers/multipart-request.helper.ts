@@ -23,10 +23,6 @@ function isMultipartFile(
     return !!part.file && !!part.filename && !!part.mimetype;
 }
 
-/**
- * Lee un request multipart y separa los campos de texto (formData)
- * de los archivos (files), reconstruyendo cada archivo en un Buffer.
- */
 export async function parseMultipartRequest(
     request: FastifyRequest,
 ): Promise<ParsedMultipart> {
@@ -56,6 +52,7 @@ export async function parseMultipartRequest(
                         originalname: filePart.filename || 'unnamed_file',
                         mimetype: filePart.mimetype || 'application/octet-stream',
                         size: buffer.length,
+                        fieldname: filePart.fieldname,
                     });
                 }
             } else {
@@ -63,19 +60,6 @@ export async function parseMultipartRequest(
                 console.log(`[DEBUG] FIELD part → ${fieldPart.fieldname} = ${JSON.stringify(fieldPart.value)}`);
                 formData[fieldPart.fieldname] = String(fieldPart.value ?? '');
             }
-            const buffer = Buffer.concat(buffers);
-            console.log(`[DEBUG] FILE part leído en ${Date.now() - tFileStart}ms, size=${buffer.length} bytes`);
-
-            files.push({
-                buffer,
-                originalname: part.filename,
-                mimetype: part.mimetype,
-                size: buffer.length,
-                fieldname: part.fieldname,
-            });
-        } else {
-            console.log(`[DEBUG] FIELD part → ${part.fieldname} = ${JSON.stringify(part.value)}`);
-            formData[part.fieldname] = part.value as string;
         }
     } catch (error) {
         console.error(`[DEBUG] Error iterando request.parts():`, error);
@@ -88,10 +72,6 @@ export async function parseMultipartRequest(
     return { files, formData };
 }
 
-/**
- * Procesa los archivos (ej. conversión de imágenes a WebP) y valida
- * que ninguno exceda el tamaño máximo permitido.
- */
 export async function processAndValidateFiles(
     files: ParsedFile[],
     maxSize: number = DEFAULT_MAX_FILE_SIZE,
@@ -117,9 +97,6 @@ export async function processAndValidateFiles(
     return processedFiles;
 }
 
-/**
- * Convierte los buffers a base64 en el formato que espera el microservicio.
- */
 export function serializeFilesForMicroservice(files: ParsedFile[]) {
     const t0 = Date.now();
     const result = files.map((f) => ({
@@ -132,10 +109,6 @@ export function serializeFilesForMicroservice(files: ParsedFile[]) {
     return result;
 }
 
-/**
- * Atajo que combina los 3 pasos anteriores: parsear + procesar/validar + serializar.
- * Cubre el 90% de los endpoints que reciben multipart en este gateway.
- */
 export async function parseAndProcessMultipart(
     request: FastifyRequest,
     maxSize?: number,
@@ -144,4 +117,4 @@ export async function parseAndProcessMultipart(
     const processedFiles = await processAndValidateFiles(files, maxSize);
     const serializedFiles = serializeFilesForMicroservice(processedFiles);
     return { formData, files: serializedFiles };
-}//prueba 1
+}
