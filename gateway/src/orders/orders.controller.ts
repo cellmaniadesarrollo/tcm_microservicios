@@ -83,7 +83,27 @@ export class OrdersController {
   @Groups('CASHIERS')
   async createOrder(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
-    const processedFiles = await processAndValidateFiles(files);
+
+    // Separar por nombre de campo ANTES de procesar
+    const bodegaRaw = files.filter((f: any) => f.fieldname === 'bodegaFiles');
+    const normalRaw = files.filter((f: any) => f.fieldname !== 'bodegaFiles');
+
+    const processedFiles = await processAndValidateFiles(normalRaw);
+    const processedBodega = await processAndValidateFiles(bodegaRaw);
+
+    // Conteos de bodega (fuera del dto)
+    const cedulaCount = Number(formData.cedulaCount ?? 0);
+    const imeiCount = Number(formData.imeiCount ?? 0);
+
+    if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
+      throw new BadRequestException('cedulaCount inválido');
+    }
+    if (!Number.isInteger(imeiCount) || imeiCount < 0) {
+      throw new BadRequestException('imeiCount inválido');
+    }
+    if (cedulaCount + imeiCount > processedBodega.length) {
+      throw new BadRequestException('Cantidad de fotos de bodega inconsistente con los conteos');
+    }
 
     const dto: CreateOrderGatewayDto = {
       order_type_id: Number(formData.order_type_id),
@@ -105,6 +125,8 @@ export class OrdersController {
       dto,
       serializeFilesForMicroservice(processedFiles),
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+      serializeFilesForMicroservice(processedBodega),
+      { cedulaCount, imeiCount },
     );
   }
 
@@ -699,7 +721,7 @@ export class OrdersController {
   async pasarABodega(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
 
-    const cedulaCount = Number(formData.cedulaCount);
+    const cedulaCount = Number(formData.cedulaCount ?? 0);
     const imeiCount = Number(formData.imeiCount ?? 0);
 
     if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
@@ -708,20 +730,12 @@ export class OrdersController {
     if (!Number.isInteger(imeiCount) || imeiCount < 0) {
       throw new BadRequestException('imeiCount inválido');
     }
-
-    const deviceCount = files.length - cedulaCount - imeiCount;
-    if (deviceCount < 0) {
+    if (cedulaCount + imeiCount > files.length) {
       throw new BadRequestException('Cantidad de archivos inconsistente con los conteos');
     }
 
-    // Mínimos comunes a todos los tipos de dispositivo.
-    // El mínimo de IMEI (ARCOTEL) solo aplica a CELLPHONE y lo valida el MS.
-    if (cedulaCount < 2) {
-      throw new BadRequestException('Debes adjuntar mínimo 2 fotos de la cédula');
-    }
-    if (deviceCount < 2) {
-      throw new BadRequestException('Debes adjuntar mínimo 2 fotos del dispositivo');
-    }
+    // Los mínimos (cédula, IMEI para celulares, dispositivo) los valida el MS
+    // sumando las fotos ya guardadas al crear la orden.
 
     const processedFiles = await processAndValidateFiles(files);
 

@@ -7,6 +7,7 @@ export interface ParsedFile {
     originalname: string;
     mimetype: string;
     size: number;
+    fieldname?: string;
 }
 
 export interface ParsedMultipart {
@@ -62,6 +63,19 @@ export async function parseMultipartRequest(
                 console.log(`[DEBUG] FIELD part → ${fieldPart.fieldname} = ${JSON.stringify(fieldPart.value)}`);
                 formData[fieldPart.fieldname] = String(fieldPart.value ?? '');
             }
+            const buffer = Buffer.concat(buffers);
+            console.log(`[DEBUG] FILE part leído en ${Date.now() - tFileStart}ms, size=${buffer.length} bytes`);
+
+            files.push({
+                buffer,
+                originalname: part.filename,
+                mimetype: part.mimetype,
+                size: buffer.length,
+                fieldname: part.fieldname,
+            });
+        } else {
+            console.log(`[DEBUG] FIELD part → ${part.fieldname} = ${JSON.stringify(part.value)}`);
+            formData[part.fieldname] = part.value as string;
         }
     } catch (error) {
         console.error(`[DEBUG] Error iterando request.parts():`, error);
