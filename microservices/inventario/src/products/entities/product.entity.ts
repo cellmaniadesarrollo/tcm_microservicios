@@ -43,7 +43,6 @@ export class Product {
     type: String, 
     required: true, 
     unique: true, 
-    index: true,
     uppercase: true,
     default: () => {
       const random = Math.floor(Math.random() * 10000000000000).toString().padStart(14, '0');
@@ -201,7 +200,6 @@ ProductSchema.index({ brand: 1, model: 1, color: 1 });
 ProductSchema.index({ stockQuantity: 1 });
 ProductSchema.index({ status: 1, isDeleted: 1 });
 ProductSchema.index({ code: 1 });
-ProductSchema.index({ sku: 1 });
 ProductSchema.index({ upc: 1 });
 ProductSchema.index({ categoryId: 1 });
 ProductSchema.index({ createdById: 1, createdAt: -1 });
