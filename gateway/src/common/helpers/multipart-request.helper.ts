@@ -7,6 +7,7 @@ export interface ParsedFile {
     originalname: string;
     mimetype: string;
     size: number;
+    fieldname?: string;
 }
 
 export interface ParsedMultipart {
@@ -52,6 +53,7 @@ export async function parseMultipartRequest(
                 originalname: part.filename,
                 mimetype: part.mimetype,
                 size: buffer.length,
+                fieldname: part.fieldname,
             });
         } else {
             console.log(`[DEBUG] FIELD part → ${part.fieldname} = ${JSON.stringify(part.value)}`);
