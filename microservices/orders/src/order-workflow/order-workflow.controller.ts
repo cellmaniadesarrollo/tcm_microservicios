@@ -55,9 +55,14 @@ export class OrderWorkflowController {
   async createOrder(data: {
     dto: CreateOrderDto;
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>;
+    bodegaFiles?: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>;
+    bodegaCounts?: { cedulaCount: number; imeiCount: number };
     user: { userId: string; companyId: string; branchId: string };
   }) {
-    return this.orderWorkflowService.createOrder(data.dto, data.files ?? [], data.user);
+    return this.orderWorkflowService.createOrder(
+      data.dto, data.files ?? [], data.user,
+      data.bodegaFiles ?? [], data.bodegaCounts,
+    );
   }
 
   @MessagePattern({ cmd: 'list_orders' })
