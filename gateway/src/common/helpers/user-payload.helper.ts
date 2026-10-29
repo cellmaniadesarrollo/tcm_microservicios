@@ -1,3 +1,4 @@
+
 export interface GatewayUserPayload {
     userId: number;
     companyId: number;

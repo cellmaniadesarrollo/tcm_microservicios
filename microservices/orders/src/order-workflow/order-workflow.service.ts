@@ -58,6 +58,7 @@ import { formatPartRequestNumber } from '../order-part-request/helpers/company-n
 import { PartRequestStatus } from '../order-part-request/entities/enums/part-request-status.enum';
 import { PartRequest } from '../order-part-request/entities/part-request.entity';
 import { OrderPriority } from '../catalogs/entities/order-priority.entity';
+import { OrderTotalsService } from './order-totals/order-totals.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -108,7 +109,7 @@ export class OrderWorkflowService {
 
     @InjectRepository(PartRequest)
     private readonly partRequestRepo: Repository<PartRequest>,
-
+    private readonly orderTotalsService: OrderTotalsService
   ) { }
 
   private async getPublicExtraCharges(orderId: number): Promise<{ name: string; price: number }[]> {
@@ -709,13 +710,8 @@ export class OrderWorkflowService {
     // ==================== QUERY 4: resumen de solicitudes de repuesto ====================
     const dataWithParts = await this.appendPartRequestsSummary(mappedData, ids); // 👈 nuevo
 
-    return {
-      data: dataWithParts, // 👈 antes: mappedData
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-    };
+    const withTotals = await this.orderTotalsService.appendTotals(dataWithParts);
+    return { data: withTotals, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async listMyOrders(
@@ -1332,43 +1328,43 @@ export class OrderWorkflowService {
 
         customer: order.customer
           ? {
-              id: order.customer.id,
-              idNumber: order.customer.idNumber,
-              idTypeName: order.customer.idTypeName,
-              firstName: order.customer.firstName,
-              lastName: order.customer.lastName,
-              contacts: (order.customer.contacts ?? []).map((c) => ({
-                id: c.id,
-                typeName: c.typeName,
-                value: c.value,
-                isPrimary: c.isPrimary,
-              })),
-            }
+            id: order.customer.id,
+            idNumber: order.customer.idNumber,
+            idTypeName: order.customer.idTypeName,
+            firstName: order.customer.firstName,
+            lastName: order.customer.lastName,
+            contacts: (order.customer.contacts ?? []).map((c) => ({
+              id: c.id,
+              typeName: c.typeName,
+              value: c.value,
+              isPrimary: c.isPrimary,
+            })),
+          }
           : null,
 
         device: order.device
           ? {
-              device_id: order.device.device_id,
-              serial_number: order.device.serial_number,
-              color: order.device.color,
-              storage: order.device.storage,
-              type: order.device.type
-                ? { id: order.device.type.id, name: order.device.type.name }
-                : null,
-              model: order.device.model
-                ? {
-                    models_id: order.device.model.models_id,
-                    models_name: order.device.model.models_name,
-                    models_img_url: order.device.model.models_img_url,
-                    brand_id: order.device.model.brand?.brands_id,
-                    brand_name: order.device.model.brand?.brands_name,
-                  }
-                : null,
-              imeis: (order.device.imeis ?? []).map((i) => ({
-                imei_id: i.imei_id,
-                imei_number: i.imei_number,
-              })),
-            }
+            device_id: order.device.device_id,
+            serial_number: order.device.serial_number,
+            color: order.device.color,
+            storage: order.device.storage,
+            type: order.device.type
+              ? { id: order.device.type.id, name: order.device.type.name }
+              : null,
+            model: order.device.model
+              ? {
+                models_id: order.device.model.models_id,
+                models_name: order.device.model.models_name,
+                models_img_url: order.device.model.models_img_url,
+                brand_id: order.device.model.brand?.brands_id,
+                brand_name: order.device.model.brand?.brands_name,
+              }
+              : null,
+            imeis: (order.device.imeis ?? []).map((i) => ({
+              imei_id: i.imei_id,
+              imei_number: i.imei_number,
+            })),
+          }
           : null,
 
         technicians: (order.technicians ?? []).map(mapUser),

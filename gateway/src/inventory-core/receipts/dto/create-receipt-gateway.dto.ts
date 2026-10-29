@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import {
-    ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsInt, IsNotEmpty, IsNumber,
+    ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber,
     IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested,
 } from 'class-validator';
 
@@ -95,4 +95,31 @@ export class CreateReceiptGatewayDto {
     @ValidateNested({ each: true })
     @Type(() => ReceiptLineGatewayDto)
     lines!: ReceiptLineGatewayDto[];
+
+    /** Pagos iniciales (cuotas ya pagadas al registrar). Su suma no puede superar el total. */
+    @IsOptional()
+    @IsArray()
+    @ArrayMaxSize(50)
+    @ValidateNested({ each: true })
+    @Type(() => ReceiptInitialPaymentGatewayDto)
+    payments?: ReceiptInitialPaymentGatewayDto[];
+}
+/** Pago hecho al momento de registrar el ingreso. */
+export class ReceiptInitialPaymentGatewayDto {
+    @Type(() => Number)
+    @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El monto debe ser numérico (hasta 2 decimales)' })
+    @Min(0.01, { message: 'El monto debe ser mayor a 0' }) @Max(9999999999.99)
+    amount!: number;
+
+    @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha de pago debe tener formato AAAA-MM-DD' })
+    paidAt!: string;
+
+    @IsIn(['CASH', 'TRANSFER', 'CHECK', 'CARD', 'OTHER'], { message: 'El método de pago no es válido' })
+    method!: 'CASH' | 'TRANSFER' | 'CHECK' | 'CARD' | 'OTHER';
+
+    @IsOptional() @IsString() @MaxLength(100)
+    reference?: string;
+
+    @IsOptional() @IsString() @MaxLength(500)
+    note?: string;
 }

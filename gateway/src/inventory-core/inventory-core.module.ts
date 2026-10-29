@@ -8,6 +8,8 @@ import { SuppliersController } from './suppliers/suppliers.controller';
 import { SuppliersService } from './suppliers/suppliers.service';
 import { ReceiptsController } from './receipts/receipts.controller';
 import { ReceiptsService } from './receipts/receipts.service';
+import { SriController } from './sri/sri.controller';
+import { SriService } from './sri/sri.service';
 
 @Module({
   imports: [
@@ -24,7 +26,7 @@ import { ReceiptsService } from './receipts/receipts.service';
     ]),
     AuthModule,
   ],
-  controllers: [InventoryCoreController, SuppliersController, ReceiptsController],
-  providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService],
+  controllers: [InventoryCoreController, SuppliersController, ReceiptsController, SriController],
+  providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService, SriService],
 })
 export class InventoryCoreModule { }
