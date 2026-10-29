@@ -156,6 +156,8 @@ export class OrderWorkflowService {
     dto: CreateOrderDto,
     files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
     user: { companyId: string; branchId: string; userId: string },
+    bodegaFiles: Array<{ buffer: string; originalname: string; mimetype: string; size: number }> = [],
+    bodegaCounts?: { cedulaCount: number; imeiCount: number },
   ) {
     return this.orderRepo.manager.transaction(async (manager) => {
       // 🔒 Resolver técnicos
@@ -290,6 +292,24 @@ export class OrderWorkflowService {
         });
 
         attachments.push(await manager.save(attachment));
+      }
+
+      // 📸 Fotos de ingreso a bodega (mismo almacén que pasarABodega)
+      if (bodegaFiles.length) {
+        const cedulaCount = Number(bodegaCounts?.cedulaCount ?? 0);
+        const imeiCount = Number(bodegaCounts?.imeiCount ?? 0);
+
+        if (
+          !Number.isInteger(cedulaCount) || cedulaCount < 0 ||
+          !Number.isInteger(imeiCount) || imeiCount < 0 ||
+          cedulaCount + imeiCount > bodegaFiles.length
+        ) {
+          throw new RpcException(new BadRequestException('cedulaCount/imeiCount inválido'));
+        }
+
+        await this.saveWarehousePhotos(
+          manager, savedOrder.id, bodegaFiles, cedulaCount, imeiCount, user.userId,
+        );
       }
 
       // 🔹 ========== OBTENER DATOS DEL DISPOSITIVO ==========
@@ -3430,20 +3450,38 @@ export class OrderWorkflowService {
         throw new RpcException(new NotFoundException('Orden no encontrada'));
       }
 
-      // ── ARCOTEL (IMEI) obligatorio solo para CELLPHONE ──
       const isCellphone = order.device?.type?.id === this.DEVICE_TYPE_CELLPHONE_ID;
 
-      if (cedulaCount < MIN_FOTOS) {
+      // ── Fotos de ingreso ya guardadas (p. ej. al crear la orden) ──
+      const existing = await manager.find(Attachment, {
+        where: {
+          entity_id: order.id,
+          is_active: true,
+          entity_type: In([
+            AttachmentEntityType.WAREHOUSE_HANDOVER,
+            AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI,
+            AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE,
+          ]),
+        },
+      });
+      const countOf = (t: AttachmentEntityType) =>
+        existing.filter((a) => a.entity_type === t).length;
+
+      const totalCedula = countOf(AttachmentEntityType.WAREHOUSE_HANDOVER) + cedulaCount;
+      const totalImei = countOf(AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI) + imeiCount;
+      const totalDevice = countOf(AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE) + deviceCount;
+
+      if (totalCedula < MIN_FOTOS) {
         throw new RpcException(
           new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos de la cédula del cliente`),
         );
       }
-      if (isCellphone && imeiCount < MIN_FOTOS) {
+      if (isCellphone && totalImei < MIN_FOTOS) {
         throw new RpcException(
           new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del IMEI (ARCOTEL) para celulares`),
         );
       }
-      if (deviceCount < MIN_FOTOS) {
+      if (totalDevice < MIN_FOTOS) {
         throw new RpcException(
           new BadRequestException(`Se requieren mínimo ${MIN_FOTOS} fotos del dispositivo`),
         );
@@ -3457,47 +3495,10 @@ export class OrderWorkflowService {
       const { toStatus, history, fromStatusId, fromStatusName } =
         await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);
 
-      // 📎 Adjuntos (orden fijo: cédula → imei → dispositivo):
-      //   - Los primeros `cedulaCount` archivos → cédula del cliente (WAREHOUSE_HANDOVER)
-      //   - Los siguientes `imeiCount` archivos → IMEI para ARCOTEL (WAREHOUSE_HANDOVER_IMEI)
-      //   - El resto → fotos del dispositivo (WAREHOUSE_HANDOVER_DEVICE)
-      const attachments: Attachment[] = [];
-
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-
-        let folder: string;
-        let entityType: AttachmentEntityType;
-
-        if (i < cedulaCount) {
-          folder = 'cedula';
-          entityType = AttachmentEntityType.WAREHOUSE_HANDOVER;
-        } else if (i < cedulaCount + imeiCount) {
-          folder = 'imei';
-          entityType = AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI;
-        } else {
-          folder = 'dispositivo';
-          entityType = AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE;
-        }
-
-        const buffer = Buffer.from(file.buffer, 'base64');
-        const prefix = `order/${order.id}/bodega/${folder}/`;
-        const url = await this.awsS3Service.uploadBuffer(
-          buffer, file.originalname, file.mimetype, prefix,
-        );
-
-        const attachment = manager.create(Attachment, {
-          entity_type: entityType,
-          entity_id: order.id,
-          file_name: file.originalname,
-          file_url: url,
-          file_type: file.mimetype,
-          uploaded_by_id: user.userId,
-          is_public: true,
-        });
-
-        attachments.push(await manager.save(attachment));
-      }
+      // 📎 Solo sube las fotos nuevas (con omitirFotos llega vacío)
+      const attachments = await this.saveWarehousePhotos(
+        manager, order.id, files, cedulaCount, imeiCount, user.userId,
+      );
 
       const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
@@ -3516,7 +3517,7 @@ export class OrderWorkflowService {
           observation,
           changed_at: history.changed_at,
         },
-        attachments: attachments.map(a => ({
+        attachments: attachments.map((a) => ({
           id: a.id,
           file_url: a.file_url,
           file_name: a.file_name,
@@ -3928,6 +3929,51 @@ export class OrderWorkflowService {
       priority: { id: result.premium.id, name: result.premium.name },
       surcharge_percentage: Number(result.premium.surcharge_percentage ?? 0),
     };
+  }
+
+  private async saveWarehousePhotos(
+    manager: EntityManager,
+    orderId: number,
+    files: Array<{ buffer: string; originalname: string; mimetype: string; size: number }>,
+    cedulaCount: number,
+    imeiCount: number,
+    userId: string,
+  ): Promise<Attachment[]> {
+    const attachments: Attachment[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      let folder: string;
+      let entityType: AttachmentEntityType;
+
+      if (i < cedulaCount) {
+        folder = 'cedula';
+        entityType = AttachmentEntityType.WAREHOUSE_HANDOVER;
+      } else if (i < cedulaCount + imeiCount) {
+        folder = 'imei';
+        entityType = AttachmentEntityType.WAREHOUSE_HANDOVER_IMEI;
+      } else {
+        folder = 'dispositivo';
+        entityType = AttachmentEntityType.WAREHOUSE_HANDOVER_DEVICE;
+      }
+
+      const buffer = Buffer.from(file.buffer, 'base64');
+      const url = await this.awsS3Service.uploadBuffer(
+        buffer, file.originalname, file.mimetype, `order/${orderId}/bodega/${folder}/`,
+      );
+
+      const attachment = manager.create(Attachment, {
+        entity_type: entityType,
+        entity_id: orderId,
+        file_name: file.originalname,
+        file_url: url,
+        file_type: file.mimetype,
+        uploaded_by_id: userId,
+        is_public: true,
+      });
+      attachments.push(await manager.save(attachment));
+    }
+    return attachments;
   }
 }
 

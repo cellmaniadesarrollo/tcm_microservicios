@@ -33,8 +33,14 @@ export class OrdersGatewayService {
 
     // ---------- Órdenes ----------
 
-    createOrder(dto: any, files: any[], user: any) {
-        return this.send('create_order', { dto, files, user });
+    createOrder(
+        dto: any,
+        files: any[],
+        user: any,
+        bodegaFiles: any[] = [],
+        bodegaCounts?: { cedulaCount: number; imeiCount: number },
+    ) {
+        return this.send('create_order', { dto, files, bodegaFiles, bodegaCounts, user });
     }
 
     findCustomer(find: any, user: any) {

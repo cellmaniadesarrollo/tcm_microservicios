@@ -83,7 +83,27 @@ export class OrdersController {
   @Groups('CASHIERS')
   async createOrder(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
-    const processedFiles = await processAndValidateFiles(files);
+
+    // Separar por nombre de campo ANTES de procesar
+    const bodegaRaw = files.filter((f: any) => f.fieldname === 'bodegaFiles');
+    const normalRaw = files.filter((f: any) => f.fieldname !== 'bodegaFiles');
+
+    const processedFiles = await processAndValidateFiles(normalRaw);
+    const processedBodega = await processAndValidateFiles(bodegaRaw);
+
+    // Conteos de bodega (fuera del dto)
+    const cedulaCount = Number(formData.cedulaCount ?? 0);
+    const imeiCount = Number(formData.imeiCount ?? 0);
+
+    if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
+      throw new BadRequestException('cedulaCount inválido');
+    }
+    if (!Number.isInteger(imeiCount) || imeiCount < 0) {
+      throw new BadRequestException('imeiCount inválido');
+    }
+    if (cedulaCount + imeiCount > processedBodega.length) {
+      throw new BadRequestException('Cantidad de fotos de bodega inconsistente con los conteos');
+    }
 
     const dto: CreateOrderGatewayDto = {
       order_type_id: Number(formData.order_type_id),
@@ -105,6 +125,8 @@ export class OrdersController {
       dto,
       serializeFilesForMicroservice(processedFiles),
       { userId: user.sub, companyId: user.companyId, branchId: user.branchId },
+      serializeFilesForMicroservice(processedBodega),
+      { cedulaCount, imeiCount },
     );
   }
 
@@ -274,11 +296,16 @@ export class OrdersController {
 
   @Post('payments')
   async registerPayment(@Req() request: FastifyRequest, @User() user: any) {
-    const requestId = Math.random().toString(36).slice(2, 8); // para correlacionar en logs
+    const requestId = Math.random().toString(36).slice(2, 8);
     console.log(`[DEBUG][${requestId}] ══ POST /payments START @ ${new Date().toISOString()}`);
-    console.log(`[DEBUG][${requestId}] user:`, JSON.stringify(user));
 
     const { files, formData } = await parseMultipartRequest(request);
+
+    // Validar si la petición llegó sin campos requeridos
+    if (!formData.orderId || isNaN(Number(formData.orderId))) {
+      throw new BadRequestException('El campo orderId es requerido y debe ser un número válido.');
+    }
+
     const processedFiles = await processAndValidateFiles(files);
 
     const dto: CreateOrderPaymentGatewayDto = {
@@ -290,9 +317,6 @@ export class OrdersController {
       observation: formData.observation,
     };
 
-    console.log(`[DEBUG][${requestId}] DTO construido:`, JSON.stringify(dto));
-    console.log(`[DEBUG][${requestId}] orderId raw='${formData.orderId}' → parsed=${dto.orderId} (isNaN=${isNaN(dto.orderId)})`);
-
     const tSend = Date.now();
     try {
       const result = await this.ordersGatewayService.registerPayment(
@@ -300,17 +324,10 @@ export class OrdersController {
         serializeFilesForMicroservice(processedFiles),
         toUserPayload(user),
       );
-      console.log(`[DEBUG][${requestId}] ✅ registerPayment OK en ${Date.now() - tSend}ms`);
-      console.log(`[DEBUG][${requestId}] ══ POST /payments END`);
       return result;
     } catch (err) {
-      console.log(`[DEBUG][${requestId}] ❌ registerPayment FALLÓ en ${Date.now() - tSend}ms`);
-
-      // Extracción segura del mensaje de error
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.log(`[DEBUG][${requestId}] Error:`, errorMessage);
-
-      console.log(`[DEBUG][${requestId}] ══ POST /payments END (con error)`);
       throw err;
     }
   }
@@ -704,7 +721,7 @@ export class OrdersController {
   async pasarABodega(@Req() request: FastifyRequest, @User() user: any) {
     const { files, formData } = await parseMultipartRequest(request);
 
-    const cedulaCount = Number(formData.cedulaCount);
+    const cedulaCount = Number(formData.cedulaCount ?? 0);
     const imeiCount = Number(formData.imeiCount ?? 0);
 
     if (!Number.isInteger(cedulaCount) || cedulaCount < 0) {
@@ -713,20 +730,12 @@ export class OrdersController {
     if (!Number.isInteger(imeiCount) || imeiCount < 0) {
       throw new BadRequestException('imeiCount inválido');
     }
-
-    const deviceCount = files.length - cedulaCount - imeiCount;
-    if (deviceCount < 0) {
+    if (cedulaCount + imeiCount > files.length) {
       throw new BadRequestException('Cantidad de archivos inconsistente con los conteos');
     }
 
-    // Mínimos comunes a todos los tipos de dispositivo.
-    // El mínimo de IMEI (ARCOTEL) solo aplica a CELLPHONE y lo valida el MS.
-    if (cedulaCount < 2) {
-      throw new BadRequestException('Debes adjuntar mínimo 2 fotos de la cédula');
-    }
-    if (deviceCount < 2) {
-      throw new BadRequestException('Debes adjuntar mínimo 2 fotos del dispositivo');
-    }
+    // Los mínimos (cédula, IMEI para celulares, dispositivo) los valida el MS
+    // sumando las fotos ya guardadas al crear la orden.
 
     const processedFiles = await processAndValidateFiles(files);
 
