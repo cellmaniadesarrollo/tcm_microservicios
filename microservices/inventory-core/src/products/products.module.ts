@@ -13,12 +13,13 @@ import { ProductName } from '../product-catalogs/entities/product-name.entity';
 import { AuditLogModule } from '../audit-log/audit-log.module';
 import { ProductUsage } from '../product-catalogs/entities/product-usage.entity';
 import { ProductUsageLink } from './entities/product-usage-link.entity';
+import { StockUnitSerial } from '../stock/entities/stock-unit-serial.entity';
 
 @Module({
   imports: [
     ProductCatalogsModule,
     AwsS3Module,
-    TypeOrmModule.forFeature([ProductImage, ProductModel, Product, ProductName, ProductUsageLink]), // registra la entidad si usas autoLoadEntities
+    TypeOrmModule.forFeature([ProductImage, ProductModel, Product, ProductName, ProductUsageLink, StockUnitSerial]), // registra la entidad si usas autoLoadEntities
     AuditLogModule
   ],
   controllers: [ProductsController, ProductImagesController],

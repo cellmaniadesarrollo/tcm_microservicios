@@ -5,7 +5,7 @@ import {
 import { CompanyReplica } from '../../companies/entities/company-replica.entity';
 import { BranchReplica } from '../../companies/entities/branch-replica.entity';
 import { Supplier } from '../../suppliers/entities/supplier.entity';
-import { ReceiptStatus, ReceiptSource } from '../enums/receipt.enums';
+import { ReceiptStatus, ReceiptSource, PaymentStatus } from '../enums/receipt.enums';
 import { ReceiptLine } from './receipt-line.entity';
 import { ReceiptDocumentType } from '../../catalogs/entities/receipt-document-type.entity';
 
@@ -46,6 +46,8 @@ import { ReceiptDocumentType } from '../../catalogs/entities/receipt-document-ty
 @Check('chk_receipts_voided_at', `"status" <> 'VOIDED' OR "voided_at" IS NOT NULL`)
 @Check('chk_receipts_access_key_source', `"source" <> 'ACCESS_KEY' OR "access_key" IS NOT NULL`)
 @Check('chk_receipts_access_key_length', `"access_key" IS NULL OR char_length("access_key") = 49`)
+@Index('idx_receipts_company_payment', ['companyId', 'paymentStatus'])
+@Check('chk_receipts_paid_total', `"paid_total" >= 0 AND "paid_total" <= "total"`)
 export class Receipt {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
@@ -166,4 +168,16 @@ export class Receipt {
 
     @UpdateDateColumn({ name: 'updated_at' })
     updatedAt!: Date;
+    @Column({ name: 'payment_status', type: 'enum', enum: PaymentStatus, default: PaymentStatus.UNPAID })
+    paymentStatus!: PaymentStatus;
+
+    /** Último cambio de estado de pago (el detalle está en receipt_payment_events). */
+    @Column({ name: 'payment_updated_at', type: 'timestamptz', nullable: true })
+    paymentUpdatedAt?: Date;
+
+    @Column({ name: 'payment_updated_by_id', type: 'uuid', nullable: true })
+    paymentUpdatedById?: string;
+
+    @Column({ name: 'paid_total', type: 'numeric', precision: 14, scale: 2, default: 0 })
+    paidTotal!: string;
 } 

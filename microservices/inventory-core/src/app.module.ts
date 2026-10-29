@@ -12,6 +12,7 @@ import { SequencesModule } from './common/sequences/sequences.module';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { StockModule } from './stock/stock.module';
+import { SriModule } from './sri/sri.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
@@ -41,7 +42,8 @@ import { StockModule } from './stock/stock.module';
     StockModule,
     CatalogsModule,
     SuppliersModule,
-    ReceiptsModule
+    ReceiptsModule,
+    SriModule
   ],
 })
 export class AppModule { }
