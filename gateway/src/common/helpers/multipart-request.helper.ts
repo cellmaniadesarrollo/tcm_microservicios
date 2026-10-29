@@ -1,3 +1,4 @@
+//src\common\helpers\multipart-request.helper.ts
 import { BadRequestException } from '@nestjs/common';
 import { FastifyRequest } from 'fastify';
 import { processFileForUpload } from './process-file.helper';
@@ -12,6 +13,13 @@ export interface ParsedFile {
 export interface ParsedMultipart {
     files: ParsedFile[];
     formData: Record<string, string>;
+}
+export interface ParsedFile {
+    buffer: Buffer;
+    originalname: string;
+    mimetype: string;
+    size: number;
+    fieldname?: string; // <- nuevo
 }
 
 export const DEFAULT_MAX_FILE_SIZE = 80 * 1024 * 1024; // 80MB
@@ -52,6 +60,7 @@ export async function parseMultipartRequest(
                 originalname: part.filename,
                 mimetype: part.mimetype,
                 size: buffer.length,
+                fieldname: part.fieldname, // <- nuevo
             });
         } else {
             console.log(`[DEBUG] FIELD part → ${part.fieldname} = ${JSON.stringify(part.value)}`);
@@ -123,3 +132,4 @@ export async function parseAndProcessMultipart(
     const serializedFiles = serializeFilesForMicroservice(processedFiles);
     return { formData, files: serializedFiles };
 }
+
