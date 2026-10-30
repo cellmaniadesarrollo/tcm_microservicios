@@ -42,7 +42,6 @@ import { LinkDeviceToOrderDto, UpdateDeviceGatewayDto } from './dto/update-devic
 import { UpdateFindingProcedureGatewayDto } from './dto/update-finding-procedure-gateway.dto';
 import { UpdateOrderFindingGatewayDto } from './dto/update-order-finding-gateway.dto';
 import { UploadAttachmentGatewayDto } from './dto/upload-attachment.gateway.dto';
-import { CreateOrderPaymentGatewayDto } from './dto/create-order-payment-gateway.dto';
 import { CloseOrderGatewayDto } from './dto/close-order-gateway.dto';
 import { GetLastOrdersByDeviceGatewayDto } from './dto/get-last-orders-by-device-gateway.dto';
 import { GetOrderPublicDataGatewayDto } from './dto/get-order-public-data-gateway.dto';
@@ -70,6 +69,12 @@ import { UpdateDeviceImeiGatewayDto } from './dto/update-device-imei-gateway.dto
 import { PasarABodegaGatewayDto } from './dto/pasar-a-bodega-gateway.dto';
 import { CreateWarehousePaymentGatewayDto } from './dto/create-warehouse-payment-gateway.dto';
 import { ListOrderPaymentsGatewayDto } from './dto/list-order-payments.gateway.dto';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import {
+  CreateOrderPaymentGatewayDto,
+  PAYMENT_METHOD_TRANSFERENCIA_ID,
+} from './dto/create-order-payment-gateway.dto';
 
 @Controller('orders')
 @Auth()
@@ -308,23 +313,40 @@ export class OrdersController {
 
     const processedFiles = await processAndValidateFiles(files);
 
-    const dto: CreateOrderPaymentGatewayDto = {
+    const rawDto = {
       orderId: Number(formData.orderId),
       amount: Number(formData.amount),
       paymentTypeId: Number(formData.paymentTypeId),
       paymentMethodId: formData.paymentMethodId ? Number(formData.paymentMethodId) : null,
-      reference: formData.reference,
+      reference: formData.reference || undefined,
       observation: formData.observation,
     };
 
-    const tSend = Date.now();
+    // Ejecuta los decoradores del DTO (no corren solos porque no usamos @Body())
+    const dto = plainToInstance(CreateOrderPaymentGatewayDto, rawDto);
+    const errors = await validate(dto);
+    if (errors.length > 0) {
+      throw new BadRequestException(
+        errors.flatMap((e) => Object.values(e.constraints ?? {})),
+      );
+    }
+
+    // Transferencia => comprobante (foto) obligatorio
+    if (
+      dto.paymentMethodId === PAYMENT_METHOD_TRANSFERENCIA_ID &&
+      processedFiles.length === 0
+    ) {
+      throw new BadRequestException(
+        'Debes adjuntar la foto del comprobante para pagos por transferencia',
+      );
+    }
+
     try {
-      const result = await this.ordersGatewayService.registerPayment(
+      return await this.ordersGatewayService.registerPayment(
         dto,
         serializeFilesForMicroservice(processedFiles),
         toUserPayload(user),
       );
-      return result;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       console.log(`[DEBUG][${requestId}] Error:`, errorMessage);
@@ -774,6 +796,15 @@ export class OrdersController {
       reference: formData.reference || undefined,
       observation: formData.observation || undefined,
     };
+
+    if (
+      dto.paymentMethodId === PAYMENT_METHOD_TRANSFERENCIA_ID &&
+      (!dto.reference?.trim() || processedFiles.length === 0)
+    ) {
+      throw new BadRequestException(
+        'Para transferencia debes enviar el número de referencia y la foto del comprobante',
+      );
+    }
 
     return this.ordersGatewayService.createWarehousePayment(
       dto,
