@@ -3651,6 +3651,17 @@ export class OrderWorkflowService {
         throw new RpcException(new BadRequestException('Tipo y método de pago son requeridos'));
       }
 
+      const paymentMethod = await manager.findOne(PaymentMethod, {
+        where: { id: dto.paymentMethodId },
+      });
+
+      if (!paymentMethod) {
+        throw new RpcException(new NotFoundException('Método de pago no encontrado'));
+      }
+
+      // Transferencia: número + foto obligatorios
+      this.assertTransferRequirements(paymentMethod, dto.reference, files?.length ?? 0);
+
       const payment = manager.create(WarehousePayment, {
         order_id: order.id,
         amount: dto.amount,
