@@ -17,6 +17,7 @@ import { TaskboardModule } from './taskboard/taskboard.module';  // ✅ Agregar 
 import { NotificationsDispatcherModule } from './notifications-dispatcher/notifications-dispatcher.module';
 import { InventarioModule } from './inventario/inventario.module';
 import { InventoryCoreModule } from './inventory-core/inventory-core.module';
+import { ReferralsModule } from './referrals/referrals.module';
 
 @Module({
   imports: [
@@ -35,7 +36,8 @@ import { InventoryCoreModule } from './inventory-core/inventory-core.module';
     TaskboardModule,  // ✅ Agregar aquí
     NotificationsDispatcherModule,
     InventarioModule,
-    InventoryCoreModule
+    InventoryCoreModule,
+    ReferralsModule
   ],
   controllers: [AppController],
   providers: [AppService],

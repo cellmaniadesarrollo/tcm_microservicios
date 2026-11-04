@@ -3,13 +3,13 @@
 # TCM microservicios - levantar / reconstruir stack de Docker
 #
 # Uso:
-#   ./start-all.sh                  # levanta todo (sin reconstruir imágenes)
-#   ./start-all.sh --build          # reconstruye (con caché) y levanta
-#   ./start-all.sh --build --no-cache
-#   ./start-all.sh --restart        # detiene contenedores ms-* antes de levantar
-#   ./start-all.sh --prune          # además limpia imágenes/caché huérfanas (dangling)
-#   ./start-all.sh gateway inventario   # solo esos stacks
-#   ./start-all.sh --down           # detiene todos los stacks (conserva volúmenes)
+#   ./reconstruir_completo.sh                  # levanta todo (sin reconstruir imágenes)
+#   ./reconstruir_completo.sh --build          # reconstruye (con caché) y levanta
+#   ./reconstruir_completo.sh --build --no-cache
+#   ./reconstruir_completo.sh --restart        # detiene contenedores ms-* antes de levantar
+#   ./reconstruir_completo.sh --prune          # además limpia imágenes/caché huérfanas (dangling)
+#   ./reconstruir_completo.sh gateway inventario   # solo esos stacks
+#   ./reconstruir_completo.sh --down           # detiene todos los stacks (conserva volúmenes)
 # ============================================================
 set -u   # sin "set -e": un fallo no debe cortar el resto
 
@@ -20,7 +20,7 @@ mkdir -p "$LOG_DIR"
 
 # Orden de arranque (carpeta dentro de $BASE). Gateway va al final
 # porque depende del resto (incluye también "realtime").
-ALL_STACKS=(infra notifications services inventario task-boards gateway)
+ALL_STACKS=(infra services referrals gateway)
 # Stacks opcionales existentes en tu carpeta (descomenta si los usas):
 # ALL_STACKS+=(core notification-dispatcher reports scraping)
 

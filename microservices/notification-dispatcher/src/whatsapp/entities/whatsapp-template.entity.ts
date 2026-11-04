@@ -14,6 +14,7 @@ export type WhatsappTemplateEvent =
     | 'ORDER_INGRESADO'
     | 'ORDER_TRABAJO_FINALIZADO'
     | 'ORDER_ENTREGADA'
+    | 'REFERRAL_WELCOME'
     | 'REMINDER_STEP_0'
     | 'REMINDER_STEP_1'
     | 'REMINDER_STEP_2'
