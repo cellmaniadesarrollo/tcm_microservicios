@@ -10,6 +10,12 @@ import { ReceiptsController } from './receipts/receipts.controller';
 import { ReceiptsService } from './receipts/receipts.service';
 import { SriController } from './sri/sri.controller';
 import { SriService } from './sri/sri.service';
+import { StockVouchersController } from './stock-vouchers/stock-vouchers.controller';
+import { StockVouchersService } from './stock-vouchers/stock-vouchers.service';
+import { EmployeesController } from './employees/employees.controller';
+import { EmployeesService } from './employees/employees.service';
+import { OrdersController } from './orders/orders.controller';
+import { OrdersService } from './orders/orders.service';
 
 @Module({
   imports: [
@@ -26,7 +32,10 @@ import { SriService } from './sri/sri.service';
     ]),
     AuthModule,
   ],
-  controllers: [InventoryCoreController, SuppliersController, ReceiptsController, SriController],
-  providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService, SriService],
+  controllers: [InventoryCoreController, SuppliersController, ReceiptsController, SriController, StockVouchersController,
+    EmployeesController, OrdersController
+  ],
+  providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService, SriService,
+    StockVouchersService, EmployeesService, OrdersService],
 })
 export class InventoryCoreModule { }

@@ -1,10 +1,25 @@
 import { Type } from 'class-transformer';
 import {
-    ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsInt, IsNotEmpty, IsNumber,
-    IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, ValidateNested,
+    ArrayMaxSize,
+    ArrayMinSize,
+    IsArray,
+    IsBoolean,
+    IsIn,
+    IsInt,
+    IsNotEmpty,
+    IsNumber,
+    IsOptional,
+    IsString,
+    IsUUID,
+    Matches,
+    Max,
+    MaxLength,
+    Min,
+    ValidateIf,
+    ValidateNested,
 } from 'class-validator';
 
-/** Un equipo físico. Un celular con dos IMEI lleva dos valores en `serials`. */
+/** Un equipo físico. Un celular con dos IMEI lleva dos valores en serials. */
 export class ReceiptUnitGatewayDto {
     @IsArray({ message: 'Los seriales deben ser una lista' })
     @ArrayMinSize(1, { message: 'Cada equipo necesita al menos un IMEI/serial' })
@@ -16,18 +31,20 @@ export class ReceiptUnitGatewayDto {
 }
 
 export class ReceiptLineGatewayDto {
-    @IsUUID('4', { message: 'El producto no es válido' })
-    productId!: string;
-
     @Type(() => Number)
     @IsInt({ message: 'La cantidad debe ser un entero' })
-    @Min(1) @Max(100000)
+    @Min(1)
+    @Max(100000)
     quantity!: number;
 
     /** Costo unitario SIN impuesto, tal como viene en el documento. */
     @Type(() => Number)
-    @IsNumber({ maxDecimalPlaces: 4 }, { message: 'El costo debe ser numérico (hasta 4 decimales)' })
-    @Min(0) @Max(1000000)
+    @IsNumber(
+        { maxDecimalPlaces: 4 },
+        { message: 'El costo debe ser numérico (hasta 4 decimales)' },
+    )
+    @Min(0)
+    @Max(1000000)
     unitCost!: number;
 
     /** Descuento TOTAL de la línea (no por unidad). */
@@ -37,29 +54,33 @@ export class ReceiptLineGatewayDto {
     @Min(0)
     discount?: number;
 
-    @IsOptional() @IsString() @MaxLength(10)
+    @IsOptional()
+    @IsString()
+    @MaxLength(10)
     purchaseTaxCode?: string;
 
     @IsOptional()
     @Type(() => Number)
     @IsNumber({ maxDecimalPlaces: 2 })
-    @Min(0) @Max(100)
+    @Min(0)
+    @Max(100)
     purchaseTaxRate?: number;
 
-    @Type(() => Number)
-    @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El precio de venta debe ser numérico' })
-    @Min(0) @Max(9999999999.99)
-    salePrice!: number;
+    @IsOptional()
+    @IsBoolean()
+    hasTax?: boolean;
 
-    @Type(() => Number)
-    @IsInt({ message: 'Los días de garantía deben ser un entero' })
-    @Min(0)
-    warrantyDays!: number;
+    @IsOptional()
+    @IsBoolean()
+    priceIncludesTax?: boolean;
 
-    @IsOptional() @IsBoolean() hasTax?: boolean;
-    @IsOptional() @IsBoolean() priceIncludesTax?: boolean;
-    @IsOptional() @IsBoolean() billableInSales?: boolean;
-    @IsOptional() @IsBoolean() billableInRepairOrders?: boolean;
+    @IsOptional()
+    @IsBoolean()
+    billableInSales?: boolean;
+
+    @IsOptional()
+    @IsBoolean()
+    billableInRepairOrders?: boolean;
 
     /** Solo productos SERIAL: un elemento por equipo (la cantidad debe coincidir). */
     @IsOptional()
@@ -67,6 +88,88 @@ export class ReceiptLineGatewayDto {
     @ValidateNested({ each: true })
     @Type(() => ReceiptUnitGatewayDto)
     units?: ReceiptUnitGatewayDto[];
+
+    /** false = línea sin stock (transporte, servicio...). Por defecto true. */
+    @IsOptional()
+    @IsBoolean()
+    affectsInventory?: boolean;
+
+    /** Descripción u observaciones de la línea. */
+    @IsOptional()
+    @IsString()
+    @MaxLength(300)
+    description?: string;
+
+    @ValidateIf((o) => o.affectsInventory !== false)
+    @IsUUID('4', { message: 'El producto no es válido' })
+    productId?: string;
+
+    @ValidateIf((o) => o.affectsInventory !== false)
+    @Type(() => Number)
+    @IsNumber(
+        { maxDecimalPlaces: 2 },
+        { message: 'El precio de venta debe ser numérico' },
+    )
+    @Min(0)
+    @Max(9999999999.99)
+    salePrice?: number;
+
+    @ValidateIf((o) => o.affectsInventory !== false)
+    @Type(() => Number)
+    @IsInt({ message: 'Los días de garantía deben ser un entero' })
+    @Min(0)
+    warrantyDays?: number;
+
+    /** Código del producto según el proveedor. Si viene, el sistema aprende la relación. */
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    supplierCode?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(300)
+    supplierDescription?: string;
+
+    /** Cantidad según el documento del proveedor (unidades del proveedor). Sirve para aprender el factor. */
+    @IsOptional()
+    @Type(() => Number)
+    @IsNumber({ maxDecimalPlaces: 4 })
+    @Min(0.0001)
+    @Max(1000000000)
+    supplierQuantity?: number;
+}
+
+/** Pago hecho al momento de registrar el ingreso. */
+export class ReceiptInitialPaymentGatewayDto {
+    @Type(() => Number)
+    @IsNumber(
+        { maxDecimalPlaces: 2 },
+        { message: 'El monto debe ser numérico (hasta 2 decimales)' },
+    )
+    @Min(0.01, { message: 'El monto debe ser mayor a 0' })
+    @Max(9999999999.99)
+    amount!: number;
+
+    @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+        message: 'La fecha de pago debe tener formato AAAA-MM-DD',
+    })
+    paidAt!: string;
+
+    @IsIn(['CASH', 'TRANSFER', 'CHECK', 'CARD', 'OTHER'], {
+        message: 'El método de pago no es válido',
+    })
+    method!: 'CASH' | 'TRANSFER' | 'CHECK' | 'CARD' | 'OTHER';
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(100)
+    reference?: string;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(500)
+    note?: string;
 }
 
 export class CreateReceiptGatewayDto {
@@ -80,13 +183,19 @@ export class CreateReceiptGatewayDto {
     @IsUUID('4', { message: 'El tipo de documento no es válido' })
     documentTypeId!: string;
 
-    @IsOptional() @IsString() @MaxLength(50)
+    @IsOptional()
+    @IsString()
+    @MaxLength(50)
     documentNumber?: string;
 
-    @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha debe tener formato AAAA-MM-DD' })
+    @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+        message: 'La fecha debe tener formato AAAA-MM-DD',
+    })
     issueDate!: string;
 
-    @IsOptional() @IsString() @MaxLength(2000)
+    @IsOptional()
+    @IsString()
+    @MaxLength(2000)
     notes?: string;
 
     @IsArray()
@@ -103,23 +212,13 @@ export class CreateReceiptGatewayDto {
     @ValidateNested({ each: true })
     @Type(() => ReceiptInitialPaymentGatewayDto)
     payments?: ReceiptInitialPaymentGatewayDto[];
-}
-/** Pago hecho al momento de registrar el ingreso. */
-export class ReceiptInitialPaymentGatewayDto {
-    @Type(() => Number)
-    @IsNumber({ maxDecimalPlaces: 2 }, { message: 'El monto debe ser numérico (hasta 2 decimales)' })
-    @Min(0.01, { message: 'El monto debe ser mayor a 0' }) @Max(9999999999.99)
-    amount!: number;
 
-    @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha de pago debe tener formato AAAA-MM-DD' })
-    paidAt!: string;
-
-    @IsIn(['CASH', 'TRANSFER', 'CHECK', 'CARD', 'OTHER'], { message: 'El método de pago no es válido' })
-    method!: 'CASH' | 'TRANSFER' | 'CHECK' | 'CARD' | 'OTHER';
-
-    @IsOptional() @IsString() @MaxLength(100)
-    reference?: string;
-
-    @IsOptional() @IsString() @MaxLength(500)
-    note?: string;
+    /** Clave de acceso del SRI (49 dígitos). Si viene, el ingreso queda como importado. */
+    @IsOptional()
+    @IsString()
+    @MaxLength(80)
+    @Matches(/^[\d\s-]{49,70}$/, {
+        message: 'La clave de acceso debe tener 49 dígitos',
+    })
+    accessKey?: string;
 }
