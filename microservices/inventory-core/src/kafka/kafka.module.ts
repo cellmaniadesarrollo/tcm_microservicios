@@ -5,6 +5,7 @@ import { KafkaProducerService } from './kafka.producer';
 import { KafkaListenersOrchestrator } from './kafka-listeners.orchestrator';
 // import { CompaniesModule } from '../companies/companies.module';
 import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
+import { OrdersRelayModule } from '../orders-relay/orders-relay.module';
 // import { CustomersEventsModule } from '../customers-events/customers-events.module';
 // import { SpareAssignmentsModule } from '../spare-assignments/spare-assignments.module';
 // import { ReportingHubModule } from '../reporting-hub/reporting-hub.module';
@@ -14,7 +15,7 @@ import { UsersEmployeesEventsModule } from '../users-employees-events/users-empl
 @Module({
     imports: [
         // CompaniesModule, 
-        UsersEmployeesEventsModule, UsersEmployeesEventsModule,
+        UsersEmployeesEventsModule, UsersEmployeesEventsModule, OrdersRelayModule
         // CustomersEventsModule,
         // SpareAssignmentsModule, ReportingHubModule, InvoicesModule, CatalogsModule
     ],

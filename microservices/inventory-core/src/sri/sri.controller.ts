@@ -14,7 +14,8 @@ export class SriController {
       throw new RpcException(new BadRequestException('Payload incompleto: falta accessKey o user.companyId'));
     }
     try {
-      return await this.sriService.previewAccessKey(data.accessKey, data.user.companyId);
+      const result = await this.sriService.previewAccessKey(data.accessKey, data.user.companyId);
+      return result;
     } catch (error: any) {
       if (error instanceof RpcException) throw error;
       if (error instanceof HttpException) throw new RpcException(error);
