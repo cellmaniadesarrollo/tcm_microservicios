@@ -12,11 +12,12 @@ import { SequencesModule } from './common/sequences/sequences.module';
 import { AwsS3Module } from './aws-s3/aws-s3.module';
 import { AuditLogModule } from './audit-log/audit-log.module';
 import { StockModule } from './stock/stock.module';
+import { OrdersRelayModule } from './orders-relay/orders-relay.module';
 import { SriModule } from './sri/sri.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
-import { StockModule } from './stock/stock.module';
+import { StockVouchersModule } from './stock-vouchers/stock-vouchers.module';
 
 @Module({
   imports: [
@@ -43,7 +44,9 @@ import { StockModule } from './stock/stock.module';
     CatalogsModule,
     SuppliersModule,
     ReceiptsModule,
-    SriModule
+    SriModule,
+    OrdersRelayModule,
+    StockVouchersModule
   ],
 })
 export class AppModule { }

@@ -15,11 +15,8 @@ import { ListReceiptsQueryDto } from './dto/list-receipts-query.dto';
 import { CreateReceiptPaymentGatewayDto } from './dto/create-receipt-payment-gateway.dto';
 import { preparePaymentProof } from './helpers/receipt-payment-proof.helper';
 import { VoidReceiptPaymentGatewayDto } from './dto/void-receipt-payment-gateway.dto';
-const flatten = (errors: ValidationError[], path = ''): string[] =>
-    errors.flatMap((e) => {
-        const p = path ? `${path}.${e.property}` : e.property;
-        return [...Object.values(e.constraints ?? {}).map((m) => `${p}: ${m}`), ...flatten(e.children ?? [], p)];
-    });
+import { parseJsonField } from '../../common/helpers/parse-json-field.helper';
+
 
 @Controller('receipts')
 @Auth()
@@ -45,22 +42,11 @@ export class ReceiptsController {
     @Post()
     async create(@Req() request: FastifyRequest, @User() user: any) {
         const { files, formData } = await parseMultipartRequest(request);
-        const dto = await this.buildReceiptDto(formData.data);
+        const dto = await parseJsonField(CreateReceiptGatewayDto, formData.data);
         const attachments = await prepareReceiptFiles(files, dto.lines.length, dto.payments?.length ?? 0);
         return this.receiptsService.create(dto, attachments, this.ctx(user));
     }
-    private async buildReceiptDto(raw?: string): Promise<CreateReceiptGatewayDto> {
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(raw ?? '');
-        } catch {
-            throw new BadRequestException('El campo "data" debe ser un JSON válido');
-        }
-        const dto = plainToInstance(CreateReceiptGatewayDto, parsed);
-        const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
-        if (errors.length) throw new BadRequestException(flatten(errors).slice(0, 10));
-        return dto;
-    }
+
     @Get()
     async list(@Query() query: ListReceiptsQueryDto, @User() user: any) {
         return this.receiptsService.list(query, this.ctx(user));
@@ -71,7 +57,7 @@ export class ReceiptsController {
     @Post(':id/payments')
     async addPayment(@Param('id', ParseUUIDPipe) id: string, @Req() request: FastifyRequest, @User() user: any) {
         const { files, formData } = await parseMultipartRequest(request);
-        const dto = await this.buildDto(CreateReceiptPaymentGatewayDto, formData.data);
+        const dto = await parseJsonField(CreateReceiptPaymentGatewayDto, formData.data);
         const proof = await preparePaymentProof(files);
         return this.receiptsService.addPayment(id, dto, proof, this.ctx(user));
     }
@@ -86,19 +72,6 @@ export class ReceiptsController {
         return this.receiptsService.voidPayment(id, paymentId, dto, this.ctx(user));
     }
 
-    /** Parsea y valida el JSON del campo "data" de un multipart. */
-    private async buildDto<T extends object>(cls: new () => T, raw?: string): Promise<T> {
-        let parsed: unknown;
-        try {
-            parsed = JSON.parse(raw ?? '');
-        } catch {
-            throw new BadRequestException('El campo "data" debe ser un JSON válido');
-        }
-        const dto = plainToInstance(cls, parsed);
-        const errors = await validate(dto, { whitelist: true, forbidNonWhitelisted: true });
-        if (errors.length) throw new BadRequestException(flatten(errors).slice(0, 10));
-        return dto;
-    }
 
     @Get(':id')
     async getDetail(@Param('id', ParseUUIDPipe) id: string, @User() user: any) {

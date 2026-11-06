@@ -1,5 +1,5 @@
 // receipts.service.ts
-import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { Brackets, DataSource, EntityManager, In } from 'typeorm';
 import { MainBranchService } from '../companies/main-branch.service';
 import { BranchReplica } from '../companies/entities/branch-replica.entity';
@@ -27,6 +27,10 @@ import { StockBalance } from '../stock/entities/stock-balance.entity';
 import { StockUnit } from '../stock/entities/stock-unit.entity';
 import { StockUnitSerial } from '../stock/entities/stock-unit-serial.entity';
 
+import { SriClientService, SriUnavailableError } from '../sri/sri-client.service';
+
+import { SupplierProductCode } from './entities/supplier-product-code.entity';
+import { parseAccessKey } from '../sri/helpers/access-key.helper';
 /** Zona horaria del negocio: la fecha por defecto debe ser la local, no la UTC del servidor. */
 const BUSINESS_TZ = 'America/Guayaquil';
 
@@ -95,28 +99,28 @@ export interface CreateReceiptInput {
     documentNumber?: string;
     issueDate: string;
     notes?: string;
+    accessKey?: string;
     lines: Array<{
-        productId: string;
+        productId?: string;            // antes obligatorio
         quantity: number;
         unitCost: number;
         discount?: number;
         purchaseTaxCode?: string;
         purchaseTaxRate?: number;
-        salePrice: number;
-        warrantyDays: number;
+        salePrice?: number;            // antes obligatorio
+        warrantyDays?: number;         // antes obligatorio
+        affectsInventory?: boolean;
+        description?: string;
+        supplierCode?: string;
+        supplierDescription?: string;
+        supplierQuantity?: number;
         hasTax?: boolean;
         priceIncludesTax?: boolean;
         billableInSales?: boolean;
         billableInRepairOrders?: boolean;
         units?: Array<{ serials: string[] }>;
     }>;
-    payments?: Array<{
-        amount: number;
-        paidAt: string;
-        method: PaymentMethod;
-        reference?: string;
-        note?: string;
-    }>;
+    payments?: Array<{ amount: number; paidAt: string; method: PaymentMethod; reference?: string; note?: string }>;
 }
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -152,11 +156,12 @@ const RECEIPT_SORT: Record<ReceiptSortBy, string> = {
 const lineProductSearchSql = (key: string) => `EXISTS (
     SELECT 1
     FROM receipt_lines rl
-    JOIN products p ON p.id = rl.product_id
-    JOIN product_names pn ON pn.id = p.product_name_id
+    LEFT JOIN products p ON p.id = rl.product_id
+    LEFT JOIN product_names pn ON pn.id = p.product_name_id
     WHERE rl.receipt_id = "r"."id"
     AND (
-        ${norm('pn.name')} LIKE :${key}
+        ${norm('rl.description')} LIKE :${key}
+        OR ${norm('pn.name')} LIKE :${key}
         OR lower(p.sku) LIKE :${key}
         OR EXISTS (
             SELECT 1 FROM product_models pm
@@ -197,6 +202,8 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
 };
 @Injectable()
 export class ReceiptsService {
+    private readonly logger = new Logger(ReceiptsService.name);
+
     constructor(
         private readonly dataSource: DataSource,
         private readonly mainBranch: MainBranchService,
@@ -204,6 +211,7 @@ export class ReceiptsService {
         private readonly stock: StockService,
         private readonly audit: AuditLogService,
         private readonly s3: AwsS3Service,
+        private readonly sri: SriClientService,
     ) { }
 
     /**
@@ -271,17 +279,21 @@ export class ReceiptsService {
         try {
             proofs = await this.uploadInitialProofs(companyId, receiptId, input.payments?.length ?? 0, files);
         } catch (e) {
-            await this.cleanupUploads(uploaded); // si fallan los comprobantes, también se limpia lo ya subido
+            await this.cleanupUploads(uploaded);
             throw e;
         }
+
+        // XML de origen (nunca falla: sin XML el ingreso se guarda igual)
+        const sourceXml = input.accessKey ? await this.fetchSourceXml(input.accessKey, companyId, receiptId) : null;
+
         const cleanupAll = async () => {
             await this.cleanupUploads(uploaded);
             await Promise.all(proofs.map((p) => this.s3.deleteObject(p.key)));
+            if (sourceXml) await this.s3.deleteObject(sourceXml.key);
         };
 
         try {
             const result = await this.dataSource.transaction(async (em) => {
-                // Serializa solicitudes con el mismo id: la segunda espera y luego encuentra a la primera
                 await em.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`receipt_req:${companyId}:${clientRequestId}`]);
 
                 const existing = await em.findOne(Receipt, {
@@ -300,14 +312,18 @@ export class ReceiptsService {
                 });
                 if (!docType) throw bad('El tipo de documento no existe o está inactivo');
 
-                const productIds = [...new Set(input.lines.map((l) => l.productId))];
-                const products = await em.find(Product, {
-                    where: { id: In(productIds), companyId, status: true },
-                    select: {
-                        id: true, kind: true, trackingMode: true, hasTax: true, priceIncludesTax: true,
-                        billableInSales: true, billableInRepairOrders: true,
-                    },
-                });
+                // Productos: solo de las líneas con inventario
+                const inventoryLines = input.lines.filter((l) => l.affectsInventory !== false);
+                const productIds = [...new Set(inventoryLines.map((l) => l.productId!))];
+                const products = productIds.length
+                    ? await em.find(Product, {
+                        where: { id: In(productIds), companyId, status: true },
+                        select: {
+                            id: true, kind: true, trackingMode: true, hasTax: true, priceIncludesTax: true,
+                            billableInSales: true, billableInRepairOrders: true,
+                        },
+                    })
+                    : [];
                 if (products.length !== productIds.length) throw bad('Alguno de los productos no existe o está inactivo');
                 const productById = new Map(products.map((p) => [p.id, p]));
 
@@ -317,8 +333,10 @@ export class ReceiptsService {
                 let grossSum = 0, discSum = 0, taxSum = 0;
                 const prepared = input.lines.map((l, i) => {
                     const label = `Línea ${i + 1}`;
-                    const product = productById.get(l.productId)!;
+                    const affects = l.affectsInventory !== false;
+                    const product = affects ? productById.get(l.productId!)! : undefined;
 
+                    // Costo, descuento e impuesto: igual para todas las líneas
                     const costU = Math.round(l.unitCost * SCALE);
                     const discU = Math.round((l.discount ?? 0) * SCALE);
                     const grossU = l.quantity * costU;
@@ -330,23 +348,27 @@ export class ReceiptsService {
                     discSum += discU;
                     taxSum += Math.round((baseU * rateBp) / 10_000);
 
-                    // forcesBillableLot manda; si no, la línea; si no, el default del producto
-                    const billableInSales = docType.forcesBillableLot ? true : (l.billableInSales ?? product.billableInSales);
-                    const billableInRepairOrders = l.billableInRepairOrders ?? (product.billableInRepairOrders && billableInSales);
-                    if (billableInRepairOrders && !billableInSales) {
-                        throw bad(`${label}: facturable en órdenes exige facturable en ventas`);
-                    }
-                    if (product.kind === ProductKind.DEVICE && product.trackingMode !== TrackingMode.SERIAL) {
-                        throw bad(`${label}: un equipo debe ser serializado`);
+                    // Banderas de facturación y chequeo de DEVICE: solo si hay producto
+                    let billableInSales = false;
+                    let billableInRepairOrders = false;
+                    if (product) {
+                        billableInSales = docType.forcesBillableLot ? true : (l.billableInSales ?? product.billableInSales);
+                        billableInRepairOrders = l.billableInRepairOrders ?? (product.billableInRepairOrders && billableInSales);
+                        if (billableInRepairOrders && !billableInSales) {
+                            throw bad(`${label}: facturable en órdenes exige facturable en ventas`);
+                        }
+                        if (product.kind === ProductKind.DEVICE && product.trackingMode !== TrackingMode.SERIAL) {
+                            throw bad(`${label}: un equipo debe ser serializado`);
+                        }
                     }
 
                     return {
                         id: randomUUID(),
                         line: l,
                         product,
-                        netUnitCost: (baseU / l.quantity / SCALE).toFixed(4), // costo del lote = neto por unidad
-                        hasTax: l.hasTax ?? product.hasTax,
-                        priceIncludesTax: l.priceIncludesTax ?? product.priceIncludesTax,
+                        netUnitCost: (baseU / l.quantity / SCALE).toFixed(4),
+                        hasTax: l.hasTax ?? product?.hasTax ?? false,
+                        priceIncludesTax: l.priceIncludesTax ?? product?.priceIncludesTax ?? false,
                         billableInSales,
                         billableInRepairOrders,
                     };
@@ -372,7 +394,11 @@ export class ReceiptsService {
                     code,
                     branchId,
                     status: ReceiptStatus.REGISTERED,
-                    source: ReceiptSource.MANUAL,
+                    source: input.accessKey ? ReceiptSource.ACCESS_KEY : ReceiptSource.MANUAL,
+                    accessKey: input.accessKey,
+                    authorizationNumber: sourceXml?.authorizationNumber,
+                    authorizationDate: sourceXml?.authorizationDate,
+                    xmlFileKey: sourceXml?.key,
                     documentTypeId: docType.id,
                     supplierId: input.supplierId,
                     documentNumber: input.documentNumber,
@@ -389,61 +415,69 @@ export class ReceiptsService {
                     createdById: userId,
                 });
 
-                // ───── Stock: lotes, saldos, unidades y kardex (lineRef = id de la línea) ─────
-                const lots = await this.stock.registerInbound(em, {
-                    companyId,
-                    userId,
-                    branchId,
-                    originType: LotOriginType.RECEIPT,
-                    reference: { type: 'RECEIPT', id: receiptId },
-                    lines: prepared.map((p) => ({
-                        lineRef: p.id,
-                        productId: p.line.productId,
-                        trackingMode: p.product.trackingMode,
-                        quantity: p.line.quantity,
-                        unitCost: p.netUnitCost,
-                        salePrice: p.line.salePrice,
-                        warrantyDays: p.line.warrantyDays,
-                        hasTax: p.hasTax,
-                        priceIncludesTax: p.priceIncludesTax,
-                        billableInSales: p.billableInSales,
-                        billableInRepairOrders: p.billableInRepairOrders,
-                        serialUnits: p.line.units?.map((u) => u.serials),
-                    })),
-                });
+                // ───── Stock: solo líneas con inventario ─────
+                const invPrepared = prepared.filter((p) => p.product);
+                const lots = invPrepared.length
+                    ? await this.stock.registerInbound(em, {
+                        companyId,
+                        userId,
+                        branchId,
+                        originType: LotOriginType.RECEIPT,
+                        reference: { type: 'RECEIPT', id: receiptId },
+                        lines: invPrepared.map((p) => ({
+                            lineRef: p.id,
+                            productId: p.line.productId!,
+                            trackingMode: p.product!.trackingMode,
+                            quantity: p.line.quantity,
+                            unitCost: p.netUnitCost,
+                            salePrice: p.line.salePrice!,
+                            warrantyDays: p.line.warrantyDays!,
+                            hasTax: p.hasTax,
+                            priceIncludesTax: p.priceIncludesTax,
+                            billableInSales: p.billableInSales,
+                            billableInRepairOrders: p.billableInRepairOrders,
+                            serialUnits: p.line.units?.map((u) => u.serials),
+                        })),
+                    })
+                    : [];
                 const lotByLine = new Map(lots.map((l) => [l.lineRef, l.lotId]));
 
-                // ───── Líneas (lo que dijo el documento + el lote generado) ─────
+                // ───── Líneas: se insertan todas ─────
                 await em.insert(
                     ReceiptLine,
                     prepared.map((p, i) => ({
                         id: p.id,
                         receiptId,
                         lineNo: i + 1,
-                        productId: p.line.productId,
+                        affectsInventory: !!p.product,
+                        description: p.line.description,
+                        productId: p.line.productId,                 // undefined si no afecta inventario
                         quantity: p.line.quantity,
                         unitCost: p.line.unitCost.toFixed(4),
                         discount: (p.line.discount ?? 0).toFixed(2),
                         purchaseTaxCode: p.line.purchaseTaxCode,
                         purchaseTaxRate: p.line.purchaseTaxRate?.toFixed(2),
-                        salePrice: p.line.salePrice.toFixed(2),
-                        warrantyDays: p.line.warrantyDays,
+                        salePrice: p.line.salePrice?.toFixed(2),
+                        warrantyDays: p.line.warrantyDays ?? 0,
                         hasTax: p.hasTax,
                         priceIncludesTax: p.priceIncludesTax,
                         billableInSales: p.billableInSales,
                         billableInRepairOrders: p.billableInRepairOrders,
-                        lotId: lotByLine.get(p.id),
+                        lotId: lotByLine.get(p.id),                  // undefined sin lote
                     })),
                 );
 
-                // ───── Pagos iniciales (con sus comprobantes si los hay) ─────
+                // ───── Códigos del proveedor (aprende productos y códigos sin inventario) ─────
+                await this.learnSupplierCodes(em, companyId, input.supplierId, userId, prepared);
+
+                // ───── Pagos iniciales ─────
                 if (payments.length) {
                     const proofByIdx = new Map(proofs.map((p) => [p.paymentIndex, p]));
                     await em.insert(ReceiptPayment, payments.map((p, i) => ({
                         id: randomUUID(),
                         receiptId,
                         companyId,
-                        clientRequestId: randomUUID(), // interno: la idempotencia la da el clientRequestId del ingreso
+                        clientRequestId: randomUUID(),
                         amount: money(p.amountC),
                         paidAt: p.paidAt,
                         method: p.method,
@@ -457,7 +491,7 @@ export class ReceiptsService {
                     })));
                 }
 
-                // ───── Adjuntos (las fotos se ligan a su línea; el documento a ninguna) ─────
+                // ───── Adjuntos ─────
                 if (uploaded.length) {
                     await em.insert(
                         ReceiptAttachment,
@@ -484,11 +518,9 @@ export class ReceiptsService {
                 return this.summary(em, companyId, receiptId, false);
             });
 
-            // Replay dentro de la transacción: el ingreso ya existía con sus archivos; los nuevos sobran
             if (result.replayed) await cleanupAll();
             return result;
         } catch (error: any) {
-            // La transacción revirtió (o fue replay por carrera): no dejamos huérfanos en S3
             await cleanupAll();
 
             if (error?.code === '23505') {
@@ -502,6 +534,9 @@ export class ReceiptsService {
                 }
                 if (constraint === 'uq_receipts_supplier_document') {
                     throw conflict('Ya existe un ingreso con ese número de documento para este proveedor y tipo de documento');
+                }
+                if (constraint === 'uq_receipts_company_access_key') {
+                    throw conflict('Esa clave de acceso ya fue importada en otro ingreso');
                 }
                 throw conflict('Conflicto al generar el código del ingreso, intenta de nuevo');
             }
@@ -735,6 +770,14 @@ export class ReceiptsService {
         if (documentNumber && documentNumber.length > 50) throw bad('El número de documento es demasiado largo');
         const notes = dto.notes?.trim() || undefined;
 
+        // Clave de acceso (opcional)
+        let accessKey: string | undefined;
+        if (dto.accessKey?.trim()) {
+            const p = parseAccessKey(dto.accessKey);
+            if (!p.ok) throw bad(p.error);
+            accessKey = p.value.accessKey;
+        }
+
         if (!Array.isArray(dto.lines) || dto.lines.length === 0) throw bad('El ingreso debe tener al menos una línea');
         if (dto.lines.length > MAX_LINES) throw bad(`Un ingreso admite hasta ${MAX_LINES} líneas`);
 
@@ -747,24 +790,47 @@ export class ReceiptsService {
             const unitCost = Number(l.unitCost);
             const discount = num(l.discount) ?? 0;
             const rate = num(l.purchaseTaxRate);
-            const salePrice = Number(l.salePrice);
-            const warrantyDays = Number(l.warrantyDays);
 
-            if (!UUID_RE.test(String(l.productId))) throw bad(`${label}: producto inválido`);
+            if (!isBool(l.affectsInventory)) throw bad(`${label}: affectsInventory debe ser verdadero o falso`);
+            const affectsInventory = l.affectsInventory !== false;
+            const description = l.description?.trim() || undefined;
+            if (description && description.length > 300) throw bad(`${label}: la descripción es demasiado larga`);
+
             if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_QTY) throw bad(`${label}: cantidad inválida (1 a ${MAX_QTY})`);
             if (!Number.isFinite(unitCost) || unitCost < 0 || unitCost > MAX_UNIT_COST) throw bad(`${label}: costo unitario inválido`);
             if (!Number.isFinite(discount) || discount < 0) throw bad(`${label}: descuento inválido`);
             if (rate !== undefined && (!Number.isFinite(rate) || rate < 0 || rate > 100)) throw bad(`${label}: porcentaje de impuesto inválido`);
-            if (!Number.isFinite(salePrice) || salePrice < 0 || salePrice > MAX_SALE_PRICE) throw bad(`${label}: precio de venta inválido`);
-            if (!Number.isInteger(warrantyDays) || warrantyDays < 0) throw bad(`${label}: garantía inválida`);
             for (const k of ['hasTax', 'priceIncludesTax', 'billableInSales', 'billableInRepairOrders'] as const) {
                 if (!isBool(l[k])) throw bad(`${label}: ${k} debe ser verdadero o falso`);
             }
             const taxCode = l.purchaseTaxCode?.trim() || undefined;
             if (taxCode && taxCode.length > 10) throw bad(`${label}: código de impuesto demasiado largo`);
 
+            let salePrice: number | undefined;
+            let warrantyDays: number | undefined;
+            if (affectsInventory) {
+                if (!UUID_RE.test(String(l.productId))) throw bad(`${label}: producto inválido`);
+                salePrice = Number(l.salePrice);
+                warrantyDays = Number(l.warrantyDays);
+                if (!Number.isFinite(salePrice) || salePrice < 0 || salePrice > MAX_SALE_PRICE) throw bad(`${label}: precio de venta inválido`);
+                if (!Number.isInteger(warrantyDays) || warrantyDays < 0) throw bad(`${label}: garantía inválida`);
+            } else {
+                if (l.productId) throw bad(`${label}: una línea sin inventario no lleva producto`);
+                if (!description) throw bad(`${label}: indica el concepto de la línea`);
+                if (l.units?.length) throw bad(`${label}: una línea sin inventario no lleva seriales`);
+            }
+
+            const supplierCode = l.supplierCode?.trim() || undefined;
+            if (supplierCode && supplierCode.length > 60) throw bad(`${label}: el código del proveedor es demasiado largo`);
+            const supplierDescription = l.supplierDescription?.trim() || undefined;
+            if (supplierDescription && supplierDescription.length > 300) throw bad(`${label}: la descripción del proveedor es demasiado larga`);
+            const supplierQuantity = num(l.supplierQuantity);
+            if (supplierQuantity !== undefined && (!Number.isFinite(supplierQuantity) || supplierQuantity <= 0)) {
+                throw bad(`${label}: cantidad del proveedor inválida`);
+            }
+
             return {
-                productId: l.productId,
+                productId: affectsInventory ? l.productId : undefined,
                 quantity,
                 unitCost,
                 discount,
@@ -776,7 +842,15 @@ export class ReceiptsService {
                 priceIncludesTax: l.priceIncludesTax ?? undefined,
                 billableInSales: l.billableInSales ?? undefined,
                 billableInRepairOrders: l.billableInRepairOrders ?? undefined,
-                units: l.units?.map((u) => ({ serials: (u.serials ?? []).map((s) => String(s ?? '').trim().toUpperCase()) })),
+                units: affectsInventory
+                    ? l.units?.map((u) => ({ serials: (u.serials ?? []).map((s) => String(s ?? '').trim().toUpperCase()) }))
+                    : undefined,
+                // al final, para no alterar el orden del hash
+                affectsInventory,
+                description,
+                supplierCode,
+                supplierDescription,
+                supplierQuantity,
             };
         });
 
@@ -784,7 +858,6 @@ export class ReceiptsService {
         if ((dto.payments?.length ?? 0) > 50) throw bad('Un ingreso admite hasta 50 pagos iniciales');
         const payments = (dto.payments ?? []).map((p, i) => {
             const f = this.normalizePaymentFields(p, `Pago ${i + 1}`);
-            // orden de claves fijo: el hash del ingreso debe ser estable
             return { amount: f.amountC / 100, paidAt: f.paidAt, method: f.method, reference: f.reference, note: f.note };
         });
 
@@ -797,6 +870,7 @@ export class ReceiptsService {
             notes,
             lines,
             payments,
+            accessKey, // en la raíz, al final
         };
     }
     private normalizePaymentFields(p: any, label: string) {
@@ -916,7 +990,6 @@ export class ReceiptsService {
         }
         return this.summary(em, companyId, existing.id, true);
     }
-
     private async summary(em: EntityManager, companyId: string, receiptId: string, replayed: boolean) {
         const r = await em.findOneOrFail(Receipt, { where: { id: receiptId, companyId } });
         const lines = await em.find(ReceiptLine, { where: { receiptId }, order: { lineNo: 'ASC' } });
@@ -933,6 +1006,7 @@ export class ReceiptsService {
             id: r.id,
             code: r.code,
             status: r.status,
+            source: r.source,
             paymentStatus: r.paymentStatus,
             paidTotal: r.paidTotal,
             supplierId: r.supplierId,
@@ -945,7 +1019,9 @@ export class ReceiptsService {
             lines: lines.map((l) => ({
                 id: l.id,
                 lineNo: l.lineNo,
-                productId: l.productId,
+                productId: l.productId ?? null,
+                affectsInventory: l.affectsInventory,
+                description: l.description ?? null,
                 quantity: l.quantity,
                 lotId: l.lotId ?? null,
                 lotCode: l.lotId ? codeByLot.get(l.lotId) ?? null : null,
@@ -979,7 +1055,9 @@ export class ReceiptsService {
             throw bad400('La fecha inicial no puede ser mayor a la final');
         }
         if (query.status && !Object.values(ReceiptStatus).includes(query.status)) throw bad400('El estado no es válido');
-        for (const k of ['documentTypeId', 'productId'] as const) { /* igual */ }
+        for (const k of ['documentTypeId', 'productId'] as const) {
+            if (query[k] && !UUID_RE.test(String(query[k]))) throw bad400(`El filtro ${k} no es válido`);
+        }
         if (query.paymentStatus && !Object.values(PaymentStatus).includes(query.paymentStatus)) {
             throw bad400('El estado de pago no es válido');
         }
@@ -1053,7 +1131,11 @@ export class ReceiptsService {
             .addSelect('dt.code', 'documentTypeCode')
             .addSelect('dt.name', 'documentTypeName')
             .addSelect(`(SELECT COUNT(*) FROM receipt_lines x WHERE x.receipt_id = "r"."id")`, 'linesCount')
-            .addSelect(`(SELECT COALESCE(SUM(x.quantity), 0) FROM receipt_lines x WHERE x.receipt_id = "r"."id")`, 'unitsCount')
+            // CAMBIO: unitsCount suma solo líneas con inventario
+            .addSelect(
+                `(SELECT COALESCE(SUM(x.quantity), 0) FROM receipt_lines x WHERE x.receipt_id = "r"."id" AND x.affects_inventory)`,
+                'unitsCount',
+            )
             .addSelect(
                 `EXISTS (SELECT 1 FROM receipt_attachments a WHERE a.receipt_id = "r"."id" AND a.kind = 'DOCUMENT')`,
                 'hasDocument',
@@ -1137,7 +1219,8 @@ export class ReceiptsService {
         ]);
 
         const lotIds = lines.map((l) => l.lotId).filter((x): x is string => !!x);
-        const productIds = [...new Set(lines.map((l) => l.productId))];
+        // CAMBIO: ignora las líneas sin producto
+        const productIds = [...new Set(lines.map((l) => l.productId).filter((x): x is string => !!x))];
 
         const [lots, balances, units, modelRows] = await Promise.all([
             lotIds.length ? em.find(Lot, { where: { id: In(lotIds), companyId } }) : Promise.resolve([] as Lot[]),
@@ -1148,12 +1231,12 @@ export class ReceiptsService {
             productIds.length
                 ? em.query(
                     `SELECT pm.product_id AS "productId", mo.models_id AS "modelId",
-                    mo.models_name AS "modelName", br.brands_name AS "brandName"
-             FROM product_models pm
-             JOIN models mo ON mo.models_id = pm.model_id
-             JOIN brands br ON br.brands_id = mo.models_brands_id
-             WHERE pm.product_id = ANY($1)
-             ORDER BY br.brands_name, mo.models_name`,
+                mo.models_name AS "modelName", br.brands_name AS "brandName"
+         FROM product_models pm
+         JOIN models mo ON mo.models_id = pm.model_id
+         JOIN brands br ON br.brands_id = mo.models_brands_id
+         WHERE pm.product_id = ANY($1)
+         ORDER BY br.brands_name, mo.models_name`,
                     [productIds],
                 ) as Promise<Array<{ productId: string; modelId: number; modelName: string; brandName: string }>>
                 : Promise.resolve([] as Array<{ productId: string; modelId: number; modelName: string; brandName: string }>),
@@ -1230,15 +1313,20 @@ export class ReceiptsService {
             return {
                 id: l.id,
                 lineNo: l.lineNo,
-                product: {
-                    id: l.product.id,
-                    code: l.product.code,
-                    sku: l.product.sku,
-                    name: l.product.productName.name,
-                    kind: l.product.kind,
-                    trackingMode: l.product.trackingMode,
-                    models: modelsByProduct.get(l.productId) ?? [],
-                },
+                affectsInventory: l.affectsInventory,
+                description: l.description ?? null,
+                // CAMBIO: puede ser null en líneas sin inventario
+                product: l.product
+                    ? {
+                        id: l.product.id,
+                        code: l.product.code,
+                        sku: l.product.sku,
+                        name: l.product.productName.name,
+                        kind: l.product.kind,
+                        trackingMode: l.product.trackingMode,
+                        models: modelsByProduct.get(l.productId!) ?? [],
+                    }
+                    : null,
                 quantity: l.quantity,
                 // Lado compra (lo que dice el documento del proveedor)
                 purchase: {
@@ -1249,15 +1337,17 @@ export class ReceiptsService {
                     subtotal: fromCents(Math.round(baseU / 100)),   // sin impuesto, con descuento
                     taxAmount: fromCents(Math.round(taxU / 100)),
                 },
-                // Configuración con la que nació el lote
-                lotConfig: {
-                    salePrice: l.salePrice,
-                    warrantyDays: l.warrantyDays,
-                    hasTax: l.hasTax,
-                    priceIncludesTax: l.priceIncludesTax,
-                    billableInSales: l.billableInSales,
-                    billableInRepairOrders: l.billableInRepairOrders,
-                },
+                // Configuración con la que nació el lote (null si no afecta inventario)
+                lotConfig: l.affectsInventory
+                    ? {
+                        salePrice: l.salePrice,
+                        warrantyDays: l.warrantyDays,
+                        hasTax: l.hasTax,
+                        priceIncludesTax: l.priceIncludesTax,
+                        billableInSales: l.billableInSales,
+                        billableInRepairOrders: l.billableInRepairOrders,
+                    }
+                    : null,
                 lot: lot
                     ? {
                         id: lot.id,
@@ -1282,6 +1372,11 @@ export class ReceiptsService {
             code: r.code,
             status: r.status,
             source: r.source,
+            // CAMBIO: datos del origen (clave de acceso / XML del SRI)
+            accessKey: r.accessKey ?? null,
+            authorizationNumber: r.authorizationNumber ?? null,
+            authorizationDate: r.authorizationDate ?? null,
+            hasSourceXml: !!r.xmlFileKey,
             issueDate: r.issueDate,
             documentNumber: r.documentNumber ?? null,
             notes: r.notes ?? null,
@@ -1334,5 +1429,97 @@ export class ReceiptsService {
                 createdAt: h.createdAt,
             })),
         };
+    }
+
+
+    /** Consulta el SRI y guarda el XML en S3. Nunca falla: sin XML, el ingreso se guarda igual. */
+    private async fetchSourceXml(accessKey: string, companyId: string, receiptId: string) {
+        const parsed = parseAccessKey(accessKey);
+        if (!parsed.ok) return null;
+        try {
+            const auth = await this.sri.fetchAuthorization(accessKey, parsed.value.environment);
+            if (auth.state !== 'AUTHORIZED' || !auth.xml) return null;
+            const key = await this.s3.uploadBuffer(
+                Buffer.from(auth.xml, 'utf8'), `${accessKey}.xml`, 'application/xml',
+                `receipts/${companyId}/${receiptId}/`,
+            );
+            const date = auth.authorizationDate ? new Date(auth.authorizationDate) : undefined;
+            return {
+                key,
+                authorizationNumber: auth.authorizationNumber ?? undefined,
+                authorizationDate: date && !Number.isNaN(date.getTime()) ? date : undefined,
+            };
+        } catch (error: any) {
+            if (!(error instanceof SriUnavailableError)) {
+                this.logger.warn(`No se guardó el XML de ${accessKey}: ${error?.message}`);
+            }
+            return null;
+        }
+    }
+
+    /** Aprende productos y marca los códigos sin inventario. Si un código cambia de destino, audita el cambio. */
+    private async learnSupplierCodes(
+        em: EntityManager, companyId: string, supplierId: string, userId: string,
+        prepared: Array<{ line: CreateReceiptInput['lines'][number] }>,
+    ): Promise<Map<string, string>> {
+        type Target = { productId?: string; nonInv: boolean; description?: string; factor?: number };
+        const byCode = new Map<string, Target>();
+
+        prepared.forEach(({ line }, i) => {
+            const code = line.supplierCode;
+            if (!code) return;
+            const nonInv = line.affectsInventory === false;
+            const prev = byCode.get(code);
+            if (prev && (prev.nonInv !== nonInv || prev.productId !== line.productId)) {
+                throw bad(`Línea ${i + 1}: el código ${code} del proveedor ya se usó con otro destino en este ingreso`);
+            }
+            let factor: number | undefined;
+            if (!nonInv && line.supplierQuantity) {
+                const f = Math.round((line.quantity / line.supplierQuantity) * 10_000) / 10_000;
+                if (f > 0 && f <= 99_999_999) factor = f;
+            }
+            byCode.set(code, {
+                productId: nonInv ? undefined : line.productId, nonInv,
+                description: line.supplierDescription ?? line.description ?? prev?.description,
+                factor: prev?.factor ?? factor,
+            });
+        });
+        if (!byCode.size) return new Map();
+
+        // Auditoría: qué códigos ya existían y cambian de destino
+        const existing = await em.find(SupplierProductCode, {
+            where: { companyId, supplierId, code: In([...byCode.keys()]) },
+        });
+        for (const e of existing) {
+            const t = byCode.get(e.code)!;
+            if ((e.productId ?? null) !== (t.productId ?? null) || e.isNonInventory !== t.nonInv) {
+                await this.audit.log(em, {
+                    companyId, entity: SupplierProductCode, entityId: e.id, action: AuditAction.UPDATED, userId,
+                    before: { productId: e.productId ?? null, isNonInventory: e.isNonInventory },
+                    after: { productId: t.productId ?? null, isNonInventory: t.nonInv },
+                });
+            }
+        }
+
+        const now = new Date();
+        const rows = [...byCode].map(([code, v]) => ({
+            id: randomUUID(), companyId, supplierId, code, description: v.description,
+            productId: v.productId, isNonInventory: v.nonInv,
+            unitFactor: v.factor?.toFixed(4), lastUsedAt: now, updatedAt: now, createdById: userId,
+        }));
+        const withFactor = rows.filter((r) => r.unitFactor);
+        const withoutFactor = rows.filter((r) => !r.unitFactor).map(({ unitFactor, ...r }) => r);
+
+        const ids = new Map<string, string>();
+        const upsert = async (values: any[], cols: string[]) => {
+            if (!values.length) return;
+            const res = await em.createQueryBuilder().insert().into(SupplierProductCode).values(values)
+                .orUpdate(cols, ['company_id', 'supplier_id', 'code']).returning(['id', 'code']).execute();
+            for (const r of res.raw as Array<{ id: string; code: string }>) ids.set(r.code, r.id);
+        };
+        const base = ['product_id', 'is_non_inventory', 'description', 'last_used_at', 'updated_at'];
+        await upsert(withFactor, [...base, 'unit_factor']);
+        await upsert(withoutFactor, base); // no toca un factor ya aprendido
+        return ids;
     }
 }
