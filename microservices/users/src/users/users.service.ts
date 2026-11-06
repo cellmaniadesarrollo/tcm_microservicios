@@ -304,17 +304,17 @@ export class UsersService {
       .andWhere('branch.location IS NOT NULL')
       .andWhere(
         `ST_DWithin(
-          branch.location,
-          ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography,
-          :radius
-        )`,
+        branch.location,
+        ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography,
+        :radius
+      )`,
         { longitude, latitude, radius: RADIUS_METERS },
       )
       .orderBy(
         `ST_Distance(
-          branch.location,
-          ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
-        )`,
+        branch.location,
+        ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326)::geography
+      )`,
         'ASC',
       )
       .setParameters({ longitude, latitude })
@@ -324,13 +324,13 @@ export class UsersService {
       return { id: nearby.id, name: nearby.name };
     }
 
-    // 2️⃣ Fallback: asignar la sucursal principal (primera en orden alfanumérico)
+    // 2️⃣ Fallback: asignar la sucursal principal (menor código, ej. 001)
     const principal = await this.branchReplicaRepository
       .createQueryBuilder('branch')
       .innerJoin('branch.company', 'company')
       .where('company.id = :companyId', { companyId })
       .andWhere('branch.status = true')
-      .orderBy('branch.name', 'ASC')
+      .orderBy('branch.code', 'ASC')
       .getOne();
 
     if (!principal) return null;
