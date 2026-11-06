@@ -2,6 +2,7 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { KafkaConsumerService } from './kafka.consumer';
 import { UsersEventsListener } from '../users-employees-events/users-events.listener';
+import { OrdersEventsListener } from '../orders-relay/orders-events.listener';
 // import { CompaniesEventsListener } from '../companies/companies-events.listener'; 
 // import { CustomersEventsListener } from '../customers-events/customers-events.listener';
 // import { SpareAssignmentsEventsListener } from '../spare-assignments/spare-assignments-events.listener';
@@ -15,6 +16,7 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
         private readonly kafkaConsumer: KafkaConsumerService,
         // private readonly companiesListener: CompaniesEventsListener,
         private readonly usersListener: UsersEventsListener,
+        private readonly ordersListener: OrdersEventsListener,
         // private readonly customersListener: CustomersEventsListener,
         // private readonly spareAssignmentsListener: SpareAssignmentsEventsListener,
         // private readonly reportingHubListener: ReportingHubEventsListener,
@@ -29,6 +31,9 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
 
         try { this.usersListener.registerHandlers(); }
         catch (e) { console.error('❌ Users handler error: ', e); }
+
+        try { this.ordersListener.registerHandlers(); }
+        catch (e) { console.error('❌ Orders handler error: ', e); }
 
         // try { this.customersListener.registerHandlers(); }
         // catch (e) { console.error('❌ Customers handler error:', e); }

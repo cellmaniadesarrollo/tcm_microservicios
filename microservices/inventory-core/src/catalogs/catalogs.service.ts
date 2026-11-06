@@ -5,8 +5,11 @@ import { RpcException } from '@nestjs/microservices';
 import { Country } from './entities/country.entity';
 import { ReceiptDocumentType } from './entities/receipt-document-type.entity';
 import { CompanyReplica } from '../companies/entities/company-replica.entity'; // Ajusta la ruta según tu estructura
+import { StockMovementReason } from '../stock-vouchers/entities/stock-movement-reason.entity';
+import { STOCK_MOVEMENT_REASONS_SEED } from '../stock-vouchers/seeds/stock-movement-reasons.seed';
 
 const SEED_LOCK_KEY = 730_100_2; // Clave única de advisory lock para este servicio
+const SEED_LOCK_KEY_REASONS = 730_100_3;
 const INSERT_CHUNK = 500;
 
 const SEED_COUNTRIES: Array<{ code: string; name: string }> = [
@@ -42,6 +45,7 @@ export class CatalogsService implements OnApplicationBootstrap {
     async onApplicationBootstrap(): Promise<void> {
         await this.seedCountriesGlobal();
         await this.seedAllCompaniesReceiptDocumentTypes();
+        await this.seedAllCompaniesStockMovementReasons();
     }
 
     /** Siembra global de países (al iniciar) */
@@ -81,6 +85,28 @@ export class CatalogsService implements OnApplicationBootstrap {
             );
 
             this.logger.log(`Seed de tipos de documento (${companyIds.length} empresa/s): +${insertedCount} registros insertados.`);
+        });
+    }
+
+    /** Siembra masiva de motivos de movimiento para todas las empresas (no pisa lo editado). */
+    async seedAllCompaniesStockMovementReasons(): Promise<void> {
+        await this.dataSource.transaction(async (em) => {
+            await em.query('SELECT pg_advisory_xact_lock($1)', [SEED_LOCK_KEY_REASONS]);
+            const companies = await em.find(CompanyReplica, { select: { id: true } });
+            const companyIds = companies.map((c) => c.id);
+
+            if (companyIds.length === 0) {
+                this.logger.log('Seed de motivos de movimiento: no hay empresas replicadas todavía.');
+                return;
+            }
+
+            const inserted = await this.insertMissing(
+                em,
+                StockMovementReason,
+                companyIds,
+                STOCK_MOVEMENT_REASONS_SEED.map((r) => ({ ...r, isSystem: true })),
+            );
+            this.logger.log(`Seed de motivos de movimiento (${companyIds.length} empresa/s): +${inserted} registros insertados.`);
         });
     }
 
@@ -125,6 +151,25 @@ export class CatalogsService implements OnApplicationBootstrap {
             where: { companyId },
             order: { code: 'ASC' },
         });
+    }
+
+    // ==========================================
+    // SECCIÓN: MOTIVOS DE MOVIMIENTO (Por Empresa)
+    // ==========================================
+
+    /**
+     * Siembra individual (empresa nueva). LLÁMALO donde ya llamas a seedReceiptDocumentTypes(companyId).
+     * Inserta solo lo que falta: si un admin renombró o desactivó un motivo, se respeta.
+     */
+    async seedStockMovementReasons(companyId: string, manager?: EntityManager): Promise<void> {
+        const em = manager || this.dataSource.manager;
+        await em
+            .createQueryBuilder()
+            .insert()
+            .into(StockMovementReason)
+            .values(STOCK_MOVEMENT_REASONS_SEED.map((r) => ({ ...r, companyId, isSystem: true })))
+            .orIgnore()
+            .execute();
     }
 
     /**

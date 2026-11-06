@@ -3,6 +3,7 @@ import { RpcException } from '@nestjs/microservices';
 import { randomUUID } from 'crypto';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { TrackingMode } from '../products/enums/product.enums';
+import { Product } from '../products/entities/product.entity';
 import { Lot } from './entities/lot.entity';
 import { StockBalance } from './entities/stock-balance.entity';
 import { StockUnit } from './entities/stock-unit.entity';
@@ -48,6 +49,54 @@ export interface RegisterInboundInput {
     /** Documento que origina el movimiento (p. ej. { type: 'RECEIPT', id }). */
     reference?: { type: string; id: string };
     lines: InboundLineInput[];
+}
+
+export interface OutboundLineInput {
+    /** Id de la línea del documento que origina la salida (se devuelve en el resultado). */
+    lineRef: string;
+    lotId: string;
+    quantity: number;
+    /** Solo productos SERIAL: las unidades (stock_units.id) que salen. Debe haber `quantity`. */
+    unitIds?: string[];
+}
+
+export interface RegisterOutboundInput {
+    companyId: string;
+    userId: string;
+    branchId: string;
+    /** REPAIR_CONSUMPTION (con orden) o INTERNAL_OUT (sin orden). */
+    movementType: MovementType;
+    reference?: { type: string; id: string };
+    lines: OutboundLineInput[];
+}
+
+/** Snapshot del lote al momento de la salida (el documento lo guarda tal cual). */
+export interface OutboundLineResult {
+    lineRef: string;
+    lotId: string;
+    lotCode: number;
+    productId: string;
+    quantity: number;
+    unitCost: string;
+    salePrice: string;
+    billableInSales: boolean;
+    billableInRepairOrders: boolean;
+}
+
+export interface ReturnLineInput {
+    lineRef: string;
+    lotId: string;
+    quantity: number;
+    unitIds?: string[];
+}
+
+export interface RegisterReturnInput {
+    companyId: string;
+    userId: string;
+    /** La misma sucursal de la que salió. */
+    branchId: string;
+    reference?: { type: string; id: string };
+    lines: ReturnLineInput[];
 }
 
 export interface CreatedLot {
@@ -317,6 +366,240 @@ export class StockService {
         }
     }
 
+    // ───────────────────────── Salidas y retornos manuales ─────────────────────────
+
+    /**
+     * Saca stock de lotes concretos: descuenta saldos, marca las unidades serializadas como ISSUED
+     * y deja el kardex (una fila por lote; una por unidad en serializados).
+     *
+     * DEBE llamarse dentro de la transacción de quien confirma. Bloquea saldos y unidades
+     * (FOR UPDATE, en orden estable para evitar deadlocks). Nunca deja stock negativo.
+     */
+    async registerOutbound(em: EntityManager, input: RegisterOutboundInput): Promise<OutboundLineResult[]> {
+        const { companyId, userId, branchId, movementType, lines } = input;
+        if (!lines.length) throw bad('No hay líneas para sacar');
+
+        const lotIds = this.validateMoveLines(lines);
+        const lotInfo = await this.loadLotsForMove(em, companyId, lotIds);
+        const balances = await this.lockBalances(em, lotIds, branchId);
+        const unitById = await this.lockUnits(em, companyId, lines.flatMap((l) => l.unitIds ?? []));
+
+        const results: OutboundLineResult[] = [];
+        const movements: Array<Partial<StockMovement>> = [];
+        const issuedUnitIds: string[] = [];
+
+        lines.forEach((line, i) => {
+            const label = `Línea ${i + 1}`;
+            const { lot, trackingMode } = lotInfo.get(line.lotId)!;
+            const balance = balances.get(line.lotId);
+            const available = balance ? balance.onHand - balance.reserved : 0;
+
+            if (line.quantity > available) {
+                throw bad(`${label}: el lote #${lot.code} solo tiene ${available} disponible(s) en la sucursal`);
+            }
+
+            const ids = line.unitIds ?? [];
+            if (trackingMode === TrackingMode.SERIAL) {
+                if (ids.length !== line.quantity) {
+                    throw bad(`${label}: elige las ${line.quantity} unidades (IMEI/serial) que salen`);
+                }
+                for (const id of ids) {
+                    const u = unitById.get(id);
+                    if (!u || u.lotId !== lot.id || u.branchId !== branchId) {
+                        throw bad(`${label}: alguna unidad no pertenece al lote #${lot.code} en esta sucursal`);
+                    }
+                    if (u.status !== UnitStatus.AVAILABLE) {
+                        throw bad(`${label}: la unidad ${u.serial} no está disponible (estado ${u.status})`);
+                    }
+                }
+            } else if (ids.length) {
+                throw bad(`${label}: un producto por cantidad no lleva unidades`);
+            }
+
+            const base = {
+                companyId,
+                branchId,
+                productId: lot.productId,
+                lotId: lot.id,
+                type: movementType,
+                unitCost: lot.unitCost,
+                referenceType: input.reference?.type,
+                referenceId: input.reference?.id,
+                createdById: userId,
+            };
+            if (trackingMode === TrackingMode.SERIAL) {
+                for (const unitId of ids) movements.push({ ...base, unitId, quantity: -1 });
+                issuedUnitIds.push(...ids);
+            } else {
+                movements.push({ ...base, quantity: -line.quantity });
+            }
+
+            results.push({
+                lineRef: line.lineRef,
+                lotId: lot.id,
+                lotCode: lot.code,
+                productId: lot.productId,
+                quantity: line.quantity,
+                unitCost: lot.unitCost,
+                salePrice: lot.salePrice,
+                billableInSales: lot.billableInSales,
+                billableInRepairOrders: lot.billableInRepairOrders,
+            });
+        });
+
+        // Escrituras (después de validar todo)
+        for (const line of lines) {
+            await em
+                .createQueryBuilder()
+                .update(StockBalance)
+                .set({ onHand: () => `on_hand - ${line.quantity}` }) // quantity ya validada como entero
+                .where('lot_id = :lotId AND branch_id = :branchId', { lotId: line.lotId, branchId })
+                .execute();
+        }
+        for (const part of chunk(issuedUnitIds)) {
+            await em.update(StockUnit, { id: In(part) }, { status: UnitStatus.ISSUED });
+        }
+        for (const part of chunk(movements)) await em.insert(StockMovement, part);
+
+        return results;
+    }
+
+    /**
+     * Regresa stock al MISMO lote y sucursal de donde salió (conserva el costo).
+     * Las unidades serializadas deben estar ISSUED y vuelven a AVAILABLE (misma unidad, no se crea otra).
+     * Quien llama valida que lo retornado no supere lo que salió.
+     */
+    async registerReturn(em: EntityManager, input: RegisterReturnInput): Promise<void> {
+        const { companyId, userId, branchId, lines } = input;
+        if (!lines.length) throw bad('No hay líneas para retornar');
+
+        const lotIds = this.validateMoveLines(lines);
+        const lotInfo = await this.loadLotsForMove(em, companyId, lotIds);
+        const balances = await this.lockBalances(em, lotIds, branchId);
+        const unitById = await this.lockUnits(em, companyId, lines.flatMap((l) => l.unitIds ?? []));
+
+        const movements: Array<Partial<StockMovement>> = [];
+        const returnedUnitIds: string[] = [];
+
+        lines.forEach((line, i) => {
+            const label = `Línea ${i + 1}`;
+            const { lot, trackingMode } = lotInfo.get(line.lotId)!;
+            if (!balances.has(line.lotId)) throw bad(`${label}: el lote #${lot.code} no tiene saldo en la sucursal`);
+
+            const ids = line.unitIds ?? [];
+            if (trackingMode === TrackingMode.SERIAL) {
+                if (ids.length !== line.quantity) {
+                    throw bad(`${label}: elige las ${line.quantity} unidades (IMEI/serial) que regresan`);
+                }
+                for (const id of ids) {
+                    const u = unitById.get(id);
+                    if (!u || u.lotId !== lot.id || u.branchId !== branchId) {
+                        throw bad(`${label}: alguna unidad no pertenece al lote #${lot.code}`);
+                    }
+                    if (u.status !== UnitStatus.ISSUED) {
+                        throw bad(`${label}: la unidad ${u.serial} no está fuera de bodega (estado ${u.status})`);
+                    }
+                }
+            } else if (ids.length) {
+                throw bad(`${label}: un producto por cantidad no lleva unidades`);
+            }
+
+            const base = {
+                companyId,
+                branchId,
+                productId: lot.productId,
+                lotId: lot.id,
+                type: MovementType.RETURN_IN,
+                unitCost: lot.unitCost,
+                referenceType: input.reference?.type,
+                referenceId: input.reference?.id,
+                createdById: userId,
+            };
+            if (trackingMode === TrackingMode.SERIAL) {
+                for (const unitId of ids) movements.push({ ...base, unitId, quantity: 1 });
+                returnedUnitIds.push(...ids);
+            } else {
+                movements.push({ ...base, quantity: line.quantity });
+            }
+        });
+
+        for (const line of lines) {
+            await em
+                .createQueryBuilder()
+                .update(StockBalance)
+                .set({ onHand: () => `on_hand + ${line.quantity}` })
+                .where('lot_id = :lotId AND branch_id = :branchId', { lotId: line.lotId, branchId })
+                .execute();
+        }
+        for (const part of chunk(returnedUnitIds)) {
+            await em.update(StockUnit, { id: In(part) }, { status: UnitStatus.AVAILABLE });
+        }
+        for (const part of chunk(movements)) await em.insert(StockMovement, part);
+    }
+
+    /** Valida forma de las líneas y devuelve los lotes (sin repetir). */
+    private validateMoveLines(lines: Array<{ lineRef: string; lotId: string; quantity: number; unitIds?: string[] }>): string[] {
+        const refs = new Set<string>();
+        const lotIds = new Set<string>();
+        lines.forEach((line, i) => {
+            const label = `Línea ${i + 1}`;
+            if (!line.lineRef || refs.has(line.lineRef)) throw bad(`${label}: referencia de línea inválida o repetida`);
+            refs.add(line.lineRef);
+            if (!line.lotId) throw bad(`${label}: falta el lote`);
+            if (lotIds.has(line.lotId)) throw bad(`${label}: el lote ya está en otra línea; suma las cantidades en una sola`);
+            lotIds.add(line.lotId);
+            if (!Number.isInteger(line.quantity) || line.quantity <= 0) {
+                throw bad(`${label}: la cantidad debe ser un entero mayor a 0`);
+            }
+            const ids = line.unitIds ?? [];
+            if (new Set(ids).size !== ids.length) throw bad(`${label}: hay unidades repetidas`);
+        });
+        return [...lotIds];
+    }
+
+    private async loadLotsForMove(em: EntityManager, companyId: string, lotIds: string[]) {
+        const lots = await em.find(Lot, { where: { id: In(lotIds), companyId } });
+        if (lots.length !== lotIds.length) throw bad('Alguno de los lotes no existe');
+
+        const productIds = [...new Set(lots.map((l) => l.productId))];
+        const products = await em.find(Product, {
+            where: { id: In(productIds), companyId },
+            select: { id: true, trackingMode: true },
+        });
+        const trackingByProduct = new Map(products.map((p) => [p.id, p.trackingMode] as [string, TrackingMode]));
+
+        return new Map(
+            lots.map((lot) => [
+                lot.id,
+                { lot, trackingMode: trackingByProduct.get(lot.productId) ?? TrackingMode.QUANTITY },
+            ] as [string, { lot: Lot; trackingMode: TrackingMode }]),
+        );
+    }
+
+    /** FOR UPDATE ordenado por lote: dos salidas concurrentes no se cruzan en deadlock. */
+    private async lockBalances(em: EntityManager, lotIds: string[], branchId: string) {
+        const rows = await em
+            .createQueryBuilder(StockBalance, 'b')
+            .setLock('pessimistic_write')
+            .where('b.lotId IN (:...lotIds)', { lotIds })
+            .andWhere('b.branchId = :branchId', { branchId })
+            .orderBy('b.lotId', 'ASC')
+            .getMany();
+        return new Map(rows.map((b) => [b.lotId, b] as [string, StockBalance]));
+    }
+
+    private async lockUnits(em: EntityManager, companyId: string, unitIds: string[]) {
+        if (!unitIds.length) return new Map<string, StockUnit>();
+        const rows = await em
+            .createQueryBuilder(StockUnit, 'u')
+            .setLock('pessimistic_write')
+            .where('u.id IN (:...unitIds)', { unitIds })
+            .andWhere('u.companyId = :companyId', { companyId })
+            .orderBy('u.id', 'ASC')
+            .getMany();
+        return new Map(rows.map((u) => [u.id, u] as [string, StockUnit]));
+    }
+
     // ───────────────────────── Consultas ─────────────────────────
 
     /**
@@ -364,7 +647,12 @@ export class StockService {
      * Lotes de un producto con existencias, para que el vendedor elija
      * (o para resolver el lote que trae el código QR). Más antiguos primero.
      */
-    async listLotsWithStock(companyId: string, productId: string, branchId?: string) {
+    async listLotsWithStock(
+        companyId: string,
+        productId: string,
+        branchId?: string,
+        filters: { billableInRepairOrders?: boolean; billableInSales?: boolean } = {},
+    ) {
         const qb = this.dataSource
             .createQueryBuilder(StockBalance, 'b')
             .innerJoin(Lot, 'l', 'l.id = b.lot_id')
@@ -389,6 +677,17 @@ export class StockService {
 
         if (branchId) qb.andWhere('b.branch_id = :branchId', { branchId });
 
+        if (filters.billableInRepairOrders !== undefined) {
+            qb.andWhere('l.billable_in_repair_orders = :billableInRepairOrders', {
+                billableInRepairOrders: filters.billableInRepairOrders,
+            });
+        }
+        if (filters.billableInSales !== undefined) {
+            qb.andWhere('l.billable_in_sales = :billableInSales', {
+                billableInSales: filters.billableInSales,
+            });
+        }
+
         const rows = await qb.getRawMany();
         return rows.map((r) => ({
             lotId: r.lotId as string,
@@ -404,6 +703,37 @@ export class StockService {
             billableInSales: r.billableInSales as boolean,
             billableInRepairOrders: r.billableInRepairOrders as boolean,
             createdAt: r.createdAt as Date,
+        }));
+    }
+
+    /** Unidades disponibles (con todos sus IMEI/seriales) de un lote, para elegir cuáles salen. */
+    async listAvailableUnits(companyId: string, lotId: string, branchId?: string) {
+        const qb = this.dataSource
+            .createQueryBuilder(StockUnit, 'u')
+            .where('u.companyId = :companyId', { companyId })
+            .andWhere('u.lotId = :lotId', { lotId })
+            .andWhere('u.status = :status', { status: UnitStatus.AVAILABLE })
+            .orderBy('u.serial', 'ASC');
+        if (branchId) qb.andWhere('u.branchId = :branchId', { branchId });
+
+        const units = await qb.getMany();
+        if (!units.length) return [];
+
+        const serialRows = await this.dataSource.getRepository(StockUnitSerial).find({
+            where: { unitId: In(units.map((u) => u.id)) },
+            order: { position: 'ASC' },
+        });
+        const byUnit = new Map<string, string[]>();
+        for (const s of serialRows) {
+            const arr = byUnit.get(s.unitId) ?? [];
+            arr.push(s.value);
+            byUnit.set(s.unitId, arr);
+        }
+
+        return units.map((u) => ({
+            unitId: u.id,
+            serial: u.serial,
+            serials: byUnit.get(u.id) ?? [u.serial],
         }));
     }
 }

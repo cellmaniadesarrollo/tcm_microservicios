@@ -12,6 +12,7 @@ export enum UnitStatus {
     SOLD = 'SOLD',
     CONSUMED = 'CONSUMED',     // usada en una orden de reparación
     RETURNED = 'RETURNED',
+    ISSUED = 'ISSUED',
 }
 
 export enum MovementType {
@@ -23,4 +24,5 @@ export enum MovementType {
     TRANSFER_IN = 'TRANSFER_IN',
     ADJUSTMENT = 'ADJUSTMENT',
     RETURN_IN = 'RETURN_IN',
+    INTERNAL_OUT = 'INTERNAL_OUT',
 }
