@@ -1,12 +1,12 @@
-import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryColumn, Column, ManyToOne, JoinColumn, PrimaryGeneratedColumn } from 'typeorm';
 import { Brand } from './brand.entity';
 
 @Entity('models')
 export class Model {
-  @PrimaryColumn()
+  @PrimaryGeneratedColumn({ type: 'int' })
   models_id!: number;
 
-  @Column({ length: 100 })
+  @Column({ length: 100, unique: true })
   models_find_id!: string;
 
   @Column({ length: 255 })
