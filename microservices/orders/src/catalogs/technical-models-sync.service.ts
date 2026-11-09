@@ -1,4 +1,3 @@
-//src\catalogs\technical-models-sync.service.ts
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -8,7 +7,7 @@ import { Model } from './entities/model.entity';
 import { ModelTechnicalCode } from './entities/model-technical-code.entity';
 
 interface TechnicalModelItem {
-    numericId?: number;
+    numericId?: number; // informativo, no se usa para enlazar
     sourceId: string;
     name?: string;
     technicalModels: string[];
@@ -22,7 +21,7 @@ interface SyncPage {
 
 interface BatchResult {
     received: number;   // dispositivos recibidos
-    matched: number;    // dispositivos que existen en models
+    matched: number;    // dispositivos que existen en models (por slug)
     attempted: number;  // códigos que se intentaron insertar
     inserted: number;   // códigos realmente nuevos
     skipped: number;    // dispositivos sin modelo en Nest
@@ -109,50 +108,29 @@ export class TechnicalModelsSyncService {
         }
     }
 
-    /** "samsung_galaxy_tab_s12_ultra_5g-14811" -> 14811 */
-    private numericIdFromSource(sourceId: string): number | undefined {
-        const m = /-(\d+)$/.exec(sourceId ?? '');
-        return m ? Number(m[1]) : undefined;
-    }
-
     async saveBatch(items: TechnicalModelItem[]): Promise<BatchResult> {
         const empty: BatchResult = {
             received: 0, matched: 0, attempted: 0, inserted: 0, skipped: 0, missing: [],
         };
         if (!items?.length) return empty;
 
-        const numericOf = (i: TechnicalModelItem) =>
-            i.numericId ?? this.numericIdFromSource(i.sourceId);
+        const key = (s: string) => s.slice(0, 100);
+        const findIds = [...new Set(items.map((i) => i.sourceId).filter(Boolean).map(key))];
+        if (!findIds.length) return { ...empty, received: items.length, skipped: items.length };
 
-        const findIds = items.map((i) => i.sourceId).filter(Boolean);
-        const ids = items.map(numericOf).filter((n): n is number => Number.isFinite(n));
-
-        // Coincide por models_find_id O por models_id (mismo criterio que ModelsSyncService)
-        const where: any[] = [];
-        if (findIds.length) where.push({ models_find_id: In(findIds) });
-        if (ids.length) where.push({ models_id: In(ids) });
-        if (!where.length) return { ...empty, received: items.length, skipped: items.length };
-
+        // Enlace SOLO por slug. El numericId del scraper no es models_id.
         const models = await this.modelRepo.find({
             select: ['models_id', 'models_find_id'],
-            where,
+            where: { models_find_id: In(findIds) },
         });
         const idByFindId = new Map(models.map((m) => [m.models_find_id, m.models_id]));
-        const knownIds = new Set(models.map((m) => m.models_id));
-
-        const resolve = (i: TechnicalModelItem): number | undefined => {
-            const byFind = idByFindId.get(i.sourceId);
-            if (byFind) return byFind;
-            const n = numericOf(i);
-            return n && knownIds.has(n) ? n : undefined;
-        };
 
         const rows: { mtc_models_id: number; mtc_code: string }[] = [];
         const missing: string[] = [];
         let matched = 0;
 
         for (const item of items) {
-            const modelsId = resolve(item);
+            const modelsId = item.sourceId ? idByFindId.get(key(item.sourceId)) : undefined;
             if (!modelsId) {
                 missing.push(item.sourceId);
                 continue;
