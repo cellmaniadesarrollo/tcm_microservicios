@@ -44,7 +44,12 @@ duplican.
    - `(verificar)`: deducción hecha sin ver el archivo real.
    - `(asumido)` / `(sin confirmar)`: dato supuesto.
    Un marcador se quita solo si en el hilo se vio el código aplicado o la prueba
-   ejecutada.
+   ejecutada. **Excepción:** cuando el usuario pide actualizar los AGENTS.md, eso se
+   toma como confirmación de que lo entregado en ese hilo quedó probado: no se
+   escribe `[ENTREGADO, SIN PROBAR]` y se quitan los `(verificar)` que una prueba
+   exitosa habría descubierto (imports, compilación, registro de módulos). Siguen
+   `(asumido)` y `(sin confirmar)` para datos externos o reglas que la prueba no
+   demuestra. Si el usuario avisa que algo no se probó, ese punto conserva su marcador.
 7. **Pendientes.** Se quita uno solo si el código visto demuestra que está
    resuelto. Los nuevos se agregan al módulo dueño, sin duplicar. Los pendientes
    que cruzan módulos viven en el módulo dueño del problema y los demás lo
@@ -60,9 +65,14 @@ duplican.
       sección.
     - Archivo completo solo si el usuario lo pide, en partes cortas.
     - Cerrar con: "Verificado con: …" y "No verificado, sin cambios: …".
-11. **Al terminar una tarea de código** (endpoint, entidad, regla, corrección),
-    proponer qué líneas de qué AGENTS.md habría que actualizar, aplicando las
-    reglas anteriores.
+11. **La documentación se entrega bajo demanda.** Al terminar una tarea de código
+    NO se proponen ni se entregan cambios a los AGENTS.md. El agente lleva en el
+    hilo una lista interna de lo que quedó sin documentar. Cuando el usuario pida
+    "actualiza agents" (o algo equivalente, por módulo o completo), entrega los
+    bloques consolidados desde la última actualización, aplicando las reglas 1 a 10.
+    Si el usuario pregunta "qué falta documentar", responde con esa lista.
+    Un módulo documentado así queda con estado "Probado" y fecha; no se vuelve a
+    marcar `SIN PROBAR` salvo que el usuario lo diga.
 
 ### Entorno
 El proyecto está **en pruebas, no en producción**. `synchronize` crea/ajusta
@@ -132,6 +142,7 @@ src/
   health/
   interceptors/                internal-auth.interceptor.ts
   kafka/                       KafkaConsumerService, producer, orquestador de listeners
+  labels/                      impresión de etiquetas de lote (Dymo/Zebra) → labels/AGENTS.md
   orders-relay/                réplica REDUCIDA de órdenes + buscador → orders-relay/AGENTS.md
   product-catalogs/            tipos, nombres, colores, calidades, usos (seeds json)
   products/                    productos (SKU), modelos, imágenes, usos → products/AGENTS.md
@@ -173,6 +184,12 @@ AGENTS.md del módulo.
 
 ### 3.3 Seeds al arrancar
 Ver `catalogs/AGENTS.md`.
+
+### 3.4 Servicios HTTP salientes
+- **Impresión de etiquetas:** servidores de impresión externos (Dymo por POST, Zebra por GET con
+  token). Variables: `LABEL_DYMO_URL`, `LABEL_ZEBRA_URL`, `LABEL_ZEBRA_KEY`,
+  `LABEL_PRINT_TIMEOUT_MS`. Sin `axios`: se usa `fetch` nativo con `AbortController`.
+  Ver `labels/AGENTS.md`.
 
 ## 4. Convenciones de código del MS
 
@@ -255,6 +272,10 @@ Ver `catalogs/AGENTS.md`.
   su propio try/catch; mismo efecto).
 - **Mensajes de error:** en español, claros, con el número de línea cuando
   aplique ("Línea 2: …").
+- **Efectos externos tras el commit:** lo que llama a servicios de red (impresión, etc.) va
+  después de la transacción y **fuera del `try` cuyo `catch` limpia S3**, capturando sus
+  propios errores. Un fallo externo no deshace un documento ya guardado. Ejemplo:
+  `ReceiptsService.printAfterCreate`.
 
 ## 5. Convenciones del gateway (repo aparte, sin AGENTS.md)
 
@@ -355,8 +376,7 @@ aparte)". Aquí solo lo general.
   producción.
 - Lo que consume lotes copia el snapshot del lote en su línea; los retornos
   copian el snapshot de la línea de origen.
-- Al terminar un cambio, actualizar el AGENTS.md del módulo (y la raíz si
-  cambia una convención).
+- La documentación se actualiza bajo demanda (ver regla 11 de la sección 0).
 
 ## 7. Pendientes transversales
 
@@ -391,7 +411,7 @@ Los pendientes de cada módulo viven en su AGENTS.md. Numeración conservada.
 | 21 | `receipts/` (resolver nombres con `user_employee_cache`) |
 | 28 | `users-employees-events/` |
 | 29 | `orders-relay/` (búsqueda sin tildes) |
-
+| L1–L11 | `labels/` |
 ## 8. Errores y lecciones transversales
 
 Los específicos de un módulo van en su AGENTS.md.
@@ -432,18 +452,25 @@ Los específicos de un módulo van en su AGENTS.md.
   `default:` está **antes** de `priority_changed` y sin `break`: un scope
   desconocido cae en `priority_changed` y falla con `payload.priority.id`. Mover
   el `default:` al final.
+- Código que puede lanzar dentro del `try` de `ReceiptsService.create()` activa `cleanupAll()` y
+  borra adjuntos de S3 de un ingreso ya confirmado. Todo lo posterior al commit debe capturar
+  sus errores (impresión: `printAfterCreate`).
+- Un campo nuevo en el JSON `data` de un multipart debe declararse en el DTO del gateway:
+  `parseJsonField` usa `forbidNonWhitelisted` y respondería 400.
 
 ## 9. Estado de implementación (resumen)
 
 El detalle por componente está en el AGENTS.md de cada módulo, bajo "Estado".
 
-| Componente | Estado |
-|---|---|
-| Ingresos, pagos, SRI, productos, proveedores | Construido y en uso (según el historial previo) |
-| `orders-relay`, buscador de órdenes, selector de empleados | **ENTREGADO, SIN PROBAR** |
-| `stock-vouchers` (MS + gateway), fotos por línea, listado enriquecido, retorno | **ENTREGADO, SIN PROBAR** |
-| `StockService` (`registerOutbound`, `registerReturn`, `listAvailableUnits`) | **ENTREGADO como parche**; **(verificar)** que se pegó |
-| Migraciones | **No aplican por ahora** (pruebas con `synchronize`) |
+| Componente                                                                     | Estado                                                 |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| Ingresos, pagos, SRI, productos, proveedores                                   | Construido y en uso (según el historial previo)        |
+| `orders-relay`, buscador de órdenes, selector de empleados                     | **ENTREGADO, SIN PROBAR**                              |
+| `stock-vouchers` (MS + gateway), fotos por línea, listado enriquecido, retorno | **ENTREGADO, SIN PROBAR**                              |
+| `StockService` (`registerOutbound`, `registerReturn`, `listAvailableUnits`)    | **ENTREGADO como parche**; **(verificar)** que se pegó |
+| Migraciones                                                                    | **No aplican por ahora** (pruebas con `synchronize`)   |
+| `labels` (MS + gateway): imprimir por lote y desde la lista de ingresos        | **Probado**                                            |
+| Etiquetas al registrar un ingreso (`labels` en `create_receipt`)               | **Probado**                                            |
 
 **Primera prueba recomendada:** ver `stock-vouchers/AGENTS.md`, sección
 "Estado".

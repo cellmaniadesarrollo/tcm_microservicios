@@ -25,7 +25,12 @@ services:
       - AWS_REGION=${AWS_REGION}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
-      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME} 
+      - LABEL_DYMO_URL=${LABEL_DYMO_URL}
+      - LABEL_ZEBRA_URL=${LABEL_ZEBRA_URL}
+      - LABEL_ZEBRA_KEY=${LABEL_ZEBRA_KEY}
+      - LABEL_PRINT_TIMEOUT_MS=${LABEL_PRINT_TIMEOUT_MS}
+
     networks: [backend]
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]

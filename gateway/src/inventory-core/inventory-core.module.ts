@@ -16,6 +16,8 @@ import { EmployeesController } from './employees/employees.controller';
 import { EmployeesService } from './employees/employees.service';
 import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
+import { LabelsController } from './labels/labels.controller';
+import { LabelsService } from './labels/labels.service';
 
 @Module({
   imports: [
@@ -33,9 +35,9 @@ import { OrdersService } from './orders/orders.service';
     AuthModule,
   ],
   controllers: [InventoryCoreController, SuppliersController, ReceiptsController, SriController, StockVouchersController,
-    EmployeesController, OrdersController
+    EmployeesController, OrdersController, LabelsController
   ],
   providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService, SriService,
-    StockVouchersService, EmployeesService, OrdersService],
+    StockVouchersService, EmployeesService, OrdersService, LabelsService],
 })
 export class InventoryCoreModule { }
