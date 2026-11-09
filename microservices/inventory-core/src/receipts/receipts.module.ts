@@ -17,6 +17,7 @@ import { ReceiptAttachment } from './entities/receipt-attachment.entity';
 import { ReceiptPayment } from './entities/receipt-payment.entity';
 import { SupplierProductCode } from './entities/supplier-product-code.entity';
 import { SriModule } from '../sri/sri.module';
+import { LabelsModule } from '../labels/labels.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ReceiptDocumentType, Receipt,
@@ -25,7 +26,7 @@ import { SriModule } from '../sri/sri.module';
     Receipt,
     ReceiptLine,
     StockUnitSerial, ReceiptAttachment, ReceiptPayment, SupplierProductCode]),
-    StockModule, CompaniesModule, AuditLogModule, SequencesModule, AwsS3Module, SriModule],
+    StockModule, CompaniesModule, AuditLogModule, SequencesModule, AwsS3Module, SriModule, LabelsModule],
   controllers: [ReceiptsController],
   providers: [ReceiptsService],
 })

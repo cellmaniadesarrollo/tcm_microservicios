@@ -4,6 +4,7 @@ import {
     ArrayMinSize,
     IsArray,
     IsBoolean,
+    IsEnum,
     IsIn,
     IsInt,
     IsNotEmpty,
@@ -18,7 +19,8 @@ import {
     ValidateIf,
     ValidateNested,
 } from 'class-validator';
-
+import { PrinterType } from '../../labels/dto/print-labels.dto';   // ajusta la ruta relativa
+// agrega IsEnum a los imports de class-validator
 /** Un equipo físico. Un celular con dos IMEI lleva dos valores en serials. */
 export class ReceiptUnitGatewayDto {
     @IsArray({ message: 'Los seriales deben ser una lista' })
@@ -171,7 +173,17 @@ export class ReceiptInitialPaymentGatewayDto {
     @MaxLength(500)
     note?: string;
 }
+export class ReceiptLabelsGatewayDto {
+    @IsEnum(PrinterType, { message: 'La impresora no es válida' })
+    printer!: PrinterType;
 
+    @IsArray()
+    @ArrayMinSize(1, { message: 'Indica al menos una etiqueta' })
+    @ArrayMaxSize(50, { message: 'Máximo 50 etiquetas por solicitud' })
+    @ValidateNested({ each: true })
+    @Type(() => ReceiptLabelItemGatewayDto)
+    items!: ReceiptLabelItemGatewayDto[];
+}
 export class CreateReceiptGatewayDto {
     /** UUID generado por el front al abrir el formulario. Hace el guardado idempotente. */
     @IsUUID('4', { message: 'El identificador de solicitud no es válido' })
@@ -221,4 +233,27 @@ export class CreateReceiptGatewayDto {
         message: 'La clave de acceso debe tener 49 dígitos',
     })
     accessKey?: string;
+
+    /** Etiquetas a imprimir al registrar. Si no viene, no se imprime. */
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => ReceiptLabelsGatewayDto)
+    labels?: ReceiptLabelsGatewayDto;
 }
+
+
+
+export class ReceiptLabelItemGatewayDto {
+    @Type(() => Number)
+    @IsInt({ message: 'La línea de la etiqueta no es válida' })
+    @Min(0)
+    @Max(199)
+    lineIndex!: number;
+
+    @Type(() => Number)
+    @IsInt({ message: 'La cantidad de etiquetas debe ser un entero' })
+    @Min(1, { message: 'La cantidad mínima de etiquetas es 1' })
+    @Max(999, { message: 'La cantidad máxima de etiquetas es 999' })
+    cant!: number;
+}
+
