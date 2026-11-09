@@ -10,9 +10,10 @@ import { CompaniesModule } from './companies/companies.module';
 import { OrdersRelayModule } from './orders-relay/orders-relay.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CustomersEventsModule } from './customers-events/customers-events.module';
+import { HealthController } from './health/health.controller';
 
 @Module({
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [AppService,
     KafkaListenersOrchestrator
   ],
