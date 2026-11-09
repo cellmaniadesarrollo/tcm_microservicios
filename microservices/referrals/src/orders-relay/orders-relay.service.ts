@@ -9,9 +9,8 @@ export class OrdersRelayService {
   private readonly processedTransitions = new Set<number>();
 
   constructor(
-    private readonly profiles: ReferralProfilesService,
-    private readonly producer: KafkaProducerService,
     private readonly profilesService: ReferralProfilesService,
+    private readonly producer: KafkaProducerService,
   ) {}
 
   async handleOrderUpdated(data: any): Promise<void> {
@@ -55,6 +54,7 @@ export class OrdersRelayService {
       const profile = await this.profilesService.ensureForCustomer(
         String(customerId),
         companyId,
+        { type: 'ORDER', id: String(orderId) }, // 👈 nuevo
       );
       console.log(`👤 Perfil ${profile.id} · código ${profile.code} (orden ${orderId})`);
 

@@ -38,10 +38,11 @@ export class CustomersEventsService {
 
     // Solo al crear el cliente (idempotente: si ya existe, no crea otro código)
     if (createProfile) {
-      await this.profiles.ensureForCustomer(String(data.id), String(data.companyId));
+      await this.profiles.ensureForCustomer(
+        String(data.id),
+        String(data.companyId),
+        { type: 'MANUAL', id: null }, // 👈 nuevo
+      );
     }
-
-    // Idempotente: si ya existe, no crea otro código
-    await this.profiles.ensureForCustomer(String(data.id), String(data.companyId));
   }
 }
