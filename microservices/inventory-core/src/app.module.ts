@@ -33,7 +33,8 @@ import { LabelsModule } from './labels/labels.module';
         password: config.get('DB_PASSWORD'),
         database: config.get('DB_NAME'),
         autoLoadEntities: true,
-        synchronize: config.get('NODE_ENV') !== 'production', // en prod usar migraciones
+        synchronize: true,
+        // synchronize: config.get('NODE_ENV') !== 'production', // en prod usar migraciones
       }),
     }),
     HealthModule, KafkaModule, CompaniesModule,
