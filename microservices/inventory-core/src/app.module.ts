@@ -34,14 +34,23 @@ import { LabelsModule } from './labels/labels.module';
         database: config.get('DB_NAME'),
         autoLoadEntities: true,
         synchronize: true,
-        // synchronize: config.get('NODE_ENV') !== 'production', // en prod usar migraciones
       }),
     }),
-    HealthModule, KafkaModule, CompaniesModule,
-    UsersEmployeesEventsModule, DevicesReplicaModule,
-    ProductCatalogsModule, ProductsModule, SequencesModule,
+
+    // 1. Módulos de infraestructura y bases fundacionales PRIMERO
+    HealthModule,
+    KafkaModule,
     AwsS3Module,
     AuditLogModule,
+
+    // 2. Módulos de dominio principal / entidades raíz (¡Aquí debe estar CompaniesModule antes que los demás!)
+    CompaniesModule,
+    UsersEmployeesEventsModule,
+    DevicesReplicaModule,
+
+    // 3. Módulos de negocio / catálogos que dependen de las entidades raíz
+    ProductCatalogsModule,
+    ProductsModule,
     StockModule,
     CatalogsModule,
     SuppliersModule,
@@ -49,7 +58,8 @@ import { LabelsModule } from './labels/labels.module';
     SriModule,
     OrdersRelayModule,
     StockVouchersModule,
-    LabelsModule
+    LabelsModule,
+    SequencesModule,
   ],
 })
 export class AppModule { }
