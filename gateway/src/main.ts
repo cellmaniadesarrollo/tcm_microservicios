@@ -56,7 +56,10 @@ async function bootstrap() {
       'https://www.teamcellmania.com',
       'https://teamcellmania.com',
       'https://master.d20yuczo7axzff.amplifyapp.com',
-      'https://web.teamcellmania.com'
+      'https://web.teamcellmania.com',
+      'https://main.d32e3wk8og95g5.amplifyapp.com',
+      'https://inventario.teamcellmania.com',
+
 
 
     ]
