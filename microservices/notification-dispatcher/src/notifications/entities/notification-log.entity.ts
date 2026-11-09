@@ -5,16 +5,20 @@ import {
 
 export type NotificationChannel = 'WHATSAPP' | 'EMAIL';
 export type NotificationStatus = 'SENT' | 'FAILED';
-export type NotificationType = 'ORDER_STATUS_CHANGE' | 'PICKUP_REMINDER';
+export type NotificationType =
+    | 'ORDER_STATUS_CHANGE'
+    | 'PICKUP_REMINDER'
+    | 'REFERRAL_WELCOME';
 
 @Entity('notification_logs')
 export class NotificationLog {
     @PrimaryGeneratedColumn('uuid')
     id!: string;
 
+    // Null en notificaciones que no pertenecen a una orden (p. ej. REFERRAL_WELCOME)
     @Index()
-    @Column()
-    orderId!: number;
+    @Column({ type: 'int', nullable: true })
+    orderId?: number | null;
 
     @Index()
     @Column()

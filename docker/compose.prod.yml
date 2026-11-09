@@ -575,6 +575,34 @@ services:
       timeout: 5s
       retries: 15
       start_period: 60s
+
+  referrals:
+    image: ghcr.io/cellmaniadesarrollo/tcm-referrals:${REFERRALS_TAG:-latest}
+    container_name: ms-referrals
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${REFERRALS_DB_HOST}
+      - DB_PORT=${REFERRALS_DB_PORT}
+      - DB_USER=${REFERRALS_DB_USER}
+      - DB_PASSWORD=${REFERRALS_DB_PASSWORD}
+      - DB_NAME=${REFERRALS_DB_NAME}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
 networks:
   backend:
 

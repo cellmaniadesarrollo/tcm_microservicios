@@ -68,7 +68,7 @@ export class WhatsappChannel implements INotificationChannel {
                 status: 'FAILED',
                 errorMessage: err?.message ?? 'Error desconocido',
             });
-            throw err; // para que NotificationsService.dispatch siga registrando FAILED
+            throw err; // para que NotificationsService siga registrando FAILED
         }
     }
 
@@ -105,15 +105,26 @@ export class WhatsappChannel implements INotificationChannel {
         let body: string | null = null;
 
         try {
+            // Fuente de variables: data (eventos sin orden) o la orden
+            const source = context.data ?? context.order;
+
             params = [...(template.variablesMapping ?? [])]
                 .sort((a: TemplateVariableMapping, b: TemplateVariableMapping) => a.index - b.index)
                 .map((m: TemplateVariableMapping) =>
-                    m.source === 'static' ? m.value : String(getByPath(context.order, m.value) ?? ''),
+                    m.source === 'static' ? m.value : String(getByPath(source, m.value) ?? ''),
                 );
             body = renderTemplateBody(template.components, params);
 
             const buttonParams = this.templates.hasDynamicUrlButton(template.components)
-                ? [{ index: 0, text: String(context.order.publicId ?? context.order.orderNumber ?? '') }]
+                ? [{
+                    index: 0,
+                    text: String(
+                        context.buttonText ??
+                        context.order?.publicId ??
+                        context.order?.orderNumber ??
+                        '',
+                    ),
+                }]
                 : undefined;
 
             const { messageId } = await this.official.sendTemplate(
