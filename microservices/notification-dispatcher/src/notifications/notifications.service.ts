@@ -7,6 +7,7 @@ import { NotificationLog } from './entities/notification-log.entity';
 import { NotificationSchedule } from './entities/notification-schedule.entity';
 import { OrderReplica } from '../orders-relay/entities/order-replica.entity';
 import { CustomerContactCache } from '../customers-events/entities/customer-contact-cache.entity';
+import { CustomerCache } from '../customers-events/entities/customer-cache.entity'; // 🆕
 import { isNotifiableOrder } from './helpers/order-type.helper';
 import { ORDER_MESSAGES, REMINDER_MESSAGES } from './helpers/message-builder.helper'
 import { REMINDER_INTERVALS, LAST_REMINDER_STEP, MAX_DAYS_FROM_START, addDays } from './helpers/reminder-schedule.helper';
@@ -31,6 +32,8 @@ export class NotificationsService {
         private readonly orderRepo: Repository<OrderReplica>,
         @InjectRepository(CustomerContactCache)
         private readonly contactRepo: Repository<CustomerContactCache>,
+        @InjectRepository(CustomerCache)                         // 🆕
+        private readonly customerRepo: Repository<CustomerCache>, // 🆕
         @Inject(CHANNEL_WHATSAPP)
         private readonly whatsapp: INotificationChannel,
     ) { }
@@ -58,7 +61,6 @@ export class NotificationsService {
         const phone = await this.getMobileContact(order.customerId);
         if (!phone) return;
 
-        // handleOrderCreated y handleStatusChanged (mismo bloque en ambos)
         await this.dispatch({
             orderId: order.id,
             customerId: order.customerId,
@@ -67,8 +69,8 @@ export class NotificationsService {
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
             message: messageFn(order),
-            order,                                          // 👈
-            event: ORDER_STATUS_TO_EVENT[statusKey],         // 👈
+            order,
+            event: ORDER_STATUS_TO_EVENT[statusKey],
         });
     }
 
@@ -105,8 +107,8 @@ export class NotificationsService {
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
             message: messageFn(order),
-            order,                                     // 👈 faltaba esto
-            event: ORDER_STATUS_TO_EVENT[statusKey],   // 👈 y esto
+            order,
+            event: ORDER_STATUS_TO_EVENT[statusKey],
         });
 
         if (statusKey === STATUS_TRABAJO_FINALIZADO) {
@@ -115,6 +117,72 @@ export class NotificationsService {
 
         if (statusKey === STATUS_ENTREGADA) {
             await this.cancelPickupReminder(order.id);
+        }
+    }
+
+    // ── 🆕 Referidos: mensaje de bienvenida ───────────────────────────────────
+    async sendReferralWelcome(data: {
+        companyId: string;
+        customerId: string;
+        code: string;
+        shareLink: string | null;
+    }): Promise<void> {
+        const customerId = Number(data.customerId);
+        if (!Number.isInteger(customerId)) {
+            this.logger.warn(`REFERRAL_WELCOME: customerId inválido (${data.customerId})`);
+            return;
+        }
+
+        const [customer, phone] = await Promise.all([
+            this.customerRepo.findOne({ where: { id: customerId } }),
+            this.getMobileContact(customerId),
+        ]);
+
+        if (!customer || !phone) {
+            this.logger.warn(
+                `REFERRAL_WELCOME: cliente ${customerId} sin ${!customer ? 'registro en cache' : 'móvil'}, se omite`,
+            );
+            return;
+        }
+
+        const link = data.shareLink ?? '';
+        // Texto de respaldo (Baileys) si no hay plantilla oficial activa
+        const message =
+            `¡Hola ${customer.firstName}! 🎁 Tu código de referido es *${data.code}*.` +
+            (link ? ` Compártelo con este enlace: ${link}` : '');
+
+        const logBase = {
+            orderId: null,
+            customerId,
+            type: 'REFERRAL_WELCOME' as const,
+            recipient: phone,
+            message,
+            channel: 'WHATSAPP' as const,
+        };
+
+        try {
+            await this.whatsapp.send(phone, message, {
+                companyId: data.companyId,
+                purpose: 'NOTIFICATIONS',
+                event: 'REFERRAL_WELCOME',
+                data: {
+                    customer: { firstName: customer.firstName },
+                    referral: { code: data.code, cardLink: link },
+                },
+                buttonText: link ? link.split('/').pop() : undefined, // ajusta según tu botón en Meta
+            });
+            await this.logRepo.save(
+                this.logRepo.create({ ...logBase, status: 'SENT', sentAt: new Date() }),
+            );
+        } catch (err: any) {
+            await this.logRepo.save(
+                this.logRepo.create({
+                    ...logBase,
+                    status: 'FAILED',
+                    errorMessage: err?.message ?? 'Error desconocido',
+                }),
+            );
+            this.logger.error(`REFERRAL_WELCOME falló para ${phone}: ${err?.message}`);
         }
     }
 
@@ -154,7 +222,6 @@ export class NotificationsService {
     }
 
     // ── Ejecutado por el scheduler ────────────────────────────────────────────
-    // ── processDueReminders ───────────────────────────────────────────────────────
     async processDueReminders(): Promise<void> {
         const nowUTC = new Date();
         const hourEC = (nowUTC.getUTCHours() - 5 + 24) % 24;
@@ -195,7 +262,6 @@ export class NotificationsService {
 
             const phone = await this.getMobileContact(schedule.customerId);
             if (phone) {
-                // processDueReminders
                 await this.dispatch({
                     orderId: schedule.orderId,
                     customerId: schedule.customerId,
@@ -205,8 +271,8 @@ export class NotificationsService {
                     sequenceStep: currentStep,
                     recipient: phone,
                     message: messageFn(order),
-                    order,                                    // 👈
-                    event: reminderStepToEvent(currentStep),  // 👈
+                    order,
+                    event: reminderStepToEvent(currentStep),
                 });
             }
 
@@ -291,7 +357,6 @@ export class NotificationsService {
 
     // ── Core: enviar + registrar ──────────────────────────────────────────────
 
-    // ── dispatch: agrega context ──────────────────────────────────────────────────
     private async dispatch(params: {
         orderId: number;
         customerId: number;
@@ -300,16 +365,16 @@ export class NotificationsService {
         type: NotificationLog['type'];
         recipient: string;
         message: string;
-        order: OrderReplica;              // 👈 nuevo
-        event?: WhatsappTemplateEvent;    // 👈 nuevo
+        order: OrderReplica;
+        event?: WhatsappTemplateEvent;
         sequenceStep?: number;
     }): Promise<void> {
         try {
             await this.whatsapp.send(params.recipient, params.message, {
                 companyId: params.companyId,
                 purpose: params.purpose,
-                event: params.event,      // 👈
-                order: params.order,      // 👈
+                event: params.event,
+                order: params.order,
             });
             await this.logRepo.save(
                 this.logRepo.create({
