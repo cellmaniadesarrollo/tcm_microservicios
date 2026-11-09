@@ -14,6 +14,7 @@ import { NotificationsScheduler } from './notifications.scheduler';
 import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { OrdersRelayModule } from '../orders-relay/orders-relay.module'; // ← Agregar
 import { OrderReplica } from '../orders-relay/entities';
+import { CustomerCache } from 'src/customers-events/entities/customer-cache.entity';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { OrderReplica } from '../orders-relay/entities';
       NotificationSchedule,
       OrderReplica,
       CustomerContactCache,
+      CustomerCache
     ]),
     ScheduleModule.forRoot(),
     forwardRef(() => WhatsappModule),
