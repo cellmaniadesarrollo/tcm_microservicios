@@ -582,14 +582,17 @@ services:
     restart: always
     environment:
       - NODE_ENV=production
+      - PORT=3000
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - DB_HOST=${REFERRALS_DB_HOST}
       - DB_PORT=${REFERRALS_DB_PORT}
       - DB_USER=${REFERRALS_DB_USER}
       - DB_PASSWORD=${REFERRALS_DB_PASSWORD}
       - DB_NAME=${REFERRALS_DB_NAME}
+      - DB_SYNC=true
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - REFERRAL_BASE_URL=${REFERRAL_BASE_URL}
     networks:
       - backend
     depends_on:
