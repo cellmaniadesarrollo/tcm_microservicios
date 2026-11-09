@@ -19,7 +19,8 @@ import { SriModule } from '../sri/sri.module';
 import { LabelsModule } from '../labels/labels.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ReceiptDocumentType, Receipt, ReceiptLineSerial,
+  imports: [TypeOrmModule.forFeature([ReceiptDocumentType, Receipt,
+    ReceiptLineSerial,
     CompanySequence,
     Receipt,
     StockUnitSerial, ReceiptAttachment, ReceiptPayment, SupplierProductCode]),
