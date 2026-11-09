@@ -34,6 +34,7 @@ on:
           - notification-dispatcher
           - inventario
           - inventory-core
+          - referrals
           - scraper
           # ── Infraestructura (solo logs/restart, nunca deploy) ──
           - kafka
@@ -69,7 +70,7 @@ jobs:
           ACTION: ${{ inputs.action_type }}
           TARGET: ${{ inputs.target_service }}
         run: |
-          ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario inventory-core scraper"
+          ALL_SERVICES="companies users clients subscriptions orders reports realtime notification-dispatcher notifications task-board gateway inventario inventory-core referrals scraper"
           INFRA_SERVICES="kafka rabbitmq init-kafka"
           SERVICES=""
 
@@ -107,6 +108,7 @@ jobs:
               ["notification-dispatcher"]="microservices/notification-dispatcher/"
               ["inventario"]="microservices/inventario/"
               ["inventory-core"]="microservices/inventory-core/"
+              ["referrals"]="microservices/referrals/"
               ["scraper"]="microservices/scraper/"
             )
 

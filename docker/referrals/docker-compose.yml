@@ -1,0 +1,40 @@
+name: tcm-referrals
+
+services:
+  referrals:
+    build:
+      context: ../../microservices/referrals
+      dockerfile: Dockerfile.dev
+    container_name: ms-referrals
+    restart: always
+    volumes:
+      - ../../microservices/referrals:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    env_file: [../.env]
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_REFERRALS}
+      - DB_SYNC=true
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS
+      - REFERRAL_BASE_URL=${REFERRAL_BASE_URL}
+    ports:
+      - "3020:3000"
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+networks:
+  backend:
+    external: true

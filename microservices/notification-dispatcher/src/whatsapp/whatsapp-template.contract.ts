@@ -83,4 +83,9 @@ export const TEMPLATE_VARIABLE_CONTRACT: Record<WhatsappTemplateEvent, TemplateV
         { index: 2, description: 'Marca del equipo', fieldPath: 'deviceBrand' },
         { index: 3, description: 'Modelo del equipo', fieldPath: 'deviceModel' },
     ],
+    REFERRAL_WELCOME: [
+        { index: 1, description: 'Nombre del cliente', fieldPath: 'customer.firstName' },
+        { index: 2, description: 'Código de referido', fieldPath: 'referral.code' },
+        { index: 3, description: 'Enlace a la tarjeta del cliente', fieldPath: 'referral.cardLink' },
+    ],
 };
