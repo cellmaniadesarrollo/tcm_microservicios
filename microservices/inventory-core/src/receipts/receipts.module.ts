@@ -5,7 +5,6 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ReceiptDocumentType } from '../catalogs/entities/receipt-document-type.entity';
 import { Receipt } from './entities/receipt.entity';
 import { ReceiptLine } from './entities/receipt-line.entity';
-import { ReceiptLineSerial } from './entities/receipt-line-serial.entity';
 import { StockModule } from '../stock/stock.module';
 import { CompaniesModule } from '../companies/companies.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -17,15 +16,15 @@ import { ReceiptAttachment } from './entities/receipt-attachment.entity';
 import { ReceiptPayment } from './entities/receipt-payment.entity';
 import { SupplierProductCode } from './entities/supplier-product-code.entity';
 import { SriModule } from '../sri/sri.module';
+import { LabelsModule } from '../labels/labels.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ReceiptDocumentType, Receipt,
-    ReceiptLine, ReceiptLineSerial,
+    ReceiptLine,
     CompanySequence,
     Receipt,
-    ReceiptLine,
     StockUnitSerial, ReceiptAttachment, ReceiptPayment, SupplierProductCode]),
-    StockModule, CompaniesModule, AuditLogModule, SequencesModule, AwsS3Module, SriModule],
+    StockModule, CompaniesModule, AuditLogModule, SequencesModule, AwsS3Module, SriModule, LabelsModule],
   controllers: [ReceiptsController],
   providers: [ReceiptsService],
 })
