@@ -1,5 +1,4 @@
-//src\catalogs\models-sync.service.ts
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Cron } from '@nestjs/schedule';
@@ -10,8 +9,8 @@ import { Model } from './entities/model.entity';
 import { TechnicalModelsSyncService } from './technical-models-sync.service';
 
 interface ModelItem {
-    numericId: number;
-    sourceId: string;
+    numericId: number; // id de GSMArena: solo informativo, NO es models_id
+    sourceId: string;  // slug: es la clave de enlace con el scraper
     name: string;
     imgUrl?: string;
     description?: string;
@@ -24,8 +23,15 @@ interface ModelsPage {
     hasMore: boolean;
 }
 
+export interface ModelsBatchResult {
+    newBrands: number;
+    newModels: number;
+    existing: number;
+    skippedNoBrand: number;
+}
+
 @Injectable()
-export class ModelsSyncService {
+export class ModelsSyncService implements OnModuleInit {
     private readonly logger = new Logger(ModelsSyncService.name);
     private readonly PAGE_SIZE = 500;
     private running = false;
@@ -41,6 +47,11 @@ export class ModelsSyncService {
         void this.runSafe();
     }
 
+    /** Red de seguridad diaria por si se perdieron eventos de Kafka. */
+    @Cron('0 3 * * *')
+    handleCron() {
+        void this.runSafe();
+    }
 
     /** Primero modelos faltantes, luego códigos técnicos (dependen de los modelos). */
     private async runSafe() {
@@ -59,9 +70,7 @@ export class ModelsSyncService {
     async syncAll(): Promise<void> {
         let after = 0;
         let hasMore = true;
-        let newBrands = 0;
-        let newModels = 0;
-        let existing = 0;
+        const total = { newBrands: 0, newModels: 0, existing: 0, skippedNoBrand: 0 };
 
         while (hasMore) {
             const page = await firstValueFrom(
@@ -76,9 +85,10 @@ export class ModelsSyncService {
             this.logger.log(`📥 Página: ${page.items.length} items (after=${after}, hasMore=${page.hasMore})`);
 
             const r = await this.saveBatch(page.items);
-            newBrands += r.newBrands;
-            newModels += r.newModels;
-            existing += r.existing;
+            total.newBrands += r.newBrands;
+            total.newModels += r.newModels;
+            total.existing += r.existing;
+            total.skippedNoBrand += r.skippedNoBrand;
 
             if (page.hasMore && page.nextCursor <= after) {
                 this.logger.warn('El cursor no avanzó, se corta el sync');
@@ -89,39 +99,45 @@ export class ModelsSyncService {
         }
 
         this.logger.log(
-            `✅ Modelos sincronizados | marcas nuevas: ${newBrands} | modelos nuevos: ${newModels} | ya existían: ${existing}`,
+            `✅ Modelos sincronizados | marcas nuevas: ${total.newBrands} | modelos nuevos: ${total.newModels} | ` +
+            `ya existían: ${total.existing} | sin marca: ${total.skippedNoBrand}`,
         );
     }
 
-    async saveBatch(items: ModelItem[]) {
-        if (!items?.length) return { newBrands: 0, newModels: 0, existing: 0 };
+    /**
+     * Enlaza SOLO por slug (find_id). Los ids de Postgres los genera la base:
+     * el numericId del scraper nunca se usa como models_id ni brands_id.
+     */
+    async saveBatch(items: ModelItem[]): Promise<ModelsBatchResult> {
+        const empty: ModelsBatchResult = { newBrands: 0, newModels: 0, existing: 0, skippedNoBrand: 0 };
+        if (!items?.length) return empty;
 
-        /** 1️⃣ Marcas: resolver cuáles existen y crear las que faltan */
-        const incomingBrands = new Map<number, ModelItem['brand']>();
-        for (const i of items) incomingBrands.set(i.brand.id, i.brand);
+        const brandKey = (s: string) => s.slice(0, 50);
+        const modelKey = (s: string) => s.slice(0, 100);
 
-        const brandList = [...incomingBrands.values()];
+        /** 1️⃣ Marcas */
+        const incomingBrands = new Map<string, ModelItem['brand']>();
+        for (const i of items) incomingBrands.set(brandKey(i.brand.sourceId), i.brand);
+
+        const brandKeys = [...incomingBrands.keys()];
         const existingBrands = await this.brandRepo.find({
-            where: [
-                { brands_id: In(brandList.map((b) => b.id)) },
-                { brands_find_id: In(brandList.map((b) => b.sourceId)) },
-            ],
+            where: { brands_find_id: In(brandKeys) },
         });
-        const brandIdById = new Map(existingBrands.map((b) => [b.brands_id, b.brands_id]));
-        const brandIdByFindId = new Map(existingBrands.map((b) => [b.brands_find_id, b.brands_id]));
-
-        const brandsToInsert = brandList.filter(
-            (b) => !brandIdById.has(b.id) && !brandIdByFindId.has(b.sourceId),
+        const brandIdByFindId = new Map<string, number>(
+            existingBrands.map((b) => [b.brands_find_id, b.brands_id]),
         );
+
+        const brandsToInsert = [...incomingBrands.entries()].filter(([k]) => !brandIdByFindId.has(k));
+        let newBrands = 0;
         if (brandsToInsert.length) {
             await this.brandRepo
                 .createQueryBuilder()
                 .insert()
                 .into(Brand)
                 .values(
-                    brandsToInsert.map((b) => ({
-                        brands_id: b.id,
-                        brands_find_id: b.sourceId.slice(0, 50),
+                    brandsToInsert.map(([k, b]) => ({
+                        // sin brands_id: lo genera Postgres
+                        brands_find_id: k,
                         brands_name: b.name.slice(0, 255),
                         brands_devices_count: 0,
                         brands_laptops_count: 0,
@@ -129,39 +145,43 @@ export class ModelsSyncService {
                 )
                 .orIgnore()
                 .execute();
-            for (const b of brandsToInsert) {
-                brandIdById.set(b.id, b.id);
-                brandIdByFindId.set(b.sourceId, b.id);
-            }
-        }
-        const resolveBrandId = (b: ModelItem['brand']) =>
-            brandIdByFindId.get(b.sourceId) ?? brandIdById.get(b.id);
 
-        /** 2️⃣ Modelos: solo los que no existen (por id o por find_id) */
+            const created = await this.brandRepo.find({
+                where: { brands_find_id: In(brandsToInsert.map(([k]) => k)) },
+            });
+            for (const b of created) brandIdByFindId.set(b.brands_find_id, b.brands_id);
+            newBrands = created.length;
+        }
+
+        /** 2️⃣ Modelos: solo por find_id */
+        const uniqueItems = new Map<string, ModelItem>();
+        for (const i of items) uniqueItems.set(modelKey(i.sourceId), i);
+
         const existingModels = await this.modelRepo.find({
             select: ['models_id', 'models_find_id'],
-            where: [
-                { models_id: In(items.map((i) => i.numericId)) },
-                { models_find_id: In(items.map((i) => i.sourceId)) },
-            ],
+            where: { models_find_id: In([...uniqueItems.keys()]) },
         });
-        const knownIds = new Set(existingModels.map((m) => m.models_id));
         const knownFindIds = new Set(existingModels.map((m) => m.models_find_id));
 
         const rows: Partial<Model>[] = [];
         let existing = 0;
+        let skippedNoBrand = 0;
 
-        for (const i of items) {
-            if (knownIds.has(i.numericId) || knownFindIds.has(i.sourceId)) {
+        for (const [key, i] of uniqueItems) {
+            if (knownFindIds.has(key)) {
                 existing++;
                 continue;
             }
-            const brandId = resolveBrandId(i.brand);
-            if (!brandId) continue;
+            const brandId = brandIdByFindId.get(brandKey(i.brand.sourceId));
+            if (!brandId) {
+                skippedNoBrand++;
+                this.logger.warn(`Sin marca resuelta para ${i.sourceId} (${i.brand.sourceId})`);
+                continue;
+            }
 
             rows.push({
-                models_id: i.numericId,
-                models_find_id: i.sourceId.slice(0, 100),
+                // sin models_id: lo genera Postgres
+                models_find_id: key,
                 models_name: i.name.slice(0, 255),
                 models_brands_id: brandId,
                 models_img_url: i.imgUrl && i.imgUrl.length <= 500 ? i.imgUrl : undefined,
@@ -169,16 +189,19 @@ export class ModelsSyncService {
             });
         }
 
+        let newModels = 0;
         if (rows.length) {
-            await this.modelRepo
+            const res = await this.modelRepo
                 .createQueryBuilder()
                 .insert()
                 .into(Model)
                 .values(rows)
                 .orIgnore() // ON CONFLICT DO NOTHING
                 .execute();
+            // con DO NOTHING solo vuelven las filas realmente insertadas
+            newModels = Array.isArray(res.raw) ? res.raw.length : rows.length;
         }
 
-        return { newBrands: brandsToInsert.length, newModels: rows.length, existing };
+        return { newBrands, newModels, existing, skippedNoBrand };
     }
 }
