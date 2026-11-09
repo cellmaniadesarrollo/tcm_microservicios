@@ -1995,6 +1995,9 @@ export class OrderWorkflowService {
     );
 
     await this.broadcastService.publishOrderUpdated(dto.orderId, 'closed', {
+      customer_id: result.order.customer_id,
+      company_id: user.companyId,
+      is_outgoing: result.order.order_type_id === 3,
       currentStatus: { id: 8, name: 'ENTREGADA' },
       statusHistoryEntry: {
         id: result.historyId,

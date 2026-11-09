@@ -1,0 +1,1 @@
+export const REFERRALS_TCP = 'REFERRALS_TCP';
