@@ -1,10 +1,10 @@
-import { Entity, PrimaryColumn, Column, OneToMany } from 'typeorm';
+import { Entity, PrimaryColumn, Column, OneToMany, PrimaryGeneratedColumn } from 'typeorm';
 import { Model } from './model.entity';
 
 @Entity('brands')
 export class Brand {
-  @PrimaryColumn()
-  brands_id: number; // ← YA NO SE AUTOINCREMENTA
+  @PrimaryGeneratedColumn({ type: 'int' })
+  brands_id!: number;
 
   @Column({ length: 50 })
   brands_find_id: string;
