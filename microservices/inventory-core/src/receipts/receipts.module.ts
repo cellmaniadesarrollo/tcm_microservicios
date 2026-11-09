@@ -4,7 +4,7 @@ import { ReceiptsController } from './receipts.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ReceiptDocumentType } from '../catalogs/entities/receipt-document-type.entity';
 import { Receipt } from './entities/receipt.entity';
-import { ReceiptLineSerial } from './entities/receipt-line-serial.entity';
+import { ReceiptLine } from './entities/receipt-line.entity';
 import { StockModule } from '../stock/stock.module';
 import { CompaniesModule } from '../companies/companies.module';
 import { AuditLogModule } from '../audit-log/audit-log.module';
@@ -20,7 +20,7 @@ import { LabelsModule } from '../labels/labels.module';
 
 @Module({
   imports: [TypeOrmModule.forFeature([ReceiptDocumentType, Receipt,
-    ReceiptLineSerial,
+    ReceiptLine,
     CompanySequence,
     Receipt,
     StockUnitSerial, ReceiptAttachment, ReceiptPayment, SupplierProductCode]),
