@@ -6,7 +6,11 @@ export interface SendContext {
     companyId: string;
     purpose: MessagePurpose;
     event?: WhatsappTemplateEvent;
-    order: OrderReplica;
+    order?: OrderReplica;                 // ahora opcional
+    /** Fuente alterna para resolver los fieldPath del contrato (eventos sin orden) */
+    data?: Record<string, any>;
+    /** Texto del botón de URL dinámica cuando no hay orden */
+    buttonText?: string;
 }
 
 export interface INotificationChannel {
