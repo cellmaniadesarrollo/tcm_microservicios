@@ -18,6 +18,7 @@ import { ReceiptsModule } from './receipts/receipts.module';
 import { SuppliersModule } from './suppliers/suppliers.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
 import { StockVouchersModule } from './stock-vouchers/stock-vouchers.module';
+import { LabelsModule } from './labels/labels.module';
 
 @Module({
   imports: [
@@ -46,7 +47,8 @@ import { StockVouchersModule } from './stock-vouchers/stock-vouchers.module';
     ReceiptsModule,
     SriModule,
     OrdersRelayModule,
-    StockVouchersModule
+    StockVouchersModule,
+    LabelsModule
   ],
 })
 export class AppModule { }

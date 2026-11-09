@@ -540,10 +540,45 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
+  inventory-core:
+    image: ghcr.io/cellmaniadesarrollo/tcm-inventory-core:${INVENTORY_CORE_TAG:-latest}
+    container_name: ms-inventory-core
+    restart: always
+    environment:
+      - NODE_ENV=production
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${INVENTORY_CORE_DB_HOST}
+      - DB_PORT=${INVENTORY_CORE_DB_PORT}
+      - DB_USER=${INVENTORY_CORE_DB_USER}
+      - DB_PASSWORD=${INVENTORY_CORE_DB_PASSWORD}
+      - DB_NAME=${INVENTORY_CORE_DB_NAME}
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - AWS_REGION=${AWS_REGION}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME}
+      - LABEL_DYMO_URL=${LABEL_DYMO_URL}
+      - LABEL_ZEBRA_URL=${LABEL_ZEBRA_URL}
+      - LABEL_ZEBRA_KEY=${LABEL_ZEBRA_KEY}
+      - LABEL_PRINT_TIMEOUT_MS=${LABEL_PRINT_TIMEOUT_MS}
+    networks:
+      - backend
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      init-kafka:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
 networks:
   backend:
 
 volumes:
   kafka_data:
   redis_data:
+

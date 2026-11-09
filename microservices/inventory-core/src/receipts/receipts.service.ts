@@ -31,6 +31,8 @@ import { SriClientService, SriUnavailableError } from '../sri/sri-client.service
 
 import { SupplierProductCode } from './entities/supplier-product-code.entity';
 import { parseAccessKey } from '../sri/helpers/access-key.helper';
+import { PrinterType } from '../labels/types/labels.types';
+import { LabelsService } from '../labels/services/labels.service';
 /** Zona horaria del negocio: la fecha por defecto debe ser la local, no la UTC del servidor. */
 const BUSINESS_TZ = 'America/Guayaquil';
 
@@ -200,6 +202,10 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
     [PaymentStatus.PARTIAL]: 'Pago parcial',
     [PaymentStatus.PAID]: 'Pagado',
 };
+type ReceiptLabelRequest = {
+    printer: PrinterType;                                   // import desde ../labels/labels.types
+    items: Array<{ lineIndex: number; cant: number }>;
+};
 @Injectable()
 export class ReceiptsService {
     private readonly logger = new Logger(ReceiptsService.name);
@@ -212,6 +218,7 @@ export class ReceiptsService {
         private readonly audit: AuditLogService,
         private readonly s3: AwsS3Service,
         private readonly sri: SriClientService,
+        private readonly labels: LabelsService
     ) { }
 
     /**
@@ -258,9 +265,18 @@ export class ReceiptsService {
 
     // ───────────────────────── Crear ─────────────────────────
 
-    async create(dto: CreateReceiptInput, companyId: string, userId: string, files: ReceiptFilesPayload = {}) {
+    async create(
+        dto: CreateReceiptInput & { labels?: ReceiptLabelRequest },
+        companyId: string,
+        userId: string,
+        files: ReceiptFilesPayload = {},
+    ) {
+        // `labels` no es parte del ingreso: se separa para que no entre al hash de idempotencia
+        const { labels: labelRequest, ...receiptDto } = dto;
+
         // 1. Validación barata antes de tocar S3 o la base
-        const input = this.normalizeInput(dto);
+        const input = this.normalizeInput(receiptDto as CreateReceiptInput);
+        this.assertLabelRequest(labelRequest, input.lines);
         const { clientRequestId, ...content } = input;
         const hash = createHash('sha256').update(JSON.stringify(content)).digest('hex');
 
@@ -518,8 +534,12 @@ export class ReceiptsService {
                 return this.summary(em, companyId, receiptId, false);
             });
 
-            if (result.replayed) await cleanupAll();
-            return result;
+            if (result.replayed) {
+                await cleanupAll();
+                return result;                       // un replay nunca imprime
+            }
+            const print = await this.printAfterCreate(companyId, receiptId, labelRequest);
+            return print ? { ...result, print } : result;
         } catch (error: any) {
             await cleanupAll();
 
@@ -1521,5 +1541,45 @@ export class ReceiptsService {
         await upsert(withFactor, [...base, 'unit_factor']);
         await upsert(withoutFactor, base); // no toca un factor ya aprendido
         return ids;
+    }
+    private assertLabelRequest(req: ReceiptLabelRequest | undefined, lines: Array<{ affectsInventory?: boolean }>) {
+        if (!req) return;
+        const seen = new Set<number>();
+        req.items.forEach((it, i) => {
+            const label = `Etiqueta ${i + 1}`;
+            if (it.lineIndex >= lines.length) throw bad(`${label}: la línea no existe`);
+            if (lines[it.lineIndex].affectsInventory === false) throw bad(`${label}: la línea no maneja inventario`);
+            if (seen.has(it.lineIndex)) throw bad(`${label}: la línea está repetida`);
+            seen.add(it.lineIndex);
+        });
+    }
+
+    /** Imprime tras el commit. NUNCA lanza: el ingreso ya está guardado. */
+    private async printAfterCreate(companyId: string, receiptId: string, req?: ReceiptLabelRequest) {
+        if (!req) return null;
+        try {
+            const lines = await this.dataSource.manager.find(ReceiptLine, {
+                where: { receiptId },
+                select: { lineNo: true, lotId: true },
+            });
+            const lotByNo = new Map(lines.map((l) => [l.lineNo, l.lotId] as [number, string | undefined]));
+            const items = req.items.map((it) => ({ lotId: lotByNo.get(it.lineIndex + 1), cant: it.cant }));
+            if (items.some((i) => !i.lotId)) throw new Error('Línea sin lote');
+
+            const res = await this.labels.print({ printer: req.printer, items }, companyId);
+            return {
+                ok: res.ok,
+                printer: res.printer,
+                items: res.items.map((r, i) => ({ lineIndex: req.items[i].lineIndex, ...r })),
+            };
+        } catch (e: any) {
+            this.logger.warn(`Impresión tras ingreso ${receiptId}: ${e?.message}`);   // (verificar que exista this.logger)
+            return {
+                ok: false,
+                printer: req.printer,
+                items: [],
+                message: 'El ingreso se guardó, pero no se pudo imprimir. Reimprime desde la lista.',
+            };
+        }
     }
 }
