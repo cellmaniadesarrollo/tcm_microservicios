@@ -3,7 +3,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { PrintEndpoint } from './entities/print-endpoint.entity';
 
-const ALLOWED_HOSTS = ['.ngrok-free.app', '.ngrok.app', '.ngrok.io', '.trycloudflare.com', '.teamcellmania.com'];
+const ALLOWED_HOSTS = [
+  '.ngrok-free.dev',   // ← el nuevo dominio de ngrok
+  '.ngrok-free.app',
+  '.ngrok.app',
+  '.ngrok.io',
+  '.teamcellmania.com',
+];
 const norm = (c: string) => String(c).padStart(3, '0');
 
 @Injectable()
