@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/tu-org/tcm-scraper/internal/events"
 	"github.com/tu-org/tcm-scraper/internal/gsmarena"
 	"github.com/tu-org/tcm-scraper/internal/store"
-	"github.com/tu-org/tcm-scraper/internal/events"
 )
 
 var (
@@ -23,6 +23,7 @@ var (
 type Options struct {
 	StaleAfter     time.Duration // volver a pedir fichas más viejas que esto
 	ListingRefresh time.Duration // volver a recorrer el listado completo cada tanto
+	NewCheckDays   int           // días entre revisiones de modelos nuevos
 	MaxRequests    int           // tope de peticiones por ejecución (0 = sin límite)
 	MaxPages       int           // páginas de listado por ejecución (0 = todas)
 	MaxSpecs       int           // fichas por ejecución (0 = todas)
@@ -30,7 +31,7 @@ type Options struct {
 	CooldownMax    time.Duration // tope de la espera
 	MaxConsecFails int           // fallos seguidos antes de pausar
 	Batch          int           // tamaño de lote de la cola de fichas
-	Pub *events.Publisher // opcional; nil = sin Kafka
+	Pub            *events.Publisher // opcional; nil = sin Kafka
 }
 
 type Crawler struct {
@@ -60,7 +61,20 @@ func NewCrawler(c *gsmarena.Client, st *store.Store, log *slog.Logger, opt Optio
 	if opt.ListingRefresh <= 0 {
 		opt.ListingRefresh = 30 * 24 * time.Hour
 	}
+	if opt.NewCheckDays <= 0 {
+		opt.NewCheckDays = 7
+	}
 	return &Crawler{c: c, st: st, log: log, opt: opt}
+}
+
+// daysSince calcula cuántos días han pasado desde la fecha "YYYY-MM-DD".
+// Si la fecha es inválida o vacía, devuelve un valor muy alto (nunca se revisó).
+func daysSince(day string, now time.Time) int {
+	t, err := time.Parse("2006-01-02", day)
+	if err != nil {
+		return 1 << 30 // nunca se revisó
+	}
+	return int(now.Sub(t).Hours() / 24)
 }
 
 // save persiste el estado aunque ctx ya esté cancelado (apagado del servicio).
@@ -95,6 +109,8 @@ func (r *Crawler) Run(ctx context.Context, now time.Time) {
 		if prev != nil && prev.ListingDone {
 			state.ListingDone = true
 			state.ListingDoneAt = prev.ListingDoneAt
+			state.NewCheckDay = prev.NewCheckDay
+			state.SeenCounts = prev.SeenCounts
 		}
 		r.log.Info("nuevo ciclo", "dia", today, "listado_reutilizado", state.ListingDone)
 	case state.Status == "done":
@@ -142,8 +158,8 @@ func (r *Crawler) Run(ctx context.Context, now time.Time) {
 		runErr = nil
 	}
 
-	// 1b) Revisión diaria de modelos nuevos (comparar totales por marca)
-	if runErr == nil && listingWasDone && state.NewCheckDay != today {
+	// 1b) Revisión semanal de modelos nuevos (en vez de diaria)
+	if runErr == nil && listingWasDone && daysSince(state.NewCheckDay, now) >= r.opt.NewCheckDays {
 		runErr = r.syncNewModels(ctx, state, budgetOK)
 		if runErr == nil {
 			state.NewCheckDay = today
@@ -216,7 +232,7 @@ func (r *Crawler) crawlListing(ctx context.Context, state *store.CrawlState, bud
 			if err != nil {
 				return err
 			}
-			r.publishCreated(ctx, b, created) 
+			r.publishCreated(ctx, b, created)
 
 			state.Stats.Devices += len(models)
 			state.BrandSourceID, state.NextPath = b.FindID, next
@@ -295,6 +311,7 @@ func (r *Crawler) crawlSpecs(ctx context.Context, state *store.CrawlState, budge
 		}
 	}
 }
+
 // syncNewModels compara el total de cada marca en makers.php3 con lo guardado
 // y solo recorre las marcas donde el sitio tiene más modelos.
 func (r *Crawler) syncNewModels(ctx context.Context, state *store.CrawlState, budgetOK func() bool) error {
@@ -310,10 +327,15 @@ func (r *Crawler) syncNewModels(ctx context.Context, state *store.CrawlState, bu
 		return err
 	}
 
+	if state.SeenCounts == nil {
+		state.SeenCounts = map[string]int{}
+	}
+
 	for _, b := range brands {
 		have := counts[b.FindID]
-		if b.DevicesCount <= int(have) {
-			continue // sin cambios (o el sitio tiene menos): no se pide nada
+		// Si ya tenemos todos o ya los vimos en una revisión anterior, saltamos.
+		if b.DevicesCount <= int(have) || state.SeenCounts[b.FindID] == b.DevicesCount {
+			continue
 		}
 		r.log.Info("marca con modelos nuevos", "marca", b.Name, "sitio", b.DevicesCount, "guardados", have)
 
@@ -356,9 +378,14 @@ func (r *Crawler) syncNewModels(ctx context.Context, state *store.CrawlState, bu
 			have = now
 			path = next
 		}
+
+		// Marca terminada sin error: recordamos el total visto
+		state.SeenCounts[b.FindID] = b.DevicesCount
+		r.save(state)
 	}
 	return nil
 }
+
 func (r *Crawler) cooldown(state *store.CrawlState, err error) time.Duration {
 	d := r.opt.CooldownBase << uint(min(state.BlockCount-1, 5))
 	d = min(d, r.opt.CooldownMax)
@@ -379,6 +406,8 @@ func (r *Crawler) finish(state *store.CrawlState, runErr error) {
 
 	case errors.Is(runErr, errBudget), errors.Is(runErr, errPageLimit), errors.Is(runErr, errSpecsLimit):
 		// Tope alcanzado: no es un error, se continúa en la próxima ejecución.
+		// Una ventana sana resetea el castigo.
+		state.BlockCount = 0
 		state.Status = "paused"
 		state.LastError = runErr.Error()
 		r.log.Info("ejecución detenida, se continúa en la próxima",
@@ -399,7 +428,7 @@ func (r *Crawler) finish(state *store.CrawlState, runErr error) {
 		r.log.Warn("crawl pausado", "err", runErr, "reintento_en", cd.String(), "hasta", state.BlockedUntil)
 	}
 	r.save(state)
-} 
+}
 
 func (r *Crawler) publishCreated(ctx context.Context, b gsmarena.Brand, created []gsmarena.Model) {
 	for _, m := range created {

@@ -11,7 +11,10 @@ export enum SpareAssignmentStatus {
     CANCELLATION_REQUESTED = 'cancellation_requested',
     RETURNED = 'returned',
 }
-
+export const SPARE_ORIGIN = {
+    LEGACY: 'legacy',
+    INVENTORY_CORE: 'inventory-core',
+} as const;
 @Entity('spare_assignments')
 @Index(['order_id'])
 @Index(['status'])
@@ -66,4 +69,9 @@ export class SpareAssignment {
 
     @Column({ type: 'timestamp' })
     updated_at: Date;
+
+    // Sistema que originó la asignación. Los eventos legacy no traen origin = 'legacy'.
+    // Con 'inventory-core', la cancelación y los retornos siguen el flujo del sistema nuevo.
+    @Column({ type: 'varchar', length: 30, default: SPARE_ORIGIN.LEGACY })
+    origin: string;
 }

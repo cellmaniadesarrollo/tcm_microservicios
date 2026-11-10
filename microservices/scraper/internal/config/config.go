@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
 
@@ -25,9 +26,10 @@ type Config struct {
 	MaxSpecs           int           // fichas por ejecución (0 = todas)
 	RefreshDays        int           // días antes de volver a pedir una ficha
 	ListingRefreshDays int           // días antes de volver a recorrer el listado
+	NewCheckDays       int           // días para revisar dispositivos nuevos
 	CooldownBase       time.Duration // espera tras el primer bloqueo
 	CooldownMax        time.Duration // tope de la espera
-	KafkaBrokers string // KAFKA_BOOTSTRAP_SERVERS (varios separados por coma)
+	KafkaBrokers       string        // KAFKA_BOOTSTRAP_SERVERS (varios separados por coma)
 }
 
 func Load() Config {
@@ -41,21 +43,22 @@ func Load() Config {
 		RabbitQueue:    get("RABBIT_QUEUE", "scraper_models_queue_sync"),
 		InternalSecret: get("INTERNAL_SECRET", ""),
 
-		ScheduleTZ: get("SCHEDULE_TZ", "America/Guayaquil"),
+		ScheduleTZ:   get("SCHEDULE_TZ", "America/Guayaquil"),
 		KafkaBrokers: get("KAFKA_BOOTSTRAP_SERVERS", ""),
 	}
 
 	if cfg.Env == "production" {
-		// Producción: masivo pero con ritmo suave para que no te baneen.
+		// Producción: ritmo suave + valores ajustables por env (sin redeploy)
 		cfg.RunOnStart = false
-		cfg.ScrapeDelay = 8 * time.Second
-		cfg.MaxRequests = 2000
-		cfg.MaxPages = 0 // todas las páginas
+		cfg.ScrapeDelay = getDuration("SCRAPE_DELAY", 20*time.Second) // 20–40 s con jitter
+		cfg.MaxRequests = getInt("MAX_REQUESTS", 25)                   // sube de a poco
+		cfg.MaxPages = 0                                               // todas las páginas
 		cfg.MaxSpecs = 1500
-		cfg.RefreshDays = 30
-		cfg.ListingRefreshDays = 30
-		cfg.CooldownBase = 3 * time.Hour
-		cfg.CooldownMax = 12 * time.Hour
+		cfg.RefreshDays = 3650        // equivale a no refrescar, hasta revisar DevicesNeedingSpecs
+		cfg.ListingRefreshDays = 180
+		cfg.NewCheckDays = 7
+		cfg.CooldownBase = 60 * time.Hour // el ban real dura ~60h
+		cfg.CooldownMax = 96 * time.Hour
 	} else {
 		cfg.RunOnStart = true
 		cfg.ScrapeDelay = 4 * time.Second
@@ -70,6 +73,7 @@ func Load() Config {
 		// cfg.MaxSpecs = 5
 		cfg.RefreshDays = 30
 		cfg.ListingRefreshDays = 30
+		cfg.NewCheckDays = 7
 		cfg.CooldownBase = 10 * time.Minute
 		cfg.CooldownMax = time.Hour
 	}
@@ -81,6 +85,24 @@ func Load() Config {
 func get(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func getInt(key string, fallback int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func getDuration(key string, fallback time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
 	}
 	return fallback
 }
