@@ -36,6 +36,8 @@ type CrawlState struct {
 
 	Stats     CrawlStats `bson:"stats"`
 	LastError string     `bson:"last_error"`
+
+	SeenCounts map[string]int `bson:"seen_counts"` // último total visto en el sitio por marca
 }
 
 func (s *Store) LoadState(ctx context.Context, id string) (*CrawlState, error) {

@@ -1,10 +1,9 @@
-// src/kafka/kafka.producer.ts
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Kafka, Producer, logLevel } from 'kafkajs';
 import { v4 as uuidv4 } from 'uuid';
 import { KafkaEvent } from './interfaces/kafka-event.interface';
 
-const SERVICE_NAME = 'ms-rbfull-infra';
+const SERVICE_NAME = 'ms-inventory-core';
 
 @Injectable()
 export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
@@ -15,12 +14,7 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
         this.kafka = new Kafka({
             clientId: `${SERVICE_NAME}-producer`,
             brokers: (process.env.KAFKA_BOOTSTRAP_SERVERS || 'kafka:9092').split(','),
-            retry: {
-                initialRetryTime: 100,
-                retries: 12,
-                factor: 1.5,
-                maxRetryTime: 30000,
-            },
+            retry: { initialRetryTime: 100, retries: 12, factor: 1.5, maxRetryTime: 30000 },
             connectionTimeout: 10000,
             requestTimeout: 25000,
             logLevel: logLevel.ERROR,
@@ -29,7 +23,6 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
         this.producer = this.kafka.producer({
             allowAutoTopicCreation: true,
             idempotent: true,
-            transactionalId: `${SERVICE_NAME}-producer-tx`,
         });
     }
 
@@ -43,24 +36,16 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
     }
 
     async onModuleDestroy() {
-        try {
-            await this.producer.disconnect();
-        } catch (e) { }
+        try { await this.producer.disconnect(); } catch (e) { }
     }
 
-    async emit<T>(
-        topic: string,
-        eventType: string,
-        data: T,
-        key?: string,
-    ): Promise<boolean> {
-        let attempts = 0;
+    /** NUNCA lanza: devuelve false si no pudo publicar. */
+    async emit<T>(topic: string, eventType: string, data: T, key?: string, eventId?: string): Promise<boolean> {
         const maxAttempts = 5;
-
-        while (attempts < maxAttempts) {
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 const event: KafkaEvent<T> = {
-                    eventId: uuidv4(),
+                    eventId: eventId ?? uuidv4(),
                     eventType,
                     timestamp: new Date().toISOString(),
                     source: SERVICE_NAME,
@@ -70,29 +55,21 @@ export class KafkaProducerService implements OnModuleInit, OnModuleDestroy {
 
                 await this.producer.send({
                     topic,
-                    messages: [
-                        {
-                            key: key || (data as any)?.id?.toString() || uuidv4(),
-                            value: JSON.stringify(event),
-                        },
-                    ],
+                    messages: [{ key: key || (data as any)?.id?.toString() || uuidv4(), value: JSON.stringify(event) }],
                 });
 
                 console.log(`📤 [Kafka] Evento emitido → ${topic} | ${eventType}`);
                 return true;
-
             } catch (error: any) {
-                attempts++;
                 const isMetadataError =
                     error.message?.includes('does not host this topic-partition') ||
                     error.message?.includes('is not the leader');
 
-                if (isMetadataError && attempts < maxAttempts) {
-                    console.warn(`⚠️ Error de metadata en Kafka (intento ${attempts}/${maxAttempts}). Reintentando...`);
-                    await new Promise(resolve => setTimeout(resolve, 800 * attempts));
+                if (isMetadataError && attempt < maxAttempts) {
+                    console.warn(`⚠️ Error de metadata en Kafka (intento ${attempt}/${maxAttempts}). Reintentando...`);
+                    await new Promise((r) => setTimeout(r, 800 * attempt));
                     continue;
                 }
-
                 console.error(`❌ [Kafka] Error al emitir ${eventType} a ${topic}:`, error.message);
                 return false;
             }
