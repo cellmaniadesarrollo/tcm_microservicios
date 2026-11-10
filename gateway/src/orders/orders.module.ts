@@ -13,6 +13,8 @@ import { InvoicesGatewayService } from './invoices/invoices-gateway.service';
 import { OrderDiscountsController } from './order-discounts/order-discounts.controller';
 import { OrderDiscountsService } from './order-discounts/order-discounts.service';
 import { PrintEndpointsController } from './print-endpoints/print-endpoints.controller';
+import { PartRequestReportsController } from './part-request-reports/part-request-reports.controller';
+import { PartRequestReportsGatewayService } from './part-request-reports/part-request-reports-gateway.service';
 
 @Module({
   imports: [
@@ -29,7 +31,9 @@ import { PrintEndpointsController } from './print-endpoints/print-endpoints.cont
     ]),
     AuthModule
   ],
-  controllers: [OrdersController, PartRequestsController, InvoicesController, OrderDiscountsController, PrintEndpointsController],
-  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient, InvoicesGatewayService, OrderDiscountsService]
+  controllers: [OrdersController, PartRequestsController,
+    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController],
+  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient,
+    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService]
 })
 export class OrdersModule { }
