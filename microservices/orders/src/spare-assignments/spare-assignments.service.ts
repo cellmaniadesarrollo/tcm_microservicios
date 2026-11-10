@@ -1,8 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { randomUUID } from 'crypto'; // ← NUEVO
-import { SpareAssignment, SpareAssignmentStatus } from './entities/spare-assignment.entity';
+import { SPARE_ORIGIN, SpareAssignment, SpareAssignmentStatus } from './entities/spare-assignment.entity';
 import { CreateCancellationRequestDto } from './dto/create-cancellation-request.dto';
 import { SpareCancellationRequest, SpareCancellationStatus } from './entities/spare-cancellation-request.entity';
 import { RpcException } from '@nestjs/microservices';
@@ -86,6 +86,10 @@ export class SpareAssignmentsService {
     }
 
     async assignSpare(data: any): Promise<void> {
+        const origin = data.origin === SPARE_ORIGIN.INVENTORY_CORE
+            ? SPARE_ORIGIN.INVENTORY_CORE
+            : SPARE_ORIGIN.LEGACY;
+
         const assignment = this.repo.create({
             id: String(data.id),
             movement_id: String(data.movementId),
@@ -95,12 +99,28 @@ export class SpareAssignmentsService {
             product_name: data.spare.productName,
             unit_price: data.spare.unitPrice,
             batch_number: data.spare.batchNumber,
-            is_billable_in_repair_orders: data.spare.isBillableInRepairOrders ?? false, // 🆕
+            is_billable_in_repair_orders: data.spare.isBillableInRepairOrders ?? false,
+            origin,
             status: SpareAssignmentStatus.ACTIVE,
             created_at: data.createdAt ?? data.assignedAt,
             updated_at: data.updatedAt ?? data.assignedAt,
         });
 
+        if (origin === SPARE_ORIGIN.INVENTORY_CORE) {
+            // Insert-or-ignore: Kafka y el outbox entregan "al menos una vez". Si llega un
+            // assigned repetido (p. ej. después de un returned), NO debe revivir la asignación.
+            await this.repo
+                .createQueryBuilder()
+                .insert()
+                .into(SpareAssignment)
+                .values(assignment)
+                .orIgnore()
+                .execute();
+            console.log(`✅ Repuesto asignado (inventory-core) → order: ${data.orderId} | sku: ${data.spare.sku} | id: ${data.id}`);
+            return;
+        }
+
+        // Legacy: comportamiento original, sin cambios
         await this.repo.save(assignment);
         console.log(`✅ Repuesto asignado → order: ${data.orderId} | sku: ${data.spare.sku}`);
     }
@@ -120,6 +140,12 @@ export class SpareAssignmentsService {
     }
 
     async returnSpare(data: any): Promise<void> {
+        // Sistema nuevo: retorno por cantidad. El legacy sigue por la ruta original, sin cambios.
+        if (data?.origin === SPARE_ORIGIN.INVENTORY_CORE) {
+            await this.returnSpareInventoryCore(data);
+            return;
+        }
+
         await this.repo.update(
             { movement_id: String(data.movementId) },
             {
@@ -304,5 +330,58 @@ export class SpareAssignmentsService {
         }
 
         return qb.orderBy('scr.updated_at', 'ASC').getRawMany();
+    }
+
+    /**
+ * Retorno del sistema nuevo. `remainingQuantity` es ABSOLUTA, no un delta:
+ * reentregar el mismo evento no cambia el resultado.
+ *  - Parcial: baja `quantity` a lo que falta; el status NO cambia (una asignación
+ *    en cancellation_requested sigue así).
+ *  - Total: status = returned. `quantity` se conserva (como en el legacy).
+ *  - Ya returned, o remaining >= quantity actual (evento viejo repetido): se ignora.
+ * Si la asignación aún no existe, lanza para que el consumer reintente (assigned y
+ * returned van en topics distintos y pueden cruzarse).
+ */
+    private async returnSpareInventoryCore(data: any): Promise<void> {
+        const movementId = String(data.movementId);
+        const remaining = Number(data.remainingQuantity);
+        if (!Number.isInteger(remaining) || remaining < 0) {
+            throw new Error(`remainingQuantity inválido para ${movementId}: ${data.remainingQuantity}`);
+        }
+
+        const current = await this.repo.findOne({
+            where: { movement_id: movementId, origin: SPARE_ORIGIN.INVENTORY_CORE },
+        });
+        if (!current) {
+            throw new Error(`Asignación ${movementId} aún no existe en órdenes; se reintentará`);
+        }
+        if (current.status === SpareAssignmentStatus.RETURNED) {
+            console.log(`⏭️ Retorno ignorado (ya returned) → movementId: ${movementId}`);
+            return;
+        }
+
+        const isTotal = remaining === 0;
+        if (!isTotal && remaining >= current.quantity) {
+            console.log(`⏭️ Retorno ignorado (evento repetido o viejo) → movementId: ${movementId} | actual: ${current.quantity} | remaining: ${remaining}`);
+            return;
+        }
+
+        const patch: Partial<SpareAssignment> = {
+            updated_at: data.updatedAt ?? new Date(),
+        };
+        if (isTotal) {
+            patch.status = SpareAssignmentStatus.RETURNED;
+            patch.returned_at = data.returnedAt ?? new Date();
+        } else {
+            patch.quantity = remaining;
+        }
+
+        // El Not(RETURNED) cubre la carrera entre el findOne y el update
+        await this.repo.update(
+            { movement_id: movementId, origin: SPARE_ORIGIN.INVENTORY_CORE, status: Not(SpareAssignmentStatus.RETURNED) },
+            patch,
+        );
+
+        console.log(`↩️ Repuesto devuelto (inventory-core) → movementId: ${movementId} | ${isTotal ? 'TOTAL' : `parcial, quedan ${remaining}`}`);
     }
 }

@@ -26,6 +26,9 @@ import {
 import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { StockVoucherAttachment } from './entities/stock-voucher-attachment.entity';
 import { StockUnit } from '../stock/entities/stock-unit.entity';
+import { OutboxService } from '../outbox/services/outbox.service';
+import { INVENTORY_CORE_ORIGIN, SPARE_EVENTS, SPARE_TOPICS } from '../outbox/constants/outbox-topics';
+
 
 // Filtros fijos del selector de lotes. Para sumar otros, agrégalos aquí.
 
@@ -98,7 +101,8 @@ export class StockVouchersService {
         private readonly sequences: SequencesService,
         private readonly audit: AuditLogService,
         private readonly mainBranch: MainBranchService,
-        private readonly s3: AwsS3Service
+        private readonly s3: AwsS3Service,
+        private readonly outbox: OutboxService,
     ) { }
 
     // ═════════════════════════════ Crear ═════════════════════════════
@@ -121,8 +125,11 @@ export class StockVouchersService {
         const photos = await this.uploadPhotos(companyId, voucherId, files, input.lines.length);
         const cleanup = () => Promise.all(photos.map((p) => this.s3.deleteObject(p.key))); // deleteObject no lanza
 
+        let outboxIds: string[] = [];   // eventos encolados por esta solicitud (solo si el vale se creó de verdad)
+        let result;                     // tipo inferido de la asignación; se usa después del try
+
         try {
-            const result = await this.dataSource.transaction(async (em) => {
+            result = await this.dataSource.transaction(async (em) => {
                 await em.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`stock_voucher_req:${companyId}:${clientRequestId}`]);
 
                 const existing = await em.findOne(StockVoucher, {
@@ -139,9 +146,9 @@ export class StockVouchersService {
                 const ctx: Ctx = { companyId, userId };
 
                 if (reason.direction === VoucherDirection.OUT) {
-                    await this.createOut(em, ctx, input, reason, voucherId, hash);
+                    outboxIds = await this.createOut(em, ctx, input, reason, voucherId, hash);
                 } else {
-                    await this.createIn(em, ctx, input, reason, voucherId, hash);
+                    outboxIds = await this.createIn(em, ctx, input, reason, voucherId, hash);
                 }
 
                 if (photos.length) {
@@ -182,7 +189,6 @@ export class StockVouchersService {
             });
 
             if (result.replayed) await cleanup(); // el vale ya existía; las fotos nuevas sobran
-            return result;
         } catch (error: any) {
             await cleanup(); // la transacción revirtió: sin huérfanos en S3
 
@@ -199,13 +205,18 @@ export class StockVouchersService {
             }
             throw error;
         }
+
+        // Efecto externo tras el commit y FUERA del try que limpia S3.
+        // dispatchNow nunca lanza; si falla, el poller reintenta.
+        void this.outbox.dispatchNow(outboxIds);
+        return result;
     }
 
     // ───────────────────────── Salida ─────────────────────────
 
     private async createOut(
         em: EntityManager, ctx: Ctx, input: VoucherInput, reason: StockMovementReason, voucherId: string, hash: string,
-    ) {
+    ): Promise<string[]> {
         const { companyId, userId } = ctx;
 
         if (input.originVoucherId) throw bad('Una salida no referencia un vale de origen');
@@ -271,34 +282,40 @@ export class StockVouchersService {
             createdById: userId,
         });
 
-        await em.insert(
-            StockVoucherLine,
-            input.lines.map((l, i) => {
-                const m = movedByRef.get(lineIds[i])!;
-                return {
-                    id: lineIds[i],
-                    voucherId,
-                    lineNo: i + 1,
-                    productId: m.productId,
-                    lotId: m.lotId,
-                    quantity: m.quantity,
-                    unitCost: m.unitCost,
-                    salePrice: m.salePrice,
-                    billableInSales: m.billableInSales,
-                    billableInRepairOrders: m.billableInRepairOrders,
-                    originLineId: null,
-                };
-            }),
-        );
+        const lineRows = input.lines.map((l, i) => {
+            const m = movedByRef.get(lineIds[i])!;
+            return {
+                id: lineIds[i],
+                voucherId,
+                lineNo: i + 1,
+                productId: m.productId,
+                lotId: m.lotId,
+                quantity: m.quantity,
+                unitCost: m.unitCost,
+                salePrice: m.salePrice,
+                billableInSales: m.billableInSales,
+                billableInRepairOrders: m.billableInRepairOrders,
+                originLineId: null,
+            };
+        });
+        await em.insert(StockVoucherLine, lineRows);
 
         await this.insertLineUnits(em, input.lines.map((l, i) => ({ lineId: lineIds[i], unitIds: l.unitIds })));
+
+        // Salida vinculada a una orden: se encola un SPARE_ASSIGNED por línea (misma transacción)
+        if (!order) return [];
+        return this.enqueueSpareAssigned(em, {
+            companyId, voucherId, voucherCode: code,
+            orderId: order.id,
+            lines: lineRows,
+        });
     }
 
     // ───────────────────────── Retorno ─────────────────────────
 
     private async createIn(
         em: EntityManager, ctx: Ctx, input: VoucherInput, reason: StockMovementReason, voucherId: string, hash: string,
-    ) {
+    ): Promise<string[]> {
         const { companyId, userId } = ctx;
 
         if (!input.originVoucherId) throw bad('Un retorno debe indicar el vale de salida original');
@@ -436,7 +453,27 @@ export class StockVouchersService {
         );
 
         await this.insertLineUnits(em, input.lines.map((l, i) => ({ lineId: lineIds[i], unitIds: l.unitIds })));
+
+        // Retorno de una salida con orden: un SPARE_RETURNED por línea de origen (misma transacción)
+        if (origin.orderId == null) return [];
+        return this.enqueueSpareReturned(em, {
+            companyId,
+            returnVoucherId: voucherId,
+            returnVoucherCode: code,
+            orderId: origin.orderId,
+            items: input.lines.map((l) => {
+                const ol = originById.get(l.originLineId!)!;
+                const alreadyReturned = progress.qty.get(ol.id) ?? 0; // calculado con las líneas de origen ya bloqueadas
+                return {
+                    originLineId: ol.id,
+                    returnedQuantity: l.quantity,
+                    remainingQuantity: ol.quantity - alreadyReturned - l.quantity,
+                };
+            }),
+        });
     }
+
+    // ═════════════════════════════ Consultas ═════════════════════════════
 
     // ═════════════════════════════ Consultas ═════════════════════════════
 
@@ -905,6 +942,72 @@ export class StockVouchersService {
         for (const part of chunk(rows)) await em.insert(StockVoucherLineUnit, part);
     }
 
+    /** Un SPARE_ASSIGNED por línea de una salida con orden. Se encola con el `em` de la transacción. */
+    private async enqueueSpareAssigned(
+        em: EntityManager,
+        p: {
+            companyId: string;
+            voucherId: string;
+            voucherCode: number;
+            orderId: number;
+            lines: Array<{
+                id: string; lineNo: number; productId: string; lotId: string;
+                quantity: number; salePrice: string; billableInRepairOrders: boolean;
+            }>;
+        },
+    ): Promise<string[]> {
+        const productIds = [...new Set(p.lines.map((l) => l.productId))];
+        const lotIds = [...new Set(p.lines.map((l) => l.lotId))];
+
+        const [products, lots, voucher] = await Promise.all([
+            em.find(Product, {
+                where: { id: In(productIds), companyId: p.companyId },
+                relations: { productName: true },
+            }),
+            em.find(Lot, { where: { id: In(lotIds), companyId: p.companyId }, select: { id: true, code: true } }),
+            em.findOne(StockVoucher, { where: { id: p.voucherId }, select: { id: true, createdAt: true } }),
+        ]);
+        const productById = new Map(products.map((x) => [x.id, x] as [string, Product]));
+        const lotById = new Map(lots.map((x) => [x.id, x] as [string, Lot]));
+        const createdAt = (voucher?.createdAt ?? new Date()).toISOString();
+
+        const events = p.lines.map((l) => {
+            const product = productById.get(l.productId);
+            const lot = lotById.get(l.lotId);
+            if (!product || !lot) {
+                // dentro de la transacción: si falta algo, mejor revertir el vale que dejar a la orden sin su repuesto
+                throw new RpcException(new InternalServerErrorException('No se pudo armar el evento del repuesto'));
+            }
+            return {
+                companyId: p.companyId,
+                topic: SPARE_TOPICS.ASSIGNED,
+                eventType: SPARE_EVENTS.ASSIGNED,
+                key: l.id,
+                payload: {
+                    id: l.id,
+                    movementId: l.id,
+                    orderId: p.orderId,
+                    quantity: l.quantity,
+                    spare: {
+                        sku: product.sku,
+                        productName: product.productName?.name ?? product.sku,
+                        unitPrice: Number(l.salePrice),
+                        batchNumber: lot.code,
+                        isBillableInRepairOrders: l.billableInRepairOrders,
+                    },
+                    createdAt,
+                    updatedAt: createdAt,
+                    origin: INVENTORY_CORE_ORIGIN,
+                    voucherId: p.voucherId,
+                    voucherCode: p.voucherCode,
+                    lineNo: l.lineNo,
+                },
+            };
+        });
+
+        return this.outbox.enqueue(em, events);
+    }
+
     private async loadOrder(em: EntityManager, companyId: string, orderId: number): Promise<OrderReplica> {
         const order = await em.findOne(OrderReplica, { where: { id: orderId, company_id: companyId } });
         if (!order) throw bad(`La orden ${orderId} no existe en esta empresa (o aún no se ha sincronizado)`);
@@ -1084,5 +1187,46 @@ export class StockVouchersService {
             note: note || undefined,
             lines,
         };
+    }
+
+
+    /** Un SPARE_RETURNED por línea de origen retornada. `remainingQuantity` es absoluta (idempotente). */
+    private async enqueueSpareReturned(
+        em: EntityManager,
+        p: {
+            companyId: string;
+            returnVoucherId: string;
+            returnVoucherCode: number;
+            orderId: number;
+            items: Array<{ originLineId: string; returnedQuantity: number; remainingQuantity: number }>;
+        },
+    ): Promise<string[]> {
+        const voucher = await em.findOne(StockVoucher, {
+            where: { id: p.returnVoucherId },
+            select: { id: true, createdAt: true },
+        });
+        const returnedAt = (voucher?.createdAt ?? new Date()).toISOString();
+
+        const events = p.items.map((it) => ({
+            companyId: p.companyId,
+            topic: SPARE_TOPICS.RETURNED,
+            eventType: SPARE_EVENTS.RETURNED,
+            key: it.originLineId, // misma key que el assigned: el outbox garantiza que returned no lo adelanta
+            payload: {
+                id: it.originLineId,
+                movementId: it.originLineId,
+                orderId: p.orderId,
+                origin: INVENTORY_CORE_ORIGIN,
+                returnedQuantity: it.returnedQuantity,
+                remainingQuantity: it.remainingQuantity,
+                isTotal: it.remainingQuantity === 0,
+                returnedAt,
+                updatedAt: returnedAt,
+                returnVoucherId: p.returnVoucherId,
+                returnVoucherCode: p.returnVoucherCode,
+            },
+        }));
+
+        return this.outbox.enqueue(em, events);
     }
 }
