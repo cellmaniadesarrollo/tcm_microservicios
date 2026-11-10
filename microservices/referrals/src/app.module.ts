@@ -16,6 +16,7 @@ import { ReferralRewardsModule } from './referral-rewards/referral-rewards.modul
 import { ReferralSettingsModule } from './referral-settings/referral-settings.module';
 import { ReferralAuditModule } from './referral-audit/referral-audit.module';
 import { AcquisitionModule } from './acquisition/acquisition.module';
+import { ReferralWelcomeModule } from './referral-welcome/referral-welcome.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AcquisitionModule } from './acquisition/acquisition.module';
     ReferralSettingsModule,
     ReferralAuditModule,
     AcquisitionModule,
+    ReferralWelcomeModule,
   ],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],
