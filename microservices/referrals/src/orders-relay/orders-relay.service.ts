@@ -1,6 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { KafkaProducerService } from '../kafka/kafka.producer';
-import { ReferralProfilesService } from '../referral-profiles/referral-profiles.service';
+import { ReferralWelcomeService } from '../referral-welcome/referral-welcome.service';
 
 @Injectable()
 export class OrdersRelayService {
@@ -8,10 +7,7 @@ export class OrdersRelayService {
   private static readonly STATUS_ENTREGADA_ID = 8;
   private readonly processedTransitions = new Set<number>();
 
-  constructor(
-    private readonly profilesService: ReferralProfilesService,
-    private readonly producer: KafkaProducerService,
-  ) {}
+  constructor(private readonly welcome: ReferralWelcomeService) {}
 
   async handleOrderUpdated(data: any): Promise<void> {
     try {
@@ -50,16 +46,19 @@ export class OrdersRelayService {
 
       console.log(`🎯 Orden ${orderId} entregada (cliente ${customerId}, empresa ${companyId})`);
 
-      // 5. Perfil de referido del cliente (crea si no existe)
-      const profile = await this.profilesService.ensureForCustomer(
-        String(customerId),
-        companyId,
-        { type: 'ORDER', id: String(orderId) }, // 👈 nuevo
-      );
-      console.log(`👤 Perfil ${profile.id} · código ${profile.code} (orden ${orderId})`);
+      // 5. Perfil de referido + WhatsApp de bienvenida
+      // ⚠️ Ajusta de dónde sale el celular (ver nota abajo)
+      const customer = data.payload?.customer;
+      const phone = customer?.phone ?? customer?.cellphone ?? data.payload?.customer_phone;
 
-      // 6. Envío al dispatcher de notificaciones
-      // TODO: pendiente tópico y DTO
+      const result = await this.welcome.sendWelcome({
+        companyId,
+        customerId: String(customerId),
+        phone,
+        firstName: customer?.first_name ?? customer?.firstName,
+        source: { type: 'ORDER', id: String(orderId) },
+      });
+      console.log(`📨 Bienvenida orden ${orderId}:`, result);
     } catch (err: any) {
       console.error('❌ Error en handleOrderUpdated:', err?.message ?? err);
     }

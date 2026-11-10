@@ -85,4 +85,8 @@ export class ReferralsService {
   saveAcquisition(data: Record<string, unknown>) {
     return this.send('acquisition.save', data);
   }
+
+  sendWelcome(data: Record<string, unknown>) {
+    return this.send('referral.send_welcome', data);
+  }
 }
