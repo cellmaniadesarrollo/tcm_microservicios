@@ -13,11 +13,11 @@ import {
 import { Public } from '../common/auth/decorators/public.decorator';
 import { ReferralsService } from './referrals.service';
 import { SaveAcquisitionDto } from './dto/save-acquisition.dto';
-import { JwtAuthGuard } from '../common/auth/guards/jwt-auth.guard';
+import { AnyJwtAuthGuard } from '../common/auth/guards/any-jwt-auth.guard';
 import { SendWelcomeDto } from './dto/send-welcome.dto';
 
 @Controller('referrals')
-@UseGuards(JwtAuthGuard)
+@UseGuards(AnyJwtAuthGuard)
 export class ReferralsController {
   constructor(private readonly service: ReferralsService) {}
 

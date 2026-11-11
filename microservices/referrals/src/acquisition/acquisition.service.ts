@@ -52,7 +52,7 @@ export class AcquisitionService {
       this.campaigns.find({ where }),
       this.publications.find({ where, order: { title: 'ASC' } }),
     ]);
-    const channelById = new Map(channels.map((c) => [c.id, c]));
+    const channelById = new Map<string, AcqChannel>(channels.map((c) => [c.id, c]));
 
     return platforms.map((p) => {
       const byChannel = new Map<string, { id: string; title: string }[]>();
@@ -104,6 +104,7 @@ export class AcquisitionService {
   /** Solo clientes que ya tienen código de referido */
   async searchReferrers(companyId: string, q: string) {
     const tokens = norm(q ?? '').split(/\s+/).filter(Boolean);
+    console.log('referral.search', { companyId, q, tokens });
     if (!tokens.length || tokens.join('').length < 2) return [];
 
     const qb = this.cache

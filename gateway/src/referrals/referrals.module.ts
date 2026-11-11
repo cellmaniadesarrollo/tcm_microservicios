@@ -1,13 +1,16 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { ReferralsController } from './referrals.controller';
 import { ReferralsService } from './referrals.service';
 import { AuthModule } from '../common/auth/auth.module';
+import { AnyJwtAuthGuard } from '../common/auth/guards/any-jwt-auth.guard';
 import { REFERRALS_TCP } from './referrals.constants';
 
 @Module({
   imports: [
     AuthModule,
+    ConfigModule,
     ClientsModule.register([
       {
         name: REFERRALS_TCP,
@@ -20,6 +23,6 @@ import { REFERRALS_TCP } from './referrals.constants';
     ]),
   ],
   controllers: [ReferralsController],
-  providers: [ReferralsService],
+  providers: [ReferralsService, AnyJwtAuthGuard],
 })
 export class ReferralsModule {}
