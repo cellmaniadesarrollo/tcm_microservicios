@@ -95,6 +95,7 @@ export class AcquisitionService {
       customerId: profile.customerId,
       firstName: c?.firstName ?? '',
       lastName: c?.lastName ?? '',
+      idNumber: c?.idNumber ?? null,
     };
   }
 
@@ -110,7 +111,7 @@ export class AcquisitionService {
       .orderBy('c.first_name', 'ASC')
       .limit(8)
       .getMany();
-    return rows.map((c) => ({ customerId: c.customerId, firstName: c.firstName, lastName: c.lastName }));
+    return rows.map((c) => ({ customerId: c.customerId, firstName: c.firstName, lastName: c.lastName, idNumber: c.idNumber, }));
   }
 
   async save(i: SaveAcquisitionInput) {
@@ -162,7 +163,7 @@ export class AcquisitionService {
           registeredBy: i.userId,
         });
       } catch (e: any) {
-        if (e?.code === 'ER_DUP_ENTRY') throw new ConflictException('El cliente ya tiene origen registrado');
+        if (e?.code === '23505') throw new ConflictException('El cliente ya tiene origen registrado');
         throw e;
       }
 

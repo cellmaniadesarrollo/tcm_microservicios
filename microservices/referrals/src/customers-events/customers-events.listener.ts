@@ -2,10 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { KafkaConsumerService } from '../kafka/kafka.consumer';
 import { CustomersEventsService } from './customers-events.service';
 
-// Verifica estos nombres en clients/src/kafka o customers.service.ts
+// Deben coincidir con TOPICS de clients/src/broadcast/broadcast.service.ts
 const TOPICS = {
-  CUSTOMER_CREATED: 'ms.customer.created',
-  CUSTOMER_UPDATED: 'ms.customer.updated',
+  CUSTOMER_CREATED: 'ms.client.created',
+  CUSTOMER_UPDATED: 'ms.client.updated',
 } as const;
 
 @Injectable()
