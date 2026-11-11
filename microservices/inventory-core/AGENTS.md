@@ -95,6 +95,8 @@ Front ──HTTP──> gateway (Nest + Fastify) ──RabbitMQ──> ms invent
                                        réplicas: órdenes, usuarios, empresas, dispositivos
 ```
 
+- **Publicación:** inventory-core también **publica** a Kafka (eventos de repuestos
+  hacia el MS de órdenes) mediante outbox. Ver `outbox/AGENTS.md`.
 - **Gateway** (repo aparte): valida con class-validator (DTOs) y envía con
   `this.inventoryClient.send('<cmd>', payload)` (comando como **string**). El MS
   lo recibe como `@MessagePattern({ cmd: '<cmd>' })`.
@@ -141,9 +143,10 @@ src/
   devices-replica/             marcas, modelos, códigos técnicos      → devices-replica/AGENTS.md
   health/
   interceptors/                internal-auth.interceptor.ts
-  kafka/                       KafkaConsumerService, producer, orquestador de listeners
+  kafka/                       KafkaConsumerService, KafkaProducerService (propio, emit no lanza), orquestador de listeners
   labels/                      impresión de etiquetas de lote (Dymo/Zebra) → labels/AGENTS.md
   orders-relay/                réplica REDUCIDA de órdenes + buscador → orders-relay/AGENTS.md
+  outbox/                      eventos a Kafka con outbox transaccional → outbox/AGENTS.md
   product-catalogs/            tipos, nombres, colores, calidades, usos (seeds json)
   products/                    productos (SKU), modelos, imágenes, usos → products/AGENTS.md
   receipts/                    ingresos                                → receipts/AGENTS.md
@@ -156,6 +159,7 @@ src/
 
 **Qué leer antes de tocar cada área:** ver la sección 6 (checklist) y el
 AGENTS.md del módulo.
+
 ## 3. Infraestructura y arranque
 
 ### 3.1 `app.module.ts`
@@ -175,6 +179,8 @@ AGENTS.md del módulo.
   módulo con réplica expone un `*EventsListener.registerHandlers()` que debe
   llamarse desde `kafka/kafka-listeners.orchestrator.ts` **(verificar que
   `OrdersEventsListener` esté registrado ahí)**.
+  Publicación: `KafkaProducerService.emit(...)` devuelve `false` si falla (no lanza);
+  los eventos de negocio no se emiten directo: pasan por `OutboxService`.
 - **RabbitMQ = bulk, reconciliación inicial y manual.** Un `ClientProxy` por
   origen: `ORDERS_ASYNC` (queue `orders_queue_sync`), `USER_ASYNC` (queue
   `users_queue_sync`). Los comandos de sync llevan
@@ -276,6 +282,9 @@ Ver `catalogs/AGENTS.md`.
   después de la transacción y **fuera del `try` cuyo `catch` limpia S3**, capturando sus
   propios errores. Un fallo externo no deshace un documento ya guardado. Ejemplo:
   `ReceiptsService.printAfterCreate`.
+  Para eventos a Kafka el patrón es el **outbox**: `outbox.enqueue(em, …)` dentro de la
+  transacción y `void outbox.dispatchNow(ids)` tras el commit, fuera del `try` que limpia S3.
+  Los consumidores deben ser idempotentes (entrega al menos una vez).
 
 ## 5. Convenciones del gateway (repo aparte, sin AGENTS.md)
 
@@ -390,9 +399,9 @@ Los pendientes de cada módulo viven en su AGENTS.md. Numeración conservada.
     datos; barrer archivos huérfanos de S3 (`receipts/{companyId}/...` y
     `stock-vouchers/{companyId}/...` vs tablas).
 24. **Antes del primer despliegue a producción:** generar migraciones reales
-    (tablas de vales y adjuntos, `orders_replica` con sus columnas de tipo y
-    dispositivo, índices, `CHECK`, `ALTER TYPE` de enums); `synchronize` está
-    apagado en producción.
+    (tablas de vales y adjuntos, `outbox_events`, `orders_replica` con sus
+    columnas de tipo y dispositivo, índices, `CHECK`, `ALTER TYPE` de enums);
+    `synchronize` está apagado en producción.
 25. **Limpieza del gateway:** quitar `[DEBUG]` de `multipart-request.helper.ts`,
     eliminar la interfaz `ParsedFile` duplicada y migrar `receipts.controller.ts`
     a `parseJsonField`.
@@ -412,6 +421,8 @@ Los pendientes de cada módulo viven en su AGENTS.md. Numeración conservada.
 | 28 | `users-employees-events/` |
 | 29 | `orders-relay/` (búsqueda sin tildes) |
 | L1–L11 | `labels/` |
+| O1–O6 | `outbox/` (fase 3, bulk, retención, deuda legacy) |
+
 ## 8. Errores y lecciones transversales
 
 Los específicos de un módulo van en su AGENTS.md.
@@ -457,6 +468,9 @@ Los específicos de un módulo van en su AGENTS.md.
   sus errores (impresión: `printAfterCreate`).
 - Un campo nuevo en el JSON `data` de un multipart debe declararse en el DTO del gateway:
   `parseJsonField` usa `forbidNonWhitelisted` y respondería 400.
+- `KafkaProducerService.emit` no lanza (devuelve `false`): comprobar el booleano.
+- Un `assigned` reentregado con `save` en órdenes revive asignaciones devueltas:
+  usar insert-or-ignore para `origin = 'inventory-core'`.
 
 ## 9. Estado de implementación (resumen)
 
@@ -471,6 +485,8 @@ El detalle por componente está en el AGENTS.md de cada módulo, bajo "Estado".
 | Migraciones                                                                    | **No aplican por ahora** (pruebas con `synchronize`)   |
 | `labels` (MS + gateway): imprimir por lote y desde la lista de ingresos        | **Probado**                                            |
 | Etiquetas al registrar un ingreso (`labels` en `create_receipt`)               | **Probado**                                            |
+| `outbox` + `SPARE_ASSIGNED` / `SPARE_RETURNED` hacia órdenes (inventory-core + MS órdenes) | **Probado** (2026-11-10)           |
+| Cancelación por solicitud, bulk de inventory-core (`outbox/` O1, O2)           | **No construido**                                      |
 
 **Primera prueba recomendada:** ver `stock-vouchers/AGENTS.md`, sección
 "Estado".

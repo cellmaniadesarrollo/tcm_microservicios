@@ -19,6 +19,7 @@ import { SuppliersModule } from './suppliers/suppliers.module';
 import { CatalogsModule } from './catalogs/catalogs.module';
 import { StockVouchersModule } from './stock-vouchers/stock-vouchers.module';
 import { LabelsModule } from './labels/labels.module';
+import { OutboxModule } from './outbox/outbox.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { LabelsModule } from './labels/labels.module';
     StockVouchersModule,
     LabelsModule,
     SequencesModule,
+    OutboxModule,
   ],
 })
 export class AppModule { }

@@ -29,6 +29,8 @@ export interface SaveAcquisitionInput {
 const norm = (s: string) =>
   s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
 
+const escapeLike = (s: string) => s.replace(/[\\%_]/g, '\\$&');
+
 @Injectable()
 export class AcquisitionService {
   constructor(
@@ -95,22 +97,31 @@ export class AcquisitionService {
       customerId: profile.customerId,
       firstName: c?.firstName ?? '',
       lastName: c?.lastName ?? '',
+      idNumber: c?.idNumber ?? null,
     };
   }
 
   /** Solo clientes que ya tienen código de referido */
   async searchReferrers(companyId: string, q: string) {
-    const term = norm(q ?? '');
-    if (term.length < 2) return [];
-    const rows = await this.cache
+    const tokens = norm(q ?? '').split(/\s+/).filter(Boolean);
+    if (!tokens.length || tokens.join('').length < 2) return [];
+
+    const qb = this.cache
       .createQueryBuilder('c')
-      .innerJoin(ReferralProfile, 'p', 'p.customer_id = c.customer_id AND p.company_id = c.company_id')
-      .where('c.company_id = :companyId', { companyId })
-      .andWhere('c.search_text LIKE :q', { q: `%${term}%` })
-      .orderBy('c.first_name', 'ASC')
-      .limit(8)
-      .getMany();
-    return rows.map((c) => ({ customerId: c.customerId, firstName: c.firstName, lastName: c.lastName }));
+      .where('c.company_id = :companyId', { companyId });
+
+    tokens.forEach((t, i) => {
+      qb.andWhere(`c.search_text LIKE :t${i}`, { [`t${i}`]: `%${escapeLike(t)}%` });
+    });
+
+    const rows = await qb.orderBy('c.first_name', 'ASC').limit(8).getMany();
+
+    return rows.map((c) => ({
+      customerId: c.customerId,
+      firstName: c.firstName,
+      lastName: c.lastName,
+      idNumber: c.idNumber,
+    }));
   }
 
   async save(i: SaveAcquisitionInput) {

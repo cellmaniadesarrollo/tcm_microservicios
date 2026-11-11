@@ -15,6 +15,8 @@ import { OrderDiscountsService } from './order-discounts/order-discounts.service
 import { PrintEndpointsController } from './print-endpoints/print-endpoints.controller';
 import { PurchaseLeadsController } from './purchase-leads/purchase-leads.controller';
 import { PurchaseLeadsGatewayService } from './purchase-leads/purchase-leads-gateway.service';
+import { PartRequestReportsController } from './part-request-reports/part-request-reports.controller';
+import { PartRequestReportsGatewayService } from './part-request-reports/part-request-reports-gateway.service';
 
 @Module({
   imports: [
@@ -31,6 +33,10 @@ import { PurchaseLeadsGatewayService } from './purchase-leads/purchase-leads-gat
     ]),
     AuthModule
   ],
+  controllers: [OrdersController, PartRequestsController,
+    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController],
+  providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient,
+    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService]
   controllers: [OrdersController, PartRequestsController, InvoicesController, OrderDiscountsController, PrintEndpointsController, PurchaseLeadsController],
   providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient, InvoicesGatewayService, OrderDiscountsService, PurchaseLeadsGatewayService]
 })

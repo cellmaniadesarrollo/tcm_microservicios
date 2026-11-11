@@ -16,32 +16,35 @@ export class CustomersEventsService {
   ) {}
 
   async syncCustomer(data: any, createProfile: boolean) {
-    if (!data?.id || !data?.companyId) return;
+    const companyId = data?.companyId ?? data?.company?.id;
+    if (!data?.id || !companyId) {
+      console.warn('syncCustomer descartado, falta id o companyId:', data?.id);
+      return;
+    }
 
-    // AJUSTA los nombres de campos al payload real del evento de clients
-    const firstName = data.firstName ?? data.first_name ?? '';
-    const secondName = data.secondName ?? data.second_name ?? null;
-    const lastName = data.lastName ?? data.last_name ?? '';
-    const secondLastName = data.secondLastName ?? data.second_last_name ?? null;
+    const firstName = data.firstName ?? '';
+    const secondName = data.secondName ?? null;
+    const lastName = data.lastName ?? '';
+    const secondLastName = data.secondLastName ?? null;
+    const idNumber = data.idNumber ? String(data.idNumber).trim().toUpperCase() : null;
 
     await this.cache.save({
       customerId: String(data.id),
-      companyId: String(data.companyId),
+      companyId: String(companyId),
       firstName,
       secondName,
       lastName,
       secondLastName,
       searchText: normalize(
-        [firstName, secondName, lastName, secondLastName].filter(Boolean).join(' '),
+        [firstName, secondName, lastName, secondLastName, idNumber].filter(Boolean).join(' '),
       ),
     });
 
-    // Solo al crear el cliente (idempotente: si ya existe, no crea otro código)
     if (createProfile) {
       await this.profiles.ensureForCustomer(
         String(data.id),
-        String(data.companyId),
-        { type: 'MANUAL', id: null }, // 👈 nuevo
+        String(companyId),
+        { type: 'MANUAL', id: null },
       );
     }
   }
