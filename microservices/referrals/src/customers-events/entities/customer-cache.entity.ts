@@ -9,6 +9,9 @@ export class CustomerCache {
   @Column({ name: 'company_id', type: 'varchar', length: 36 })
   companyId!: string;
 
+  @Column({ name: 'id_number', type: 'varchar', length: 20, nullable: true })
+  idNumber!: string | null;
+
   @Column({ name: 'first_name', type: 'varchar', length: 100 })
   firstName!: string;
 

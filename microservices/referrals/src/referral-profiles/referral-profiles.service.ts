@@ -60,7 +60,7 @@ export class ReferralProfilesService {
         const again = await this.profiles.findOne({ where: { customerId } });
         if (again) return again;
         // Solo se reintenta ante duplicados (colisión de código)
-        if (e?.code !== 'ER_DUP_ENTRY') throw e;
+        if (e?.code !== '23505') throw e;
       }
     }
     throw lastError;
