@@ -64,11 +64,13 @@ func main() {
 
 	gs := gsmarena.NewClient(cfg.ScrapeDelay)
 	crawler := ingest.NewCrawler(gs, st, log, ingest.Options{
-		StaleAfter:   time.Duration(cfg.RefreshDays) * 24 * time.Hour,
-		MaxRequests:  cfg.MaxRequests,
-		CooldownBase: cfg.CooldownBase,
-		CooldownMax:  cfg.CooldownMax,
-		Pub:          pub, // NUEVO
+		StaleAfter:     time.Duration(cfg.RefreshDays) * 24 * time.Hour,
+		ListingRefresh: time.Duration(cfg.ListingRefreshDays) * 24 * time.Hour,
+		NewCheckDays:   cfg.NewCheckDays,
+		MaxRequests:    cfg.MaxRequests,
+		CooldownBase:   cfg.CooldownBase,
+		CooldownMax:    cfg.CooldownMax,
+		Pub:            pub,
 	})
 
 	consumer := messaging.NewConsumer(cfg.RabbitURL, cfg.RabbitQueue)

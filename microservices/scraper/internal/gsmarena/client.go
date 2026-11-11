@@ -6,6 +6,7 @@ import (
 	"io"
 	"math/rand"
 	"net/http"
+	"net/http/cookiejar"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -41,8 +42,12 @@ type Client struct {
 }
 
 func NewClient(delay time.Duration) *Client {
+	jar, _ := cookiejar.New(nil)
 	return &Client{
-		http:  &http.Client{Timeout: 20 * time.Second},
+		http: &http.Client{
+			Timeout: 20 * time.Second,
+			Jar:     jar,
+		},
 		delay: delay,
 	}
 }
@@ -96,8 +101,10 @@ func (c *Client) Get(ctx context.Context, path string) (*goquery.Document, error
 		if err != nil {
 			return nil, err
 		}
-		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+		req.Header.Set("Referer", BaseURL)
 
 		c.reqs.Add(1)
 		resp, err := c.http.Do(req)
