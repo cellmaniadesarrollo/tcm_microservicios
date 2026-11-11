@@ -104,6 +104,7 @@ export class AcquisitionService {
   /** Solo clientes que ya tienen código de referido */
   async searchReferrers(companyId: string, q: string) {
     const tokens = norm(q ?? '').split(/\s+/).filter(Boolean);
+    console.log('referral.search', { companyId, q, tokens });
     if (!tokens.length || tokens.join('').length < 2) return [];
 
     const qb = this.cache
