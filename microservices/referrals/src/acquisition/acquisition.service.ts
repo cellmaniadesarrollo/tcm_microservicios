@@ -50,7 +50,7 @@ export class AcquisitionService {
       this.campaigns.find({ where }),
       this.publications.find({ where, order: { title: 'ASC' } }),
     ]);
-    const channelById = new Map(channels.map((c) => [c.id, c]));
+    const channelById = new Map<string, AcqChannel>(channels.map((c) => [c.id, c]));
 
     return platforms.map((p) => {
       const byChannel = new Map<string, { id: string; title: string }[]>();
@@ -162,7 +162,7 @@ export class AcquisitionService {
           registeredBy: i.userId,
         });
       } catch (e: any) {
-        if (e?.code === 'ER_DUP_ENTRY') throw new ConflictException('El cliente ya tiene origen registrado');
+        if (e?.code === '23505') throw new ConflictException('El cliente ya tiene origen registrado');
         throw e;
       }
 
