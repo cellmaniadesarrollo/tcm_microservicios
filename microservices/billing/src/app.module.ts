@@ -3,7 +3,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { HealthModule } from './health/health.module';
 // import { KafkaModule } from './kafka/kafka.module';
-// import { AwsS3Module } from './aws-s3/aws-s3.module';
+import { AwsS3Module } from './aws-s3/aws-s3.module';
 // import { AuditLogModule } from './audit-log/audit-log.module';
 // import { CompaniesModule } from './companies/companies.module';
 import { UsersEmployeesEventsModule } from './users-employees-events/users-employees-events.module';
@@ -33,7 +33,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     // Infraestructura
     HealthModule,
     KafkaModule,
-    // AwsS3Module,
+    AwsS3Module,
     // AuditLogModule,
 
     // // Dominio raíz (réplicas)
