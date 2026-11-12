@@ -1,9 +1,11 @@
-// purchase-leads.controller.ts
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseIntPipe, Patch, Post, Query, Req } from '@nestjs/common';
+import { FastifyRequest } from 'fastify';
 import { Auth } from '../../common/auth/decorators/auth.decorator';
 import { Features } from '../../common/auth/decorators/features.decorator';
 import { User } from '../../common/auth/decorators/user.decorator';
+import { parseMultipartRequest } from '../../common/helpers/multipart-request.helper';
 import { PurchaseLeadsGatewayService } from './purchase-leads-gateway.service';
+import { preparePurchaseLeadPhotos } from './helpers/purchase-lead-photos.helper';
 import { CreatePurchaseLeadGatewayDto } from './dto/create-purchase-lead-gateway.dto';
 import { ListPurchaseLeadsGatewayDto } from './dto/list-purchase-leads-gateway.dto';
 import { MarkContactedGatewayDto } from './dto/mark-contacted-gateway.dto';
@@ -31,6 +33,17 @@ export class PurchaseLeadsController {
   @Get(':id')
   getOne(@Param('id', ParseIntPipe) id: number, @User() user: any) {
     return this.service.getOne(id, this.ctx(user));
+  }
+
+  @Post(':id/photos')
+  async uploadPhotos(
+    @Param('id', ParseIntPipe) id: number,
+    @Req() request: FastifyRequest,
+    @User() user: any,
+  ) {
+    const { files } = await parseMultipartRequest(request);
+    const photos = await preparePurchaseLeadPhotos(files);
+    return this.service.uploadPhotos(id, photos, this.ctx(user));
   }
 
   @Patch(':id/contact')

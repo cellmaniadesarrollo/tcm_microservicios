@@ -1,4 +1,3 @@
-// purchase-leads-gateway.service.ts
 import { Injectable } from '@nestjs/common';
 import { OrderServiceClient } from '../../common/microservices/order-service-client';
 import { CreatePurchaseLeadGatewayDto } from './dto/create-purchase-lead-gateway.dto';
@@ -17,6 +16,9 @@ export class PurchaseLeadsGatewayService {
   }
   getOne(id: number, user: any) {
     return this.orderServiceClient.send('get_purchase_lead', { dto: { id }, user });
+  }
+  uploadPhotos(id: number, files: any[], user: any) {
+    return this.orderServiceClient.send('upload_purchase_lead_photos', { dto: { id, files }, user });
   }
   markContacted(id: number, dto: MarkContactedGatewayDto, user: any) {
     return this.orderServiceClient.send('mark_purchase_lead_contacted', { dto: { ...dto, id }, user });

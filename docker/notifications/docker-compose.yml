@@ -19,7 +19,9 @@ x-rabbit-health: &rabbit-health
   retries: 3
 
 services:
-  rabbitmq:
+  # RENOMBRADO: antes se llamaba "rabbitmq" y chocaba con el broker principal
+  # (Docker agrega el nombre del servicio como alias en la red backend).
+  notifications-rabbitmq:
     image: rabbitmq:3.12-management
     container_name: ms-notifications-rabbitmq
     restart: always
@@ -67,14 +69,16 @@ services:
     environment:
       - DB_NAME=${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}
       - MONGODB_URI=mongodb://${MONGO_USER:-admin}:${MONGO_PASSWORD:-password}@mongodb:27017/${DB_NAME_NOTIFICATIONS:-notificationsTeamCellmania}?authSource=admin
-      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@rabbitmq:5672
+      # CAMBIADO: apunta al broker de notificaciones por su nombre nuevo
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASS:-guest}@notifications-rabbitmq:5672
+      - RABBIT_URL=amqp://guest:guest@rabbitmq:5672
       - PORT=3010  # ← Cambiar a 3010
       - KAFKA_BOOTSTRAP_SERVERS
     networks: [backend]
     depends_on:
       mongodb:
         condition: service_healthy
-      rabbitmq:
+      notifications-rabbitmq:
         condition: service_healthy
     healthcheck: *node-health
 
