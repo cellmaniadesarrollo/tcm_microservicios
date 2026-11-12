@@ -3,31 +3,68 @@ import {
     HttpStatus,
     Inject,
     Injectable,
+    OnModuleInit,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { catchError, firstValueFrom, throwError, timeout, TimeoutError } from 'rxjs';
 import { ListOrderPaymentsGatewayDto } from './dto/list-order-payments.gateway.dto';
+
+/** Timeout normal para consultas y operaciones simples */
+const DEFAULT_MS = 15000;
+/** Timeout para operaciones con archivos adjuntos */
+const LONG_MS = 60000;
 
 /**
  * Toda la lógica de "hablar con el microservicio de órdenes" vive acá:
  * - inyecta el internalToken en cada mensaje
  * - resuelve el Observable con firstValueFrom
+ * - aplica timeout y convierte TimeoutError en 504
  * - centraliza el manejo de errores cuando aplica
  *
  * El controller ya no conoce `ClientProxy` ni `process.env.INTERNAL_SECRET`.
+ *
+ * NOTA: 'ORDER_SERVICE' es compartido con otras clases (OrderServiceClient, etc.),
+ * por eso aquí NO se llama client.close(); eso solo se hace en OrderServiceClient.
  */
 @Injectable()
-export class OrdersGatewayService {
+export class OrdersGatewayService implements OnModuleInit {
     constructor(
         @Inject('ORDER_SERVICE') private readonly client: ClientProxy,
     ) { }
 
-    private send<T = any>(cmd: string, payload: Record<string, any> = {}): Promise<T> {
+    async onModuleInit() {
+        try {
+            await this.client.connect();
+        } catch (e: any) {
+            console.error('ORDER_SERVICE no disponible al arrancar:', e?.message);
+        }
+    }
+
+    private send<T = any>(
+        cmd: string,
+        payload: Record<string, any> = {},
+        ms = DEFAULT_MS,
+    ): Promise<T> {
         return firstValueFrom(
-            this.client.send<T>(
-                { cmd },
-                { internalToken: process.env.INTERNAL_SECRET, ...payload },
-            ),
+            this.client
+                .send<T>(
+                    { cmd },
+                    { internalToken: process.env.INTERNAL_SECRET, ...payload },
+                )
+                .pipe(
+                    timeout(ms),
+                    catchError((err) =>
+                        err instanceof TimeoutError
+                            ? throwError(
+                                () =>
+                                    new HttpException(
+                                        `El microservicio de órdenes no respondió (${cmd})`,
+                                        HttpStatus.GATEWAY_TIMEOUT,
+                                    ),
+                            )
+                            : throwError(() => err),
+                    ),
+                ),
         );
     }
 
@@ -40,7 +77,11 @@ export class OrdersGatewayService {
         bodegaFiles: any[] = [],
         bodegaCounts?: { cedulaCount: number; imeiCount: number },
     ) {
-        return this.send('create_order', { dto, files, bodegaFiles, bodegaCounts, user });
+        return this.send(
+            'create_order',
+            { dto, files, bodegaFiles, bodegaCounts, user },
+            LONG_MS,
+        );
     }
 
     findCustomer(find: any, user: any) {
@@ -160,17 +201,17 @@ export class OrdersGatewayService {
     }
 
     uploadAttachments(files: any[], dto: any, user: any) {
-        return this.send('upload_attachments', { files, dto, user });
+        return this.send('upload_attachments', { files, dto, user }, LONG_MS);
     }
 
     // ---------- Pagos / cierre ----------
 
     registerPayment(dto: any, files: any[], user: any) {
-        return this.send('register_order_payment', { dto, files, user });
+        return this.send('register_order_payment', { dto, files, user }, LONG_MS);
     }
 
     closeOrder(dto: any, files: any[], user: any) {
-        return this.send('close_order', { dto, files, user });
+        return this.send('close_order', { dto, files, user }, LONG_MS);
     }
 
     getPaymentCatalogs() {
@@ -304,7 +345,7 @@ export class OrdersGatewayService {
     // ---------- Productos pendientes ----------
 
     createPendingProduct(dto: any, files: any[], user: any) {
-        return this.send('create_order_pending_product', { dto, files, user });
+        return this.send('create_order_pending_product', { dto, files, user }, LONG_MS);
     }
 
     updatePendingProduct(
@@ -314,13 +355,17 @@ export class OrdersGatewayService {
         removeAttachmentIds: number[],
         user: any,
     ) {
-        return this.send('update_order_pending_product', {
-            id,
-            dto,
-            files,
-            removeAttachmentIds,
-            user,
-        });
+        return this.send(
+            'update_order_pending_product',
+            {
+                id,
+                dto,
+                files,
+                removeAttachmentIds,
+                user,
+            },
+            LONG_MS,
+        );
     }
 
     deletePendingProduct(id: number, user: any) {
@@ -330,7 +375,7 @@ export class OrdersGatewayService {
     // ---------- Servicios extra ----------
 
     createExtraService(dto: any, files: any[], user: any) {
-        return this.send('create_order_extra_service', { dto, files, user });
+        return this.send('create_order_extra_service', { dto, files, user }, LONG_MS);
     }
 
     updateExtraService(
@@ -340,13 +385,17 @@ export class OrdersGatewayService {
         removeAttachmentIds: number[],
         user: any,
     ) {
-        return this.send('update_order_extra_service', {
-            id,
-            dto,
-            files,
-            removeAttachmentIds,
-            user,
-        });
+        return this.send(
+            'update_order_extra_service',
+            {
+                id,
+                dto,
+                files,
+                removeAttachmentIds,
+                user,
+            },
+            LONG_MS,
+        );
     }
 
     deleteExtraService(id: number, user: any) {
@@ -364,7 +413,7 @@ export class OrdersGatewayService {
     deleteOrderPriceAgreement(orderId: number, user: any) {
         return this.send('delete_order_price_agreement', { orderId, user });
     }
-    
+
     createOrderPriceAgreement(orderId: number, dto: any, user: any) {
         return this.send('create_order_price_agreement', { orderId, dto, user });
     }
@@ -375,7 +424,7 @@ export class OrdersGatewayService {
 
     async pasarABodega(dto: any, files: any[], user: any) {
         try {
-            return await this.send('pasar_a_bodega', { dto, files, user });
+            return await this.send('pasar_a_bodega', { dto, files, user }, LONG_MS);
         } catch (error: any) {
             throw new HttpException(
                 error.message || 'Error interno en la comunicación con el microservicio',
@@ -394,10 +443,10 @@ export class OrdersGatewayService {
             );
         }
     }
-    
+
     async createWarehousePayment(dto: any, files: any[], user: any) {
         try {
-            return await this.send('create_warehouse_payment', { dto, files, user });
+            return await this.send('create_warehouse_payment', { dto, files, user }, LONG_MS);
         } catch (error: any) {
             throw new HttpException(
                 error.message || 'Error interno en la comunicación con el microservicio',
@@ -427,6 +476,7 @@ export class OrdersGatewayService {
             );
         }
     }
+
     listOrderPayments(query: ListOrderPaymentsGatewayDto, user: any) {
         return this.send('list_order_payments', { query, user });
     }
