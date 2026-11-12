@@ -6,7 +6,16 @@ import { MessagePattern, Payload, RpcException } from '@nestjs/microservices';
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) { }
   private readonly logger = new Logger(ProductsController.name);
-
+  @MessagePattern({ cmd: 'get_products_sync' })
+  async getProductsSync(@Payload() data: any) {
+    return this.run(() =>
+      this.productsService.syncPage({
+        cursor: data?.cursor ?? null,
+        updatedSince: data?.updatedSince ?? null,
+        limit: data?.limit,
+      }),
+    );
+  }
   @MessagePattern({ cmd: 'create_product' })
   async createProduct(@Payload() data: any) {
     if (!data?.dto || !data?.user?.companyId || !data?.user?.userId) {
