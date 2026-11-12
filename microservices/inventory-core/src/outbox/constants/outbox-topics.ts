@@ -11,3 +11,11 @@ export const SPARE_EVENTS = {
     RETURNED: 'SPARE_RETURNED',
     CANCELLED: 'SPARE_CANCELLED',
 } as const;
+
+export const PRODUCT_TOPICS = {
+    UPSERTED: 'ms.inventory.core.product.upserted',
+} as const;
+
+export const PRODUCT_EVENTS = {
+    UPSERTED: 'PRODUCT_UPSERTED',
+} as const;

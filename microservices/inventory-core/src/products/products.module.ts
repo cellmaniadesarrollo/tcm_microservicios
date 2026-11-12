@@ -17,13 +17,15 @@ import { StockUnitSerial } from '../stock/entities/stock-unit-serial.entity';
 import { ProductListQuery } from './queries/product-list.query';
 import { ProductDetailQuery } from './queries/product-detail.query';
 import { ReceiptSearchQuery } from './queries/receipt-search.query';
+import { OutboxModule } from '../outbox/outbox.module';
 
 @Module({
   imports: [
     ProductCatalogsModule,
     AwsS3Module,
     TypeOrmModule.forFeature([ProductImage, ProductModel, Product, ProductName, ProductUsageLink, StockUnitSerial]), // registra la entidad si usas autoLoadEntities
-    AuditLogModule
+    AuditLogModule,
+    OutboxModule
   ],
   controllers: [ProductsController, ProductImagesController],
   providers: [ProductsService,

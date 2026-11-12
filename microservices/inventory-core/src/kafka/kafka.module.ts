@@ -3,7 +3,7 @@ import { Global, Module } from '@nestjs/common';
 import { KafkaConsumerService } from './kafka.consumer';
 import { KafkaProducerService } from './kafka.producer';
 import { KafkaListenersOrchestrator } from './kafka-listeners.orchestrator';
-// import { CompaniesModule } from '../companies/companies.module';
+import { CompaniesModule } from '../companies/companies.module';
 import { UsersEmployeesEventsModule } from '../users-employees-events/users-employees-events.module';
 import { OrdersRelayModule } from '../orders-relay/orders-relay.module';
 // import { CustomersEventsModule } from '../customers-events/customers-events.module';
@@ -14,8 +14,8 @@ import { OrdersRelayModule } from '../orders-relay/orders-relay.module';
 @Global()
 @Module({
     imports: [
-        // CompaniesModule, 
-        UsersEmployeesEventsModule, UsersEmployeesEventsModule, OrdersRelayModule
+        CompaniesModule,
+        UsersEmployeesEventsModule, OrdersRelayModule
         // CustomersEventsModule,
         // SpareAssignmentsModule, ReportingHubModule, InvoicesModule, CatalogsModule
     ],
