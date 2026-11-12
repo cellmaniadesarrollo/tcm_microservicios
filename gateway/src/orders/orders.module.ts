@@ -34,8 +34,8 @@ import { PartRequestReportsGatewayService } from './part-request-reports/part-re
     AuthModule
   ],
   controllers: [OrdersController, PartRequestsController,
-    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController],
+    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController, PurchaseLeadsController],
   providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient,
-    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService],
+    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService, PurchaseLeadsGatewayService],
 })
 export class OrdersModule { }
