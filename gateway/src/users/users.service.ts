@@ -1,56 +1,74 @@
 import {
   HttpException,
+  HttpStatus,
   Inject,
   Injectable,
-  InternalServerErrorException,
+  OnModuleInit,
+  OnModuleDestroy,
 } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { catchError, firstValueFrom, throwError, timeout, TimeoutError } from 'rxjs';
 import { CreateUserDto } from './dto/create-user.dto';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 
 @Injectable()
-export class UsersService {
+export class UsersService implements OnModuleInit, OnModuleDestroy {
   constructor(
     @Inject('USER_SERVICE')
     private readonly userService: ClientProxy,
     private readonly subscriptionsService: SubscriptionsService,
   ) { }
 
-  getAllUsers() {
+  async onModuleInit() {
+    try {
+      await this.userService.connect();
+    } catch (e: any) {
+      console.error('USER_SERVICE no disponible al arrancar:', e?.message);
+    }
+  }
+
+  async onModuleDestroy() {
+    await this.userService.close();
+  }
+
+  /** Único punto de salida hacia el MS users: token interno + timeout + 504 */
+  private call<T = any>(
+    cmd: string,
+    payload: Record<string, any> = {},
+    ms = 10000,
+  ): Promise<T> {
     return firstValueFrom(
-      this.userService.send(
-        { cmd: 'get_all_users' },
-        { internalToken: process.env.INTERNAL_SECRET },
-      ),
+      this.userService
+        .send<T>({ cmd }, { ...payload, internalToken: process.env.INTERNAL_SECRET })
+        .pipe(
+          timeout(ms),
+          catchError((err) =>
+            err instanceof TimeoutError
+              ? throwError(
+                  () =>
+                    new HttpException(
+                      `El microservicio de usuarios no respondió (${cmd})`,
+                      HttpStatus.GATEWAY_TIMEOUT,
+                    ),
+                )
+              : throwError(() => err),
+          ),
+        ),
     );
+  }
+
+  getAllUsers() {
+    return this.call('get_all_users');
   }
 
   async createUser(dto: CreateUserDto, user: any) {
     // 🔒 Validar límite de usuarios
     await this.subscriptionsService.validateCompanyUserLimit(user.companyId);
-    return firstValueFrom(
-      this.userService.send(
-        { cmd: 'create_user' },
-        {
-          ...dto,
-          user,
-          internalToken: process.env.INTERNAL_SECRET,
-        },
-      ),
-    );
+    return this.call('create_user', { ...dto, user });
   }
 
   async login(dto: any) {
-    return firstValueFrom(
-      this.userService.send(
-        { cmd: 'login_user' },
-        {
-          ...dto,
-          internalToken: process.env.INTERNAL_SECRET,
-        },
-      ),
-    );
+    return this.call('login_user', { ...dto });
   }
 
   // ===============================================
@@ -59,12 +77,7 @@ export class UsersService {
 
   /** Envía un patrón RPC al MS users agregando siempre el token interno */
   private sendPin<T = any>(cmd: string, payload: Record<string, any>): Promise<T> {
-    return firstValueFrom(
-      this.userService.send<T>(
-        { cmd },
-        { ...payload, internalToken: process.env.INTERNAL_SECRET },
-      ),
-    );
+    return this.call<T>(cmd, payload);
   }
 
   /** Los grupos del JWT pueden venir como strings o como { id, name } */

@@ -1,7 +1,7 @@
 // src/spare-assignments/spare-assignments-sync.controller.ts
 import { Controller, Inject, OnModuleInit } from '@nestjs/common';
 import { ClientProxy, Ctx, MessagePattern, Payload, RmqContext } from '@nestjs/microservices';
-import { firstValueFrom } from 'rxjs';
+import { firstValueFrom, timeout } from 'rxjs';
 import { SpareAssignmentsService } from './spare-assignments.service';
 import { CreateCancellationRequestDto } from './dto/create-cancellation-request.dto';
 
@@ -13,30 +13,37 @@ export class SpareAssignmentsSyncController implements OnModuleInit {
         @Inject('SPARE_ASSIGNMENTS_SYNC') private readonly syncClient: ClientProxy,
     ) { }
 
-    async onModuleInit() {
+    /** No bloquea el arranque: la sync corre en segundo plano. */
+    onModuleInit() {
+        void this.syncOnStart();
+    }
+
+    private async syncOnStart() {
         try {
             const fromCache = await this.spareAssignmentsService.getLastUpdatedAt();
             console.log(`🔄 Sincronizando spare assignments desde: ${fromCache ?? 'el origen del tiempo'}`);
 
             const response = await firstValueFrom(
-                this.syncClient.send(
-                    { cmd: 'async_spare_assignments_start' },
-                    {
-                        internalToken: process.env.INTERNAL_SECRET,
-                        fromCache,
-                    },
-                ),
+                this.syncClient
+                    .send(
+                        { cmd: 'async_spare_assignments_start' },
+                        {
+                            internalToken: process.env.INTERNAL_SECRET,
+                            fromCache,
+                        },
+                    )
+                    .pipe(timeout(30000)),
             );
 
             await this.spareAssignmentsService.syncBulk(response);
         } catch (err: any) {
-            console.error('❌ Error en sync inicial de spare assignments:', err.message);
+            console.warn('⚠️ Sync inicial de spare assignments omitida:', err?.message ?? err);
         }
     }
 
     @MessagePattern({ cmd: 'cancel_spare_assignment' })
     async cancelSpareAssignment(
-        @Payload() payload: { 
+        @Payload() payload: {
             orderId: number;
             spareAssignmentId: string;
             dto: CreateCancellationRequestDto;

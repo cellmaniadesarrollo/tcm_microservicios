@@ -13,6 +13,8 @@ import { InvoicesGatewayService } from './invoices/invoices-gateway.service';
 import { OrderDiscountsController } from './order-discounts/order-discounts.controller';
 import { OrderDiscountsService } from './order-discounts/order-discounts.service';
 import { PrintEndpointsController } from './print-endpoints/print-endpoints.controller';
+import { PurchaseLeadsController } from './purchase-leads/purchase-leads.controller';
+import { PurchaseLeadsGatewayService } from './purchase-leads/purchase-leads-gateway.service';
 import { PartRequestReportsController } from './part-request-reports/part-request-reports.controller';
 import { PartRequestReportsGatewayService } from './part-request-reports/part-request-reports-gateway.service';
 
@@ -32,8 +34,8 @@ import { PartRequestReportsGatewayService } from './part-request-reports/part-re
     AuthModule
   ],
   controllers: [OrdersController, PartRequestsController,
-    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController],
+    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController, PurchaseLeadsController],
   providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient,
-    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService]
+    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService, PurchaseLeadsGatewayService],
 })
 export class OrdersModule { }
