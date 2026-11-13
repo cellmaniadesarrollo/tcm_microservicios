@@ -129,6 +129,7 @@ Front ──HTTP──> gateway (Nest + Fastify) ──RabbitMQ──> ms invent
   `create_receipt`, `list_receipts`, `create_stock_voucher`, `search_orders`,
   `get_employees_basic`). **No** usar `modulo.accion` (`stock_vouchers.create`):
   ya causó un desajuste.
+- Publica también réplicas de productos y lotes hacia ms-billing (Kafka vía outbox + bulk por RabbitMQ inventory_core_queue_sync)  
 
 ## 2. Mapa del MS e índice
 
@@ -187,6 +188,7 @@ AGENTS.md del módulo.
   `internalToken: process.env.INTERNAL_SECRET`.
 - **Sync inicial:** los controllers de réplica hacen el sync en `onModuleInit`
   (catálogos primero, luego datos).
+- Comandos de sync que atiende este MS: get_products_sync, get_lots_sync (paginados por cursor, validan internalToken con el interceptor global)
 
 ### 3.3 Seeds al arrancar
 Ver `catalogs/AGENTS.md`.

@@ -13,6 +13,8 @@ import { CompaniesModule } from './companies/companies.module';
 import { ProductsReplicaModule } from './products-replica/products-replica.module';
 import { ScheduleModule } from '@nestjs/schedule';
 import { SignaturesModule } from './signature/signatures.module';
+import { LotsReplicaModule } from './lots-replica/lots-replica.module';
+import { ClientsReplicaModule } from './clients-replica/clients-replica.module';
 
 @Module({
   imports: [
@@ -42,6 +44,8 @@ import { SignaturesModule } from './signature/signatures.module';
     CompaniesModule,
     UsersEmployeesEventsModule,
     ProductsReplicaModule,
+    LotsReplicaModule,
+    ClientsReplicaModule,
     // DevicesReplicaModule,
 
     // Dominio de billing (se agrega después)
