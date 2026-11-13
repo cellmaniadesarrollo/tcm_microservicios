@@ -10,6 +10,9 @@ import { StockUnit } from './entities/stock-unit.entity';
 import { StockMovement } from './entities/stock-movement.entity';
 import { LotOriginType, MovementType, UnitStatus } from './enums/stock.enums';
 import { StockUnitSerial } from './entities/stock-unit-serial.entity';
+import { OutboxService } from '../outbox/services/outbox.service';
+import { buildLotSnapshots } from './events/lot-snapshot';
+import { LOT_EVENTS, LOT_TOPICS } from '../outbox/constants/outbox-topics';
 
 const MAX_SERIAL_LENGTH = 100;
 /** Evita superar el límite de parámetros de Postgres en inserciones masivas. */
@@ -133,7 +136,10 @@ const normSerial = (s: string) => String(s ?? '').trim().toUpperCase();
  */
 @Injectable()
 export class StockService {
-    constructor(private readonly dataSource: DataSource) { }
+    constructor(
+        private readonly dataSource: DataSource,
+        private readonly outbox: OutboxService,
+    ) { }
 
     // ───────────────────────── Entrada de mercadería ─────────────────────────
 
@@ -252,7 +258,15 @@ export class StockService {
             }
             throw error;
         }
-
+        // Un LOT_UPSERTED por lote, en la misma transacción. El poller del outbox lo despacha tras el commit.
+        const snaps = await buildLotSnapshots(em, created.map((c) => c.lotId));
+        await this.outbox.enqueue(em, snaps.map((s) => ({
+            companyId: s.companyId,
+            topic: LOT_TOPICS.UPSERTED,
+            eventType: LOT_EVENTS.UPSERTED,
+            key: s.id,
+            payload: s as unknown as Record<string, unknown>,
+        })));
         return created;
     }
 
@@ -735,5 +749,46 @@ export class StockService {
             serial: u.serial,
             serials: byUnit.get(u.id) ?? [u.serial],
         }));
+    }
+
+    /** Página de snapshots de lotes (todas las empresas), orden (created_at, id). cursor = "ISO|uuid". */
+    async syncLotsPage(params: { cursor?: string | null; createdSince?: string | null; limit?: number }) {
+        const limit = Math.min(1000, Math.max(1, Math.trunc(Number(params.limit)) || 500));
+
+        let curTs: string | null = null;
+        let curId: string | null = null;
+        if (params.cursor) {
+            const [ts, id] = String(params.cursor).split('|');
+            if (!ts || !id || Number.isNaN(Date.parse(ts)) || !/^[0-9a-f-]{36}$/i.test(id)) {
+                throw bad('El cursor no es válido');
+            }
+            curTs = new Date(ts).toISOString();
+            curId = id.toLowerCase();
+        }
+        let since: string | null = null;
+        if (params.createdSince) {
+            if (Number.isNaN(Date.parse(String(params.createdSince)))) throw bad('createdSince no es válido');
+            since = new Date(params.createdSince).toISOString();
+        }
+
+        const rows: Array<{ id: string; ts: Date }> = await this.dataSource.query(
+            `SELECT id, date_trunc('milliseconds', created_at) AS ts
+           FROM lots
+          WHERE ($1::timestamptz IS NULL
+                 OR (date_trunc('milliseconds', created_at), id) > ($1::timestamptz, $2::uuid))
+            AND ($3::timestamptz IS NULL OR created_at >= $3::timestamptz)
+          ORDER BY ts ASC, id ASC
+          LIMIT $4`,
+            [curTs, curId, since, limit + 1],
+        );
+
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        const items = await buildLotSnapshots(this.dataSource.manager, page.map((r) => r.id));
+        const last = page[page.length - 1];
+        return {
+            items,
+            nextCursor: hasMore && last ? `${new Date(last.ts).toISOString()}|${last.id}` : null,
+        };
     }
 }
