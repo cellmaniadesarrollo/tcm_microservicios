@@ -19,3 +19,11 @@ export const PRODUCT_TOPICS = {
 export const PRODUCT_EVENTS = {
     UPSERTED: 'PRODUCT_UPSERTED',
 } as const;
+
+export const LOT_TOPICS = {
+    UPSERTED: 'ms.inventory.core.lot.upserted',
+} as const;
+
+export const LOT_EVENTS = {
+    UPSERTED: 'LOT_UPSERTED',
+} as const;

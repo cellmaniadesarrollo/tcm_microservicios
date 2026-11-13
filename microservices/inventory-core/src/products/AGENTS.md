@@ -8,14 +8,12 @@
 Ficha de catálogo (SKU). **No guarda existencias, costos ni condiciones
 fiscales reales**: eso vive en lote, saldos y unidades (`stock/AGENTS.md`).
 
-## 1. Archivos
-- `products.service.ts`: `receiptItemsQuery`, `mapReceiptItems`,
-  `findReceiptItemsByIds`, `searchForReceipt`, `list`, `findOne`.
-- Catálogos auxiliares en `product-catalogs/` (tipos, nombres, colores,
-  calidades, usos; seeds json).
-- Tablas usadas en consultas crudas (réplica de dispositivos):
-  `brands (brands_id, brands_name)`, `models (models_id, models_name, models_brands_id)`,
-  `model_technical_codes (mtc_models_id, mtc_code)`, `product_models (product_id, model_id)`.
+## 1. Archivos (adición)
+- `events/product-snapshot.ts`: `buildProductSnapshots(em, ids, companyId?)`.
+  Snapshot compartido por el evento y el sync.
+- `ProductsService`: `enqueueProductUpserted` (privado) y `syncPage`.
+- `ProductsController`: comando `get_products_sync`.
+- `ProductsModule` importa `OutboxModule`.
 
 ## 2. Modelo (`products`)
 - `code` (correlativo por empresa, inmutable; `MAX(code)+1` con advisory lock),
@@ -41,13 +39,40 @@ fiscales reales**: eso vive en lote, saldos y unidades (`stock/AGENTS.md`).
 - Buscador para ingresos (`products/search`): ver `receipts/AGENTS.md`.
 
 ## 4. Estado
+
 Construido y en uso (según el historial previo).
 
-## 5. Pendientes
+## 5. Pendientes (adición)
+
 Relacionados en `stock-vouchers/`: 8 (buscador de productos con existencias,
 requiere ver `ProductsService`) y 9 (nombre del producto, requiere entidad
 `ProductName`).
 
+- `restore` existe en el service pero **no tiene comando** en el controller
+  (`(verificar)` gateway): el evento saldrá cuando exista el endpoint.
+- Si se crea CRUD de catálogos (hoy solo seeds), republicar los productos
+  afectados.
+
 ## 6. Errores y lecciones
+
 - Correlativo de productos con `MAX(code)+1` + `pg_advisory_xact_lock`: no
   usar `SequencesService` aquí.
+
+## 7. Réplica hacia billing (Probado 2026-11-12)
+
+- `create`, `update` (solo si hubo cambio real), `remove` y `restore` encolan
+  un `PRODUCT_UPSERTED` dentro de la transacción; `void outbox.dispatchNow(ids)`
+  tras el commit y fuera del `try` que limpia S3.
+- **Fechas:** `createdAt/updatedAt` se fijan desde JS (`new Date()`) y en
+  `update/remove/restore` después de tomar el lock. `update` fija `updatedAt`
+  también si solo cambiaron modelos/usos.
+- **Snapshot** (`ProductSnapshot`): `id, companyId, code, sku, upc, name,
+  description, kind, trackingMode, productTypeId/Code/Name, colorId/Name,
+  qualityId/Name, modelIds, status, defaults{basePrice, hasTax,
+  priceIncludesTax, billableInSales, billableInRepairOrders, warrantyDays},
+  createdAt, updatedAt` (ISO, ms). No viajan imágenes ni usos.
+- **Sync:** `get_products_sync` `{ cursor?, updatedSince?, limit }` (máx. 1000,
+  defecto 500) → `{ items, nextCursor }`. Todas las empresas, incluye
+  inactivos, orden `(date_trunc('milliseconds', updated_at), id)`. El token lo
+  valida `InternalAuthInterceptor` global.
+- Lado consumidor: `ms-billing/src/products-replica/AGENTS.md`.

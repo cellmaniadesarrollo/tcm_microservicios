@@ -20,6 +20,10 @@ Consumidores: `receipts/` (entradas) y `stock-vouchers/` (salidas y retornos).
   (`stock_unit_serials`).
 - Correlativo de lotes y productos: `MAX(code)+1` con
   `pg_advisory_xact_lock` (patrón en `StockService` y `ProductsService`).
+- `events/lot-snapshot.ts`: `buildLotSnapshots(em, ids)`.
+- `lots-sync.controller.ts`: comando `get_lots_sync`. `StockModule` importa
+  `OutboxModule` y declara este controller. `StockService` inyecta
+  `OutboxService`.
 
 ## 2. Modelo de datos
 
@@ -52,12 +56,13 @@ Consumidores: `receipts/` (entradas) y `stock-vouchers/` (salidas y retornos).
 
 | Método | Qué hace |
 |---|---|
-| `registerInbound(em, input)` | Crea lote por línea, saldo, unidades serializadas y kardex (`RECEIPT_IN` por defecto). Valida seriales (no repetidos en el ingreso ni en stock). Correlativo de lotes con `MAX(code)+1` + advisory lock. |
+| `registerInbound(em, input)` | Crea lote por línea, saldo, unidades serializadas y kardex (`RECEIPT_IN` por defecto). Valida seriales (no repetidos en el ingreso ni en stock). Correlativo de lotes con `MAX(code)+1` + advisory lock. Al final, en la misma transacción, encola un `LOT_UPSERTED` por lote creado. |
 | `registerOutbound(em, input)` `[ENTREGADO]` | Saca stock de lotes concretos: bloquea saldos y unidades (orden estable), valida disponibilidad y estado, descuenta `on_hand`, marca unidades `ISSUED`, inserta kardex (`REPAIR_CONSUMPTION` o `INTERNAL_OUT`; −qty o −1 por unidad). Devuelve el snapshot del lote por línea (`OutboundLineResult`: `lineRef, productId, lotId, quantity, unitCost, salePrice, billable…`). |
 | `registerReturn(em, input)` `[ENTREGADO]` | Regresa al mismo lote/sucursal: suma `on_hand`, unidades `ISSUED` → `AVAILABLE`, kardex `RETURN_IN` (+qty o +1 por unidad). **Quien llama valida que lo retornado no supere lo sacado.** |
 | `availability(companyId, productIds, branchId?)` | Disponibilidad por producto, separando lo facturable en ventas y en órdenes. |
 | `listLotsWithStock(companyId, productId, branchId?, filters?)` | Lotes con existencias (`on_hand > 0`), más antiguos primero (para elegir lote o resolver el QR). `filters` opcional: `{ billableInRepairOrders?, billableInSales? }`; cada filtro solo se aplica si no es `undefined`. |
 | `listAvailableUnits(companyId, lotId, branchId?)` `[ENTREGADO]` | Unidades `AVAILABLE` de un lote con todos sus IMEI. |
+| `syncLotsPage({ cursor?, createdSince?, limit? })` | Página de snapshots de lotes (todas las empresas), orden `(created_at, id)`, cursor `"ISO|uuid"`, máx. 1000. |
 
 - Todas las operaciones de escritura reciben el `EntityManager` de quien
   confirma (van **dentro de su transacción**).
@@ -84,6 +89,12 @@ La prueba end-to-end está descrita en `stock-vouchers/AGENTS.md` (sección 8).
 15. Decidir unicidad de IMEI **global por empresa** (hoy por producto).
 16. Reservas de stock (`reserved`) dependen de ventas/órdenes, hoy en 0.
 17. Stock por sucursal (`byBranch`) cuando existan transferencias.
+18. **Flujo de venta con billing** (sin construir): `list_sale_lots`,
+    `create_sale_outbound`, `return_sale_outbound`, idempotentes con
+    `clientRequestId`, `MovementType.SALE_OUT` (ya existe), kardex con
+    `reference_type = 'SALE'` y `reference_id` = id de la venta de billing.
+    Venta siempre de la sucursal principal. (Numeración propia a confirmar
+    para no chocar con los existentes.)
 
 Relacionados en otros módulos: 12 (regularizar lote) y 26 (sucursal de las
 salidas) en `stock-vouchers/`; 2 (anular ingreso) en `receipts/`.
@@ -103,3 +114,15 @@ Al cambiar un método de `StockService`, una entidad o un enum: actualizar las
 secciones 2–4. Si cambia el contrato con vales o ingresos, anotarlo también en
 `stock-vouchers/AGENTS.md` o `receipts/AGENTS.md`. Reglas completas en la
 sección 0 de la raíz.
+
+## 9. Réplica de lotes hacia billing (Probado 2026-11-12)
+- **Snapshot** (`LotSnapshot`): `id, companyId, productId, code, originType,
+  quantityReceived, salePrice, warrantyDays, hasTax, priceIncludesTax,
+  billableInSales, billableInRepairOrders, createdAt`. **No** viaja `unitCost`
+  (dato sensible) ni saldos ni unidades.
+- Un ingreso que falla (p. ej. serial repetido) revierte la transacción y no
+  deja evento.
+- Lo único que cambia un lote tras crearse es "regularizar" (no construido): al
+  construirlo, agregar `updated_at` a `lots`, reenviar el evento y usar guard
+  de fecha en billing.
+- Lado consumidor: `ms-billing/src/lots-replica/AGENTS.md`.
