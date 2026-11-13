@@ -12,6 +12,7 @@ import { CompaniesModule } from './companies/companies.module';
 // import { DevicesReplicaModule } from './devices-replica/devices-replica.module';
 import { ProductsReplicaModule } from './products-replica/products-replica.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { SignaturesModule } from './signature/signatures.module';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     // DevicesReplicaModule,
 
     // Dominio de billing (se agrega después)
+    SignaturesModule,
   ],
 })
 export class AppModule { }
