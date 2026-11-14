@@ -13,7 +13,7 @@ import { UserEmployeeCache } from '../users-employees-events/entities/user_emplo
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SpareAssignment, SpareCancellationRequest,UserEmployeeCache]),
+    TypeOrmModule.forFeature([SpareAssignment, SpareCancellationRequest, UserEmployeeCache]),
     ClientsModule.register([
       {
         name: 'SPARE_ASSIGNMENTS_SYNC',
@@ -25,8 +25,18 @@ import { UserEmployeeCache } from '../users-employees-events/entities/user_emplo
           persistent: true,
         },
       },
+      {
+        name: 'INVENTORY_CORE_SYNC',
+        transport: Transport.RMQ,
+        options: {
+          urls: [process.env.RABBIT_URL || 'amqp://rabbitmq:5672'],
+          queue: 'inventory_core_queue_sync', // Asegura un valor por defecto si falta la variable
+          queueOptions: { durable: true },
+          persistent: true,
+        },
+      },
     ]),
-    BroadcastModule
+    BroadcastModule,
   ],
   controllers: [SpareAssignmentsController, SpareAssignmentsSyncController],
   providers: [SpareAssignmentsService, SpareAssignmentsEventsListener],
