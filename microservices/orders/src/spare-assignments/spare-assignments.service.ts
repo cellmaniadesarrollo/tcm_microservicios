@@ -22,11 +22,12 @@ export class SpareAssignmentsService {
         private readonly broadcastService: BroadcastService
     ) { }
 
-    async getLastUpdatedAt(): Promise<Date | null> {
+    async getLastUpdatedAt(origin: string = SPARE_ORIGIN.LEGACY): Promise<Date | null> {
         const result = await this.repo
             .createQueryBuilder('sa')
             .select('sa.updated_at', 'updatedAt')
             .where('sa.updated_at IS NOT NULL')
+            .andWhere('sa.origin = :origin', { origin })
             .orderBy('sa.updated_at', 'DESC')
             .limit(1)
             .getRawOne();
@@ -57,6 +58,7 @@ export class SpareAssignmentsService {
                     unit_price: spare.spare?.unitPrice,
                     batch_number: spare.spare?.batchNumber,
                     is_billable_in_repair_orders: spare.spare?.isBillableInRepairOrders ?? false, // 🆕
+                    origin: spare.origin === SPARE_ORIGIN.INVENTORY_CORE ? SPARE_ORIGIN.INVENTORY_CORE : SPARE_ORIGIN.LEGACY,
                     status: (spare.status as SpareAssignmentStatus) ?? SpareAssignmentStatus.ACTIVE,
                     returned_at: spare.returnedAt ?? null,
                     created_at: spare.createdAt,
@@ -240,7 +242,7 @@ export class SpareAssignmentsService {
             requested_by_username: requester?.username ?? null,
             requested_by_first_name: requester?.first_name ?? null,
             requested_by_last_name: requester?.last_name ?? null,
-        });
+        }, spare.origin);
 
         return request;
     }
