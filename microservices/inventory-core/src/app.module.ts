@@ -20,6 +20,8 @@ import { CatalogsModule } from './catalogs/catalogs.module';
 import { StockVouchersModule } from './stock-vouchers/stock-vouchers.module';
 import { LabelsModule } from './labels/labels.module';
 import { OutboxModule } from './outbox/outbox.module';
+import { SpareCancellationsModule } from './spare-cancellations/spare-cancellations.module';
+import { SpareAssignmentsSyncModule } from './spare-assignments-sync/spare-assignments-sync.module';
 
 @Module({
   imports: [
@@ -62,6 +64,8 @@ import { OutboxModule } from './outbox/outbox.module';
     LabelsModule,
     SequencesModule,
     OutboxModule,
+    SpareCancellationsModule,
+    SpareAssignmentsSyncModule,
   ],
 })
 export class AppModule { }

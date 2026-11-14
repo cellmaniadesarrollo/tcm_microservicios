@@ -1,7 +1,8 @@
 # AGENTS.md — stock-vouchers (movimientos manuales de stock)
 
 > Reglas de mantenimiento: ver **sección 0 del AGENTS.md raíz del MS**
-> (`microservices/inventory-core/AGENTS.md`). No se duplican aquí.
+> (`microservices/inventory-core/AGENTS.md`).
+> No se duplican aquí.
 > Solo se corrige lo verificado; lo no verificado se conserva tal cual; los
 > marcadores `[ENTREGADO, SIN PROBAR]` y `(verificar)` se quitan solo con
 > código visto o prueba ejecutada.
@@ -31,16 +32,17 @@ ha ejecutado contra Postgres ni compilado con el type-check completo del repo.
 **Módulos a importar en `StockVouchersModule`:**
 `TypeOrmModule.forFeature([StockMovementReason, StockVoucher, StockVoucherLine, StockVoucherLineUnit, StockVoucherAttachment])`,
 `CompaniesModule`, `StockModule`, `SequencesModule`, `AuditLogModule`,
-**`AwsS3Module`** (nuevo). Lee `OrderReplica` y `UserEmployeeCache` por
-`EntityManager` (sus módulos ya registran las entidades vía `autoLoadEntities`).
+**`AwsS3Module`** (nuevo), `SpareCancellationsModule`.
+Lee `OrderReplica` y `UserEmployeeCache` por `EntityManager` (sus módulos ya
+registran las entidades vía `autoLoadEntities`).
 
 **`StockVouchersService` inyecta:**
-`DataSource, StockService, SequencesService, AuditLogService, MainBranchService, AwsS3Service`.
+`DataSource, StockService, SequencesService, AuditLogService, MainBranchService, AwsS3Service, SpareCancellationsService`.
 
 **Regla de oro:** el stock se mueve únicamente a través de `StockService`
 (ver `stock/AGENTS.md`).
 
-## 2. Modelo de datos  [ENTREGADO, SIN PROBAR]
+## 2. Modelo de datos [ENTREGADO, SIN PROBAR]
 
 | Entidad | Tabla | Notas clave |
 |---|---|---|
@@ -107,6 +109,7 @@ Constantes: `ORDER_STATUSES_BLOCK_ISSUE = [8,9,10]`,
 1. **Un vale es un documento inmutable** (cabecera + líneas + fotos). No se
    edita ni se borra. Un error se corrige con un **retorno**. El kardex también
    es solo-inserción.
+
 2. **Dirección y reglas salen del motivo** (`StockMovementReason`):
    `direction` (OUT/IN) y `order_link`. Para OUT: `REQUIRED` exige `orderId`,
    `FORBIDDEN` lo prohíbe. Para IN: indica sobre qué salidas aplica (con o sin
@@ -203,7 +206,12 @@ Constantes: `ORDER_STATUSES_BLOCK_ISSUE = [8,9,10]`,
 9. **Todo con idempotencia (`clientRequestId`) y auditoría** (`CREATED`) en la
    misma transacción. El stock se mueve únicamente a través de `StockService`.
    Límites: 100 líneas por vale, nota ≤ 500.
-## 6. Gateway (repo aparte)  [ENTREGADO, SIN PROBAR]
+
+10. **Cierre de solicitudes de cancelación:** un retorno que deja una línea en
+    `0` cierra, en la misma transacción, la solicitud de cancelación `PENDING` de esa
+    línea (`spare-cancellations/`).
+
+## 6. Gateway (repo aparte) [ENTREGADO, SIN PROBAR]
 
 Ubicación: `gateway/src/inventory-core/stock-vouchers/`
 (`stock-vouchers.controller.ts`, `stock-vouchers.service.ts`,
@@ -228,7 +236,7 @@ ver pendiente 20).
 | `GET lots/:lotId/units` | `list_stock_voucher_lot_units` | `{ lotId, user }` | Unidades `AVAILABLE` del lote con todos sus IMEI (sucursal **principal**). Ya no lo necesita el modal de salida (los lotes traen `units`). |
 | `GET orders/:orderId` | `get_order_stock_summary` | `{ orderId, user }` | Vales de la orden + `products[]` (`netQuantity`, `netCost`, `netBillableAmount`) + `totals`. `orderId` entero (`ParseIntPipe`). |
 | `POST /` | `create_stock_voucher` | `{ dto, files, user }` | **multipart**: campo `data` (JSON del vale) + campos `photos_<n>` (0–5 imágenes por línea, n = índice de línea base 0). Crea una salida **o** un retorno según el motivo. Idempotente. Devuelve resumen con `lines[].attachments` y `replayed`. |
-| `GET /` | `list_stock_vouchers` | `{ query, user }` | Listado enriquecido (ver 6.3). Filtros `direction, reasonId, employeeId, orderId, from, to, search`, `page/limit/sortBy(createdAt\|code)/sortDir`, `includeFilters`. |
+| `GET /` | `list_stock_vouchers` | `{ query, user }` | Listado enriquecido (ver 6.3). Filtros `direction, reasonId, employeeId, orderId, from, to, search`, `page/limit/sortBy(createdAt|code)/sortDir`, `includeFilters`. |
 | `GET :id` | `get_stock_voucher_detail` | `{ id, user }` | Cabecera, motivo, empleado y creador **con nombre**, orden (con estado/cliente de la réplica), vale origen, retornos, `canReturn`/`returnBlock`, líneas (SKU, lote, snapshot, unidades con IMEI, `attachments` con URL firmada), `returned`/`pending` por línea en salidas. |
 
 Rutas literales (`new-data`, `products/...`, `lots/...`, `orders/...`) van
@@ -244,6 +252,7 @@ una orden un lote no facturable en órdenes (su costo sale del stock pero
 
 Payload `data` de `create_stock_voucher`:
 `{ clientRequestId, reasonId, employeeId?, orderId?, originVoucherId?, note?, lines[{ lotId?, originLineId?, quantity, unitIds? }] }`.
+
 - Salida: `employeeId` obligatorio; `orderId` si el motivo lo exige; cada línea
   con `lotId`; `unitIds` solo en serializados.
 - Retorno: `originVoucherId` obligatorio; cada línea con `originLineId`; **no**
@@ -262,8 +271,8 @@ orden.
 ### 6.3 Listado `GET /stock-vouchers`
 
 **Query** (todos opcionales): `page` (≥ 1, def. 1), `limit` (1–100, def. 20),
-`sortBy` (`createdAt`\|`code`), `sortDir` (`ASC`\|`DESC`, también minúsculas),
-`direction` (`OUT`\|`IN`), `reasonId` (uuid), `employeeId` (uuid), `orderId`
+`sortBy` (`createdAt`|`code`), `sortDir` (`ASC`|`DESC`, también minúsculas),
+`direction` (`OUT`|`IN`), `reasonId` (uuid), `employeeId` (uuid), `orderId`
 (entero = **id interno** de la orden, no el número visible), `from`/`to`
 (`AAAA-MM-DD`, inclusivo, hora de Guayaquil), `search` (máx. 100: solo dígitos
 hasta 9 → código de vale **o** número de orden; otro texto → nombre del
@@ -272,6 +281,7 @@ empleado **o nombre del cliente de la orden**, `ILIKE`, sensible a tildes),
 
 **Item** (los campos antiguos se conservan; los nuevos se listan debajo del
 ejemplo):
+
 ```json
 {
   "id": "uuid", "code": 57, "direction": "OUT",
@@ -288,10 +298,11 @@ ejemplo):
   "createdAt": "2026-11-05T15:20:00.000Z"
 }
 ```
+
 - Nuevos: `reason.code`, `reason.isReturnable`, `createdBy`, `orderStatus`,
   `customerName`, `originVoucher { id, code }`, `totalQuantity` (suma de
   unidades, no de líneas), `returnedQuantity`, `pendingQuantity`,
-  `returnStatus` (`NONE`\|`PARTIAL`\|`FULL`), `returnCount`, `photoCount`,
+  `returnStatus` (`NONE`|`PARTIAL`|`FULL`), `returnCount`, `photoCount`,
   `canReturn`, `returnBlock`.
 - En retornos (`IN`): `returnedQuantity`, `pendingQuantity` y `returnStatus`
   son `null`; `canReturn` es `false` con `returnBlock: 'IS_RETURN'`;
@@ -364,7 +375,7 @@ original).
 coincidían con el gateway); el parche de renombre está **entregado, sin
 aplicar/verificar**.
 
-## 8. Estado  [ENTREGADO, SIN PROBAR]
+## 8. Estado [ENTREGADO, SIN PROBAR]
 
 | Componente | Estado |
 |---|---|
@@ -380,8 +391,10 @@ aplicar/verificar**.
 | Seed de motivos | **ENTREGADO como parche** en `CatalogsService`; falta enganchar `seedStockMovementReasons(companyId)` al flujo de empresa nueva (ver `catalogs/AGENTS.md`). |
 | `StockService` (`registerOutbound`, `registerReturn`, `listAvailableUnits`) | Ver `stock/AGENTS.md`. |
 | Gateway `stock-vouchers` | **ENTREGADO, SIN PROBAR.** Falta registrarlo en el módulo del gateway (y RouterModule si aplica). |
+| Cierre de solicitudes de cancelación por retorno total | **Probado** (2026-11-14). |
 
 ### Primera prueba recomendada
+
 Una **salida serializada** completa (con orden, fotos en `photos_0` y
 `photos_1`) seguida de un **retorno parcial** (con foto) y luego del resto; ahí
 se cruzan bloqueos, unidades `ISSUED`, pendiente por línea, snapshot y
@@ -462,7 +475,9 @@ concurrentes del mismo lote.
     `stock_voucher_attachments(voucher_id)` ya existe).
 
 Pendientes de la raíz que afectan a este módulo: 22 (permisos de
-salidas/retornos), 24 (migraciones), 35 (mensajes de `ParseUUIDPipe`).
+salidas/retornos), 24 (migraciones), 35 (mensajes de `ParseUUIDPipe`), **O7
+(endpoints de bodega para solicitudes de cancelación; ver
+`spare-cancellations/AGENTS.md`)**.
 
 ## 10. Errores y lecciones propios del módulo
 
@@ -484,7 +499,8 @@ salidas/retornos), 24 (migraciones), 35 (mensajes de `ParseUUIDPipe`).
   (mensaje en español con número de línea y lote).
 
 ## 11. Cómo actualizar este archivo
+
 Al cambiar reglas, contrato o comandos de vales: actualizar las secciones 5–7
 de este archivo. Si el cambio toca `StockService`, también `stock/AGENTS.md`;
 si toca la réplica de órdenes, `orders-relay/AGENTS.md`. Las reglas completas
-están en la sección 0 de la raíz. 
+están en la sección 0 de la raíz.

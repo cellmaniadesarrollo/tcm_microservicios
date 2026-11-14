@@ -6,6 +6,8 @@ const TOPICS = {
   ORDER_CREATED: 'ms.order.created',
   ORDER_UPDATED: 'ms.order.updated',
   SPARE_CANCELLATION_REQUESTED: 'ms.inventory.spare.cancellation.requested',
+  // Solicitudes sobre asignaciones origin = 'inventory-core' (el legacy NO consume este topic)
+  SPARE_CANCELLATION_REQUESTED_CORE: 'ms.inventory.core.spare.cancellation.requested',
   INVOICE_EMISSION_REQUESTED: 'ms.order.invoice.emission.requested',
 } as const;
 
@@ -65,14 +67,21 @@ export class BroadcastService {
     requested_by_username: string | null;
     requested_by_first_name: string | null;
     requested_by_last_name: string | null;
-  }): Promise<void> {
+  }, origin: string = 'legacy'): Promise<void> {
 
-    await this.kafkaProducer.emit(
-      TOPICS.SPARE_CANCELLATION_REQUESTED,
+    // El topic depende de quién es dueño de la asignación. Cualquier valor distinto
+    // de 'inventory-core' va al legacy (comportamiento original).
+    const topic = origin === 'inventory-core'
+      ? TOPICS.SPARE_CANCELLATION_REQUESTED_CORE
+      : TOPICS.SPARE_CANCELLATION_REQUESTED;
+
+    const ok = await this.kafkaProducer.emit(
+      topic,
       'SPARE_CANCELLATION_REQUESTED',
       request,
       request.movement_id,
     );
+    if (!ok) throw new Error(`No se pudo publicar la solicitud de cancelación ${request.request_id}`);
   }
 
   async publishInvoiceEmissionRequested(payload: {
