@@ -41,6 +41,9 @@ export class Signature {
     @Column({ name: 'client_request_id', type: 'uuid' })
     clientRequestId!: string;
 
+    @Column({ name: 'issuer_id', type: 'uuid', nullable: true })
+    issuerId!: string | null;
+
     @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
     createdAt!: Date;
 

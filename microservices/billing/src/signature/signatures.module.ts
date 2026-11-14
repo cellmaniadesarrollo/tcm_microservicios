@@ -6,9 +6,10 @@ import { SignatureBranch } from './entities/signature-branch.entity';
 import { SignatureCryptoService } from './services/signature-crypto.service';
 import { SignaturesController } from './controllers/signatures.controller';
 import { SignaturesService } from './services/signatures.service';
+import { BranchReplica } from '../companies/entities/branch-replica.entity';
 
 @Module({
-    imports: [TypeOrmModule.forFeature([Signature, SignatureBranch]), AwsS3Module],
+    imports: [TypeOrmModule.forFeature([Signature, SignatureBranch, BranchReplica]), AwsS3Module],
     controllers: [SignaturesController],
     providers: [SignaturesService, SignatureCryptoService],
     exports: [SignaturesService], // el servicio que firma facturas lo necesitará

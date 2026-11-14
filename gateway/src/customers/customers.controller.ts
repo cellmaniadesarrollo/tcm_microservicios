@@ -222,4 +222,32 @@ export class CustomersController {
       ),
     );
   }
+
+  /** Catálogos para el formulario de facturación: { idTypes, personTypes } */
+  @Get('billing/form-catalogs')
+  async getBillingFormCatalogs() {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_billing_form_catalogs' },
+        { internalToken: process.env.INTERNAL_SECRET },
+      ),
+    );
+  }
+
+  /** Lista paginada de BillingData de la empresa del usuario */
+  @Get('billing/list')
+  async listBilling(
+    @Query('q') q: string,
+    @Query('active') active: string,
+    @Query('page') page: string,
+    @Query('limit') limit: string,
+    @User() user: any,
+  ) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'list_billing' },
+        { internalToken: process.env.INTERNAL_SECRET, q, active, page, limit, user },
+      ),
+    );
+  }
 }

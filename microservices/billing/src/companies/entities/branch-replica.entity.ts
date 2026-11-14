@@ -1,4 +1,4 @@
-//microservices\orders\src\companies\entities\branch-replica.entity.ts 
+//microservices\billing\src\companies\entities\branch-replica.entity.ts 
 import {
   Entity,
   PrimaryColumn,

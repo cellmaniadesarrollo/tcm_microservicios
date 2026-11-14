@@ -4,7 +4,7 @@ import {
     NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Like, QueryFailedError, Repository } from 'typeorm';
+import { DataSource, ILike, Like, QueryFailedError, Repository } from 'typeorm';
 import { RpcException } from '@nestjs/microservices';
 import { BillingData } from './entities/billing-data.entity';
 import { CustomerBillingData } from './entities/customer-billing-data.entity';
@@ -1290,4 +1290,38 @@ export class BillingService {
         return result;
     }
 
+    async list(data: any) {
+        try {
+            if (!data?.user?.companyId)
+            throw new RpcException(new BadRequestException('companyId es requerido'));
+
+            const page = Math.max(1, Number(data.page) || 1);
+            const limit = Math.min(50, Math.max(1, Number(data.limit) || 20));
+            const q = String(data.q ?? '').trim();
+
+            const base: Record<string, any> = { company: { id: data.user.companyId } };
+            if (data.active === 'true') base.isActive = true;
+            if (data.active === 'false') base.isActive = false;
+
+            const where = q
+            ? ['idNumber', 'firstName', 'lastName', 'tradeName', 'mainEmail'].map((f) => ({
+                ...base,
+                [f]: ILike(`%${q}%`),
+                }))
+            : base;
+
+            const [items, total] = await this.billingRepo.findAndCount({
+            where,
+            relations: { idType: true, personType: true, gender: true },
+            order: { firstName: 'ASC' },
+            skip: (page - 1) * limit,
+            take: limit,
+            });
+
+            return { items, total, page, limit };
+        } catch (error) {
+            if (error instanceof RpcException) throw error;
+            throw new RpcException(new InternalServerErrorException('Error al listar datos de facturación'));
+        }
+    }
 }

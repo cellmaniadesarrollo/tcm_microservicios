@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsNotEmpty, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateSignatureDto {
     @IsString()
@@ -23,4 +23,8 @@ export class CreateSignatureDto {
 
     @IsUUID()
     clientRequestId!: string;
+    
+    @IsOptional()
+    @IsUUID()
+    issuerId?: string;
 }
