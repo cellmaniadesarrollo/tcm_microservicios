@@ -11,11 +11,14 @@ export class SpareAssignmentsSyncController implements OnModuleInit {
     constructor(
         private readonly spareAssignmentsService: SpareAssignmentsService,
         @Inject('SPARE_ASSIGNMENTS_SYNC') private readonly syncClient: ClientProxy,
+        @Inject('INVENTORY_CORE_SYNC') private readonly coreSyncClient: ClientProxy,
     ) { }
 
     /** No bloquea el arranque: la sync corre en segundo plano. */
     onModuleInit() {
+        void this.syncCoreOnStart();
         void this.syncOnStart();
+
     }
 
     private async syncOnStart() {
@@ -40,7 +43,27 @@ export class SpareAssignmentsSyncController implements OnModuleInit {
             console.warn('⚠️ Sync inicial de spare assignments omitida:', err?.message ?? err);
         }
     }
+    /** Sync del sistema nuevo (inventory-core). Segundo plano; su fallo no afecta al legacy. */
+    private async syncCoreOnStart() {
 
+        try {
+            const fromCache = await this.spareAssignmentsService.getLastUpdatedAt('inventory-core');
+            console.log(`🔄 Sincronizando spare assignments (inventory-core) desde: ${fromCache ?? 'el origen del tiempo'}`);
+
+            const response = await firstValueFrom(
+                this.coreSyncClient
+                    .send(
+                        { cmd: 'async_core_spare_assignments_start' },
+                        { internalToken: process.env.INTERNAL_SECRET, fromCache },
+                    )
+                    .pipe(timeout(30000)),
+            );
+
+            await this.spareAssignmentsService.syncBulk(response);
+        } catch (err: any) {
+            console.warn('⚠️ Sync inicial de spare assignments (inventory-core) omitida:', err?.message ?? err);
+        }
+    }
     @MessagePattern({ cmd: 'cancel_spare_assignment' })
     async cancelSpareAssignment(
         @Payload() payload: {

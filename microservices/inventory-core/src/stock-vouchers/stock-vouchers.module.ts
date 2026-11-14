@@ -13,6 +13,7 @@ import { StockVouchersService } from './stock-vouchers.service';
 import { StockVoucherAttachment } from './entities/stock-voucher-attachment.entity';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { OutboxModule } from '../outbox/outbox.module';
+import { SpareCancellationsModule } from '../spare-cancellations/spare-cancellations.module';
 
 @Module({
   imports: [
@@ -23,7 +24,8 @@ import { OutboxModule } from '../outbox/outbox.module';
     SequencesModule,
     AuditLogModule,
     AwsS3Module,
-    OutboxModule
+    OutboxModule,
+    SpareCancellationsModule
   ],
   controllers: [StockVouchersController],
   providers: [StockVouchersService],

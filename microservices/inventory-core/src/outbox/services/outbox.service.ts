@@ -74,6 +74,7 @@ export class OutboxService implements OnModuleInit, OnModuleDestroy {
         if (!ids.length) return;
         try {
             await this.runBatch(ids);
+            await this.runBatch(ids); // 2.ª pasada: libera el siguiente evento de la misma key (p. ej. SPARE_CANCELLED tras SPARE_RETURNED)
         } catch (error: any) {
             console.error('❌ [Outbox] dispatchNow:', error?.message);
         }

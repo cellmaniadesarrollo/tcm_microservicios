@@ -129,6 +129,7 @@ Front ──HTTP──> gateway (Nest + Fastify) ──RabbitMQ──> ms invent
   `create_receipt`, `list_receipts`, `create_stock_voucher`, `search_orders`,
   `get_employees_basic`). **No** usar `modulo.accion` (`stock_vouchers.create`):
   ya causó un desajuste.
+- Publica también réplicas de productos y lotes hacia ms-billing (Kafka vía outbox + bulk por RabbitMQ inventory_core_queue_sync)  
 
 ## 2. Mapa del MS e índice
 
@@ -151,6 +152,8 @@ src/
   products/                    productos (SKU), modelos, imágenes, usos → products/AGENTS.md
   receipts/                    ingresos                                → receipts/AGENTS.md
   sri/                         consulta SRI por clave de acceso        → sri/AGENTS.md
+  spare-assignments-sync/      bulk de asignaciones hacia órdenes      → spare-assignments-sync/AGENTS.md
+  spare-cancellations/         solicitudes de cancelación de repuestos → spare-cancellations/AGENTS.md
   stock/                       StockService, lotes, saldos, unidades, kardex → stock/AGENTS.md
   stock-vouchers/              salidas y retornos manuales, fotos por línea → stock-vouchers/AGENTS.md
   suppliers/
@@ -185,8 +188,13 @@ AGENTS.md del módulo.
   origen: `ORDERS_ASYNC` (queue `orders_queue_sync`), `USER_ASYNC` (queue
   `users_queue_sync`). Los comandos de sync llevan
   `internalToken: process.env.INTERNAL_SECRET`.
+- Inventory-core **responde** el bulk `async_core_spare_assignments_start`
+  (cola propia **(sin confirmar)**) y **consulta** a órdenes
+  `async_spare_cancellations_start`; ambos con `internalToken`.
+  Variables: `ORDERS_CANCELLATIONS_QUEUE`.
 - **Sync inicial:** los controllers de réplica hacen el sync en `onModuleInit`
   (catálogos primero, luego datos).
+- Comandos de sync que atiende este MS: get_products_sync, get_lots_sync (paginados por cursor, validan internalToken con el interceptor global)
 
 ### 3.3 Seeds al arrancar
 Ver `catalogs/AGENTS.md`.
@@ -285,6 +293,8 @@ Ver `catalogs/AGENTS.md`.
   Para eventos a Kafka el patrón es el **outbox**: `outbox.enqueue(em, …)` dentro de la
   transacción y `void outbox.dispatchNow(ids)` tras el commit, fuera del `try` que limpia S3.
   Los consumidores deben ser idempotentes (entrega al menos una vez).
+- **Timers propios:** usar `setInterval` + `unref` (sin `@nestjs/schedule`)
+  para poller y barridos; siempre con bandera contra solapes.
 
 ## 5. Convenciones del gateway (repo aparte, sin AGENTS.md)
 
@@ -421,7 +431,7 @@ Los pendientes de cada módulo viven en su AGENTS.md. Numeración conservada.
 | 28 | `users-employees-events/` |
 | 29 | `orders-relay/` (búsqueda sin tildes) |
 | L1–L11 | `labels/` |
-| O1–O6 | `outbox/` (fase 3, bulk, retención, deuda legacy) |
+| O1–O9 | `outbox/` y `spare-cancellations/` |
 
 ## 8. Errores y lecciones transversales
 
@@ -471,7 +481,9 @@ Los específicos de un módulo van en su AGENTS.md.
 - `KafkaProducerService.emit` no lanza (devuelve `false`): comprobar el booleano.
 - Un `assigned` reentregado con `save` en órdenes revive asignaciones devueltas:
   usar insert-or-ignore para `origin = 'inventory-core'`.
-
+- Un `UPDATE ... RETURNING` con `dataSource.query` puede devolver `[filas, n]`
+  o filas: normalizar. Reconciliar sin filtrar por línea propia respondería
+  `active` a solicitudes del legacy.
 ## 9. Estado de implementación (resumen)
 
 El detalle por componente está en el AGENTS.md de cada módulo, bajo "Estado".
@@ -486,7 +498,8 @@ El detalle por componente está en el AGENTS.md de cada módulo, bajo "Estado".
 | `labels` (MS + gateway): imprimir por lote y desde la lista de ingresos        | **Probado**                                            |
 | Etiquetas al registrar un ingreso (`labels` en `create_receipt`)               | **Probado**                                            |
 | `outbox` + `SPARE_ASSIGNED` / `SPARE_RETURNED` hacia órdenes (inventory-core + MS órdenes) | **Probado** (2026-11-10)           |
-| Cancelación por solicitud, bulk de inventory-core (`outbox/` O1, O2)           | **No construido**                                      |
+| Cancelación por solicitud, bulk de asignaciones y reconciliación de solicitudes | **Probado** (2026-11-14) |
+| Endpoints de bodega para listar y rechazar solicitudes (`spare-cancellations/` O7) | **No construido** (otro hilo) |
 
 **Primera prueba recomendada:** ver `stock-vouchers/AGENTS.md`, sección
 "Estado".

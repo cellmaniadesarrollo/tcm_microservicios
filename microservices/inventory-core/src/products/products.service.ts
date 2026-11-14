@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { randomUUID } from 'crypto';
-import { DataSource, In, MoreThan } from 'typeorm';
+import { DataSource, EntityManager, In, MoreThan } from 'typeorm';
 import { ProductType } from '../product-catalogs/entities/product-type.entity';
 import { ProductName } from '../product-catalogs/entities/product-name.entity';
 import { Color } from '../product-catalogs/entities/color.entity';
@@ -25,6 +25,9 @@ import { ProductDetailQuery } from './queries/product-detail.query';
 import { ReceiptSearchQuery } from './queries/receipt-search.query';
 import { ListProductsQuery } from './types/product-list.types';
 import { ProductForReceipt, ReceiptProductItem, SearchProductsForReceiptQuery } from './types/product-receipt.types';
+import { OutboxService } from '../outbox/services/outbox.service';
+import { PRODUCT_EVENTS, PRODUCT_TOPICS } from '../outbox/constants/outbox-topics';
+import { buildProductSnapshots } from './events/product-snapshot';
 
 // Compatibilidad: otros módulos pueden seguir importando estos tipos desde products.service
 export * from './types/product-list.types';
@@ -39,7 +42,20 @@ export class ProductsService {
         private readonly listQuery: ProductListQuery,
         private readonly detailQuery: ProductDetailQuery,
         private readonly receiptQuery: ReceiptSearchQuery,
+        private readonly outbox: OutboxService,
     ) { }
+
+    /** Un PRODUCT_UPSERTED por producto, con el estado ya guardado. Usar con el `em` de la transacción. */
+    private async enqueueProductUpserted(em: EntityManager, ids: string[]): Promise<string[]> {
+        const snaps = await buildProductSnapshots(em, ids);
+        return this.outbox.enqueue(em, snaps.map((s) => ({
+            companyId: s.companyId,
+            topic: PRODUCT_TOPICS.UPSERTED,
+            eventType: PRODUCT_EVENTS.UPSERTED,
+            key: s.id,
+            payload: s as unknown as Record<string, unknown>,
+        })));
+    }
 
     // ───────────────────────── Crear ─────────────────────────
 
@@ -54,6 +70,7 @@ export class ProductsService {
         const uploaded = await this.images.uploadFiles(productId, companyId, files);
 
         let summary: { id: string; code: number; sku: string; name: string; imagesCount: number };
+        let outboxIds: string[] = [];
 
         try {
             summary = await this.dataSource.transaction(async (em) => {
@@ -144,6 +161,7 @@ export class ProductsService {
 
                 // 8. Guardar producto (compatibleModels y usages tienen cascade) + imágenes
                 try {
+                    const now = new Date();
                     const product = await em.save(
                         em.create(Product, {
                             id: productId,
@@ -168,6 +186,8 @@ export class ProductsService {
                             billableInRepairOrders: dto.billableInRepairOrders ?? false,
                             compatibleModels: modelIds.map((modelId) => ({ modelId })),
                             usages: usageIds.map((usageId) => ({ usageId })),
+                            createdAt: now,
+                            updatedAt: now,
                         }),
                     );
                     await this.audit.log(em, {
@@ -176,6 +196,8 @@ export class ProductsService {
                     });
                     // Registrar imágenes en la misma transacción
                     await this.images.insertImages(em, product.id, uploaded, userId);
+
+                    outboxIds = await this.enqueueProductUpserted(em, [product.id]);
 
                     return {
                         id: product.id,
@@ -206,6 +228,8 @@ export class ProductsService {
         }
 
         // Fuera del try: el producto ya está confirmado, no se deben borrar sus imágenes
+        void this.outbox.dispatchNow(outboxIds);
+
         const { items } = await this.searchForReceipt({ id: summary.id }, companyId);
 
         return { ...summary, option: items[0] ?? null };
@@ -245,7 +269,8 @@ export class ProductsService {
 
         assertValidDto(dto);
 
-        return this.dataSource.transaction(async (em) => {
+        let outboxIds: string[] = [];
+        const result = await this.dataSource.transaction(async (em) => {
             // Bloquea la fila para que dos ediciones simultáneas no se pisen
             const product = await em.findOne(Product, {
                 where: { id, companyId, status: true },
@@ -367,8 +392,9 @@ export class ProductsService {
                 after.usageIds = nextIds;
             }
 
-            // Si solo cambiaron modelos o usos, igual se refresca "última modificación"
-            if (relationsChanged) patch.updatedAt = new Date();
+            // Hubo cambio real (columnas o relaciones): se fija la fecha desde JS, después de tomar el lock
+            const changed = relationsChanged || Object.keys(patch).length > 0;
+            if (changed) patch.updatedAt = new Date();
 
             // ── Guardar ──
             try {
@@ -390,14 +416,19 @@ export class ProductsService {
                 action: AuditAction.UPDATED, userId, before, after,
             });
 
+            if (changed) outboxIds = await this.enqueueProductUpserted(em, [id]);
+
             return { id: product.id, code: product.code, sku: product.sku };
         });
+        void this.outbox.dispatchNow(outboxIds);
+        return result;
     }
 
     // ───────────────────────── Desactivar / reactivar ─────────────────────────
 
     async remove(id: string, companyId: string, userId: string) {
-        return this.dataSource.transaction(async (em) => {
+        let outboxIds: string[] = [];
+        const result = await this.dataSource.transaction(async (em) => {
             const product = await em.findOne(Product, {
                 where: { id, companyId },
                 lock: { mode: 'pessimistic_write' },
@@ -420,7 +451,7 @@ export class ProductsService {
             }
             // TODO: bloquear también si tiene órdenes activas (cuando exista el módulo)
 
-            await em.update(Product, { id, companyId }, { status: false });
+            await em.update(Product, { id, companyId }, { status: false, updatedAt: new Date() });
 
             await this.audit.log(em, {
                 companyId, entity: Product, entityId: id,
@@ -428,13 +459,18 @@ export class ProductsService {
                 before: { code: product.code, sku: product.sku, upc: product.upc, status: true },
             });
 
+            outboxIds = await this.enqueueProductUpserted(em, [id]);
+
             return { id, sku: product.sku, deleted: true };
         });
+        void this.outbox.dispatchNow(outboxIds);
+        return result;
     }
 
     /** Reactiva un producto desactivado. El SKU y el UPC siguen siendo los mismos. */
     async restore(id: string, companyId: string, userId: string) {
-        return this.dataSource.transaction(async (em) => {
+        let outboxIds: string[] = [];
+        const result = await this.dataSource.transaction(async (em) => {
             const product = await em.findOne(Product, {
                 where: { id, companyId },
                 lock: { mode: 'pessimistic_write' },
@@ -446,7 +482,7 @@ export class ProductsService {
                 throw new RpcException(new ConflictException('El producto ya está activo'));
             }
 
-            await em.update(Product, { id, companyId }, { status: true });
+            await em.update(Product, { id, companyId }, { status: true, updatedAt: new Date() });
 
             // Se usa UPDATED para no depender de un valor nuevo en el enum de auditoría.
             // Si prefieres, agrega AuditAction.RESTORED y cámbialo aquí.
@@ -457,8 +493,12 @@ export class ProductsService {
                 after: { status: true },
             });
 
+            outboxIds = await this.enqueueProductUpserted(em, [id]);
+
             return { id, sku: product.sku, restored: true };
         });
+        void this.outbox.dispatchNow(outboxIds);
+        return result;
     }
 
     // ───────────────────────── Consultas ─────────────────────────
@@ -495,5 +535,56 @@ export class ProductsService {
 
     searchForReceipt(query: SearchProductsForReceiptQuery, companyId: string) {
         return this.receiptQuery.search(query, companyId);
+    }
+
+    // ───────────────────────── Sync para réplicas ─────────────────────────
+
+    /**
+     * Página de snapshots de TODAS las empresas (incluye inactivos), ordenada por (updated_at, id).
+     * cursor = "ISO|uuid" de la última fila de la página anterior. updatedSince = ISO (sync incremental).
+     */
+    async syncPage(params: { cursor?: string | null; updatedSince?: string | null; limit?: number }) {
+        const limit = Math.min(1000, Math.max(1, Math.trunc(Number(params.limit)) || 500));
+
+        let curTs: string | null = null;
+        let curId: string | null = null;
+        if (params.cursor) {
+            const [ts, id] = String(params.cursor).split('|');
+            if (!ts || !id || Number.isNaN(Date.parse(ts)) || !/^[0-9a-f-]{36}$/i.test(id)) {
+                throw new RpcException(new BadRequestException('El cursor no es válido'));
+            }
+            curTs = new Date(ts).toISOString();
+            curId = id.toLowerCase();
+        }
+
+        let since: string | null = null;
+        if (params.updatedSince) {
+            if (Number.isNaN(Date.parse(String(params.updatedSince)))) {
+                throw new RpcException(new BadRequestException('updatedSince no es válido'));
+            }
+            since = new Date(params.updatedSince).toISOString();
+        }
+
+        // date_trunc a ms: las filas viejas guardan microsegundos y el cursor viaja en ms
+        const rows: Array<{ id: string; ts: Date }> = await this.dataSource.query(
+            `SELECT id, date_trunc('milliseconds', updated_at) AS ts
+           FROM products
+          WHERE ($1::timestamptz IS NULL
+                 OR (date_trunc('milliseconds', updated_at), id) > ($1::timestamptz, $2::uuid))
+            AND ($3::timestamptz IS NULL OR updated_at >= $3::timestamptz)
+          ORDER BY ts ASC, id ASC
+          LIMIT $4`,
+            [curTs, curId, since, limit + 1],
+        );
+
+        const hasMore = rows.length > limit;
+        const page = hasMore ? rows.slice(0, limit) : rows;
+        const items = await buildProductSnapshots(this.dataSource.manager, page.map((r) => r.id));
+
+        const last = page[page.length - 1];
+        return {
+            items,
+            nextCursor: hasMore && last ? `${new Date(last.ts).toISOString()}|${last.id}` : null,
+        };
     }
 }

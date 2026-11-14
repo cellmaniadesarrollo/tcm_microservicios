@@ -11,6 +11,7 @@ import { KafkaModule } from './kafka/kafka.module';
 import { HealthModule } from './health/health.module';
 import { KafkaListenersOrchestrator } from './kafka/kafka-listeners.orchestrator';
 import { AuditModule } from './audit/audit.module';
+import { ReplicaModule } from './replica/replica.module';
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -22,7 +23,7 @@ import { AuditModule } from './audit/audit.module';
       database: process.env.DB_NAME,
       autoLoadEntities: true,
       synchronize: true,
-    }), AuditModule, CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule, HealthModule,],
+    }), AuditModule, CustomersModule, BillingModule, CatalogsModule, BroadcastModule, CompaniesModule, KafkaModule, HealthModule, ReplicaModule,],
   controllers: [AppController],
   providers: [AppService, KafkaListenersOrchestrator],
 })

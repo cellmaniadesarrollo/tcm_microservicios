@@ -28,6 +28,7 @@ import { StockVoucherAttachment } from './entities/stock-voucher-attachment.enti
 import { StockUnit } from '../stock/entities/stock-unit.entity';
 import { OutboxService } from '../outbox/services/outbox.service';
 import { INVENTORY_CORE_ORIGIN, SPARE_EVENTS, SPARE_TOPICS } from '../outbox/constants/outbox-topics';
+import { SpareCancellationsService } from '../spare-cancellations/services/spare-cancellations.service';
 
 
 // Filtros fijos del selector de lotes. Para sumar otros, agrégalos aquí.
@@ -103,6 +104,7 @@ export class StockVouchersService {
         private readonly mainBranch: MainBranchService,
         private readonly s3: AwsS3Service,
         private readonly outbox: OutboxService,
+        private readonly cancellations: SpareCancellationsService,
     ) { }
 
     // ═════════════════════════════ Crear ═════════════════════════════
@@ -1227,6 +1229,14 @@ export class StockVouchersService {
             },
         }));
 
-        return this.outbox.enqueue(em, events);
+        // Las líneas que quedaron en 0 cierran su solicitud de cancelación pendiente (si la hay).
+        // Van DESPUÉS del SPARE_RETURNED (mayor seq, misma key).
+        const closing = await this.cancellations.confirmForReturnedLines(
+            em,
+            p.companyId,
+            p.items.filter((it) => it.remainingQuantity === 0).map((it) => it.originLineId),
+        );
+
+        return this.outbox.enqueue(em, [...events, ...closing]);
     }
 }
