@@ -16,6 +16,8 @@ import { SignaturesModule } from './signature/signatures.module';
 import { LotsReplicaModule } from './lots-replica/lots-replica.module';
 import { ClientsReplicaModule } from './clients-replica/clients-replica.module';
 import { IssuersModule } from './issuer/issuers.module';
+import { SriCatalogsModule } from './sri-catalogs/sri-catalogs.module';
+import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 
 @Module({
   imports: [
@@ -52,6 +54,8 @@ import { IssuersModule } from './issuer/issuers.module';
     // Dominio de billing (se agrega después)
     SignaturesModule,
     IssuersModule,
+    SriCatalogsModule,
+    SriDocumentsModule,
   ],
 })
 export class AppModule { }
