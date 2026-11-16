@@ -403,7 +403,7 @@ services:
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}   # ya está en el .env
-      - MAX_REQUESTS=${SCRAPER_MAX_REQUESTS:-300}            # default en el compose
+      - MAX_REQUESTS=${SCRAPER_MAX_REQUESTS:-500}            # default en el compose
       - SCRAPE_DELAY=${SCRAPER_DELAY:-20s}                   # default en el compose
     networks:
       - backend
