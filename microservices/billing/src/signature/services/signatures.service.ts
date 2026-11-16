@@ -162,4 +162,23 @@ export class SignaturesService {
     const { items } = await this.list(companyId);
     return items.find((i) => i.id === id);
   }
+
+  async updateIssuer(companyId: string, id: string, issuerId: string | null) {
+    const repo = this.ds.getRepository(Signature);
+    const sig = await repo.findOne({ where: { id, companyId } });
+    if (!sig) throw new NotFoundException('Firma no encontrada.');
+
+    if (issuerId) {
+      const issuer = await this.ds.getRepository(Issuer).findOne({
+        where: { id: issuerId, companyId, active: true },
+      });
+      if (!issuer) throw new BadRequestException('Emisor no válido.');
+    }
+
+    sig.issuerId = issuerId;
+    await repo.save(sig);
+
+    const { items } = await this.list(companyId);
+    return items.find((i) => i.id === id);
+  }
 }

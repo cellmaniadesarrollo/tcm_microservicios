@@ -23,4 +23,8 @@ export class SignaturesService {
     updateBranches(id: string, branchIds: string[], user: UserCtx) {
         return this.billing.send('update_signature_branches', { id, dto: { branchIds }, user });
     }
+
+    updateIssuer(id: string, issuerId: string | null, user: UserCtx) {
+        return this.billing.send('update_signature_issuer', { id, dto: { issuerId }, user });
+    }
 }

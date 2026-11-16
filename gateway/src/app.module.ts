@@ -19,6 +19,7 @@ import { InventarioModule } from './inventario/inventario.module';
 import { InventoryCoreModule } from './inventory-core/inventory-core.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { SignaturesModule } from './signatures/signatures.module';
+import { IssuersModule } from './issuers/issuers.module';
 
 @Module({
   imports: [
@@ -39,7 +40,8 @@ import { SignaturesModule } from './signatures/signatures.module';
     InventarioModule,
     InventoryCoreModule,
     ReferralsModule,
-    SignaturesModule
+    SignaturesModule,
+    IssuersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

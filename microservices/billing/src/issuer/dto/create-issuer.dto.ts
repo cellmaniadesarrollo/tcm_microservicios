@@ -8,4 +8,3 @@ export class CreateIssuerDto {
   environment?: number;
   emissionType?: number;
 }
-export type UpdateIssuerDto = Partial<Omit<CreateIssuerDto, 'ruc'>> & { active?: boolean };

@@ -2,7 +2,8 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { DataSource, In, QueryFailedError } from 'typeorm';
 import { BranchReplica } from '../../companies/entities/branch-replica.entity';
 import { SignatureBranch } from '../../signature/entities/signature-branch.entity';
-import { CreateIssuerDto, UpdateIssuerDto } from '../dto/create-issuer.dto';
+import { CreateIssuerDto } from '../dto/create-issuer.dto';
+import { UpdateIssuerDto } from '../dto/update-issuer.dto';
 import { Issuer } from '../entities/issuer.entity';
 
 const up = (s?: string | null) => (s ? s.trim().toUpperCase() : null);

@@ -41,4 +41,9 @@ export class SignaturesController {
     updateBranches(@Payload() data: any) {
         return this.service.updateBranches(data.user.companyId, data.id, data.dto.branchIds);
     }
+
+    @MessagePattern({ cmd: 'update_signature_issuer' })
+    updateIssuer(@Payload() data: any) {
+        return this.service.updateIssuer(data.user.companyId, data.id, data.dto.issuerId ?? null);
+    }
 }

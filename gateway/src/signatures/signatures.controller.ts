@@ -8,6 +8,7 @@ import { CreateSignatureGatewayDto } from './dto/create-signature-gateway.dto';
 import { prepareSignatureFile } from './signature-file.helper';
 import { SignaturesService } from './signatures.service';
 import { UpdateSignatureBranchesGatewayDto } from './dto/update-signature-branches-gateway.dto';
+import { UpdateSignatureIssuerGatewayDto } from './dto/update-signature-issuer-gateway.dto';
 
 @Controller('signatures')
 @Auth()
@@ -43,5 +44,14 @@ export class SignaturesController {
         @User() user: any,
     ) {
         return this.service.updateBranches(id, dto.branchIds, this.ctx(user));
+    }
+
+    @Put(':id/issuer')
+    updateIssuer(
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: UpdateSignatureIssuerGatewayDto,
+        @User() user: any,
+    ) {
+        return this.service.updateIssuer(id, dto.issuerId ?? null, this.ctx(user));
     }
 }

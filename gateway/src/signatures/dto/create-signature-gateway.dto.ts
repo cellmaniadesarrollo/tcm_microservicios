@@ -1,4 +1,4 @@
-import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsNotEmpty, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, ArrayUnique, IsArray, IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class CreateSignatureGatewayDto {
     @IsUUID('4', { message: 'El identificador de solicitud no es válido' })
@@ -16,4 +16,9 @@ export class CreateSignatureGatewayDto {
     @ArrayUnique()
     @IsUUID('4', { each: true, message: 'Hay una sucursal no válida' })
     branchIds!: string[];
+
+    /** Emisor de la firma. Opcional por ahora. */
+    @IsOptional()
+    @IsUUID('4', { message: 'El emisor no es válido' })
+    issuerId?: string;
 }
