@@ -1,12 +1,14 @@
 import { Controller, Inject, OnModuleInit } from '@nestjs/common';
-import { ClientProxy, MessagePattern } from '@nestjs/microservices';
+import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { OrdersRelayService } from './orders-relay.service';
+import { OrdersReconcileService } from './orders-reconcile.service';
 
 @Controller('orders-relay')
 export class OrdersRelayController implements OnModuleInit {
     constructor(
         private readonly ordersRelayService: OrdersRelayService,
+        private readonly reconcileService: OrdersReconcileService,
         @Inject('ORDERS_ASYNC') private readonly ordersClient: ClientProxy,
     ) { }
 
@@ -14,14 +16,13 @@ export class OrdersRelayController implements OnModuleInit {
         console.log('🚀 Iniciando procesos de sincronización...');
 
         try {
-            // 1. Sincronizar Normalizaciones (Maestros/Catálogos)
-            // Es recomendable hacerlo primero para tener los IDs de referencia listos.
+            // 1. Catálogos primero (los IDs de referencia deben existir)
             await this.syncNormalizations();
 
-            // 2. Sincronizar Órdenes
-            await this.syncOrders();
+            // 2. Reconciliación de órdenes, sin await para no bloquear el arranque
+            void this.reconcileService.run('startup');
 
-            console.log('✅ Sincronización inicial completada con éxito.');
+            console.log('✅ Catálogos sincronizados; reconciliación de órdenes en segundo plano.');
         } catch (err: any) {
             console.error('❌ Error crítico en el ciclo de inicio:', err.message);
         }
@@ -39,23 +40,4 @@ export class OrdersRelayController implements OnModuleInit {
 
         await this.ordersRelayService.syncNormalizations(response);
     }
-
-    private async syncOrders() {
-        const fromCache = await this.ordersRelayService.getLastUpdatedAt();
-        console.log(`🔄 Sincronizando órdenes desde: ${fromCache ?? 'el origen del tiempo'}`);
-
-        const response = await firstValueFrom(
-            this.ordersClient.send(
-                { cmd: 'async_orders_start' },
-                {
-                    internalToken: process.env.INTERNAL_SECRET,
-                    fromCache,
-                },
-            ),
-        );
-
-        await this.ordersRelayService.syncOrdersBulk(response);
-    }
-
-
 }
