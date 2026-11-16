@@ -14,6 +14,7 @@ import { StockVoucherAttachment } from './entities/stock-voucher-attachment.enti
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { OutboxModule } from '../outbox/outbox.module';
 import { SpareCancellationsModule } from '../spare-cancellations/spare-cancellations.module';
+import { StockVouchersCancellationController } from './stock-vouchers-cancellation.controller';
 
 @Module({
   imports: [
@@ -27,7 +28,7 @@ import { SpareCancellationsModule } from '../spare-cancellations/spare-cancellat
     OutboxModule,
     SpareCancellationsModule
   ],
-  controllers: [StockVouchersController],
+  controllers: [StockVouchersController, StockVouchersCancellationController],
   providers: [StockVouchersService],
   exports: [StockVouchersService],
 })
