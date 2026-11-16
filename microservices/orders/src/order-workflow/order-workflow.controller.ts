@@ -25,6 +25,15 @@ export class OrderWorkflowController {
   constructor(private readonly orderWorkflowService: OrderWorkflowService,
     private readonly orderShippingService: OrderShippingService, private readonly orderPaymentsListService: OrderPaymentsListService) { }
 
+  @MessagePattern({ cmd: 'reconcile_orders_fingerprints' })
+  fingerprints(@Payload() p: { afterId: number; limit: number }) {
+    return this.orderWorkflowService.getReconcileFingerprints(p.afterId, p.limit);
+  }
+
+  @MessagePattern({ cmd: 'reconcile_orders_by_ids' })
+  byIds(@Payload() p: { ids: number[] }) {
+    return this.orderWorkflowService.findFullDataForSync(null, { ids: p.ids });
+  }
   @MessagePattern({ cmd: 'async_orders_start' })
   async onSyncStart(
     @Payload() payload: any,

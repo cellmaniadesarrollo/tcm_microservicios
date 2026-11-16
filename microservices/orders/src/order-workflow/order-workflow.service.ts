@@ -59,6 +59,7 @@ import { PartRequestStatus } from '../order-part-request/entities/enums/part-req
 import { PartRequest } from '../order-part-request/entities/part-request.entity';
 import { OrderPriority } from '../catalogs/entities/order-priority.entity';
 import { OrderTotalsService } from './order-totals/order-totals.service';
+import { orderFingerprint } from './order-fingerprint';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -2710,7 +2711,7 @@ export class OrderWorkflowService {
    * - Sin fromCache → todas las órdenes
    * - Con fromCache → solo modificadas/creadas después de esa fecha
    */
-  async findFullDataForSync(fromCache: string | null) {
+  async findFullDataForSync(fromCache: string | null, opts?: { ids?: number[] }) {
     const qb = this.orderRepo
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.company', 'company')
@@ -2741,7 +2742,12 @@ export class OrderWorkflowService {
       .orderBy('order.updatedAt', 'ASC')
       .addOrderBy('findings.createdAt', 'ASC')
       .addOrderBy('payments.paid_at', 'ASC');
-
+    if (opts?.ids) {
+      qb.where('order.id IN (:...ids)', { ids: opts.ids });
+    } else if (fromCache) {
+      const date = new Date(fromCache);
+      qb.where('order.createdAt > :date', { date }).orWhere('order.updatedAt > :date', { date });
+    }
     if (fromCache) {
       const date = new Date(fromCache);
       qb.where('order.createdAt > :date', { date })
@@ -2923,7 +2929,25 @@ export class OrderWorkflowService {
       updatedAt: order.updatedAt,
     }));
   }
+  async getReconcileFingerprints(afterId: number, limit: number) {
+    const rows = await this.orderRepo
+      .createQueryBuilder('o')
+      .select('o.id', 'id')
+      .where('o.id > :afterId', { afterId })
+      .orderBy('o.id', 'ASC')
+      .limit(limit)
+      .getRawMany();
 
+    const ids = rows.map((r) => Number(r.id));
+    if (!ids.length) return { items: [], lastId: null, hasMore: false };
+
+    const full = await this.findFullDataForSync(null, { ids });
+    return {
+      items: full.map((o) => ({ id: o.id, fp: orderFingerprint(o) })),
+      lastId: ids[ids.length - 1],
+      hasMore: ids.length === limit,
+    };
+  }
   private mapOrderToReplicaShape(order: any) {
     return {
       id: order.id,

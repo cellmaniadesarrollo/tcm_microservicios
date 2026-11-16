@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { OrdersRelayController } from './orders-relay.controller';
 import { OrdersRelayService } from './orders-relay.service';
+import { OrdersReconcileService } from './orders-reconcile.service';
 import { OrdersEventsListener } from './orders-events.listener';
 import { OrderReplica, OrderReplicaSchema } from './schemas/order-replica.schema';
 import { MongooseModule } from '@nestjs/mongoose';
@@ -11,6 +13,7 @@ import { OrderValidationModule } from '../order-validation/order-validation.modu
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     MongooseModule.forFeature([
       { name: OrderReplica.name, schema: OrderReplicaSchema },
       { name: OrderStatus.name, schema: OrderStatusSchema },
@@ -28,13 +31,17 @@ import { OrderValidationModule } from '../order-validation/order-validation.modu
         },
       },
     ]),
-    OrderValidationModule
+    OrderValidationModule,
   ],
   controllers: [OrdersRelayController],
-  providers: [OrdersRelayService, OrdersEventsListener],
-  exports: [OrdersEventsListener, MongooseModule.forFeature([
-    { name: OrderStatus.name, schema: OrderStatusSchema },
-    { name: OrderType.name, schema: OrderTypeSchema },
-  ]), OrdersRelayService,]
+  providers: [OrdersRelayService, OrdersReconcileService, OrdersEventsListener],
+  exports: [
+    OrdersEventsListener,
+    MongooseModule.forFeature([
+      { name: OrderStatus.name, schema: OrderStatusSchema },
+      { name: OrderType.name, schema: OrderTypeSchema },
+    ]),
+    OrdersRelayService,
+  ],
 })
 export class OrdersRelayModule { }
