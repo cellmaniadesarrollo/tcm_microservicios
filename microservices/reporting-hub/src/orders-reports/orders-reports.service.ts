@@ -77,6 +77,8 @@ export class OrdersReportsService {
         card: string,
         page: number,
         limit: number,
+        sortBy?: string,
+        sortDir?: string,
     ): Promise<{ data: any[]; total: number }> {
 
         const { todayStart, todayEnd } = _dayBoundaries();
@@ -196,7 +198,36 @@ export class OrdersReportsService {
             month_collected: 'last_paid_at', range_collected: 'last_paid_at',
         };
 
-        const sortMode: SortMode = SORT_MODE_MAP[resolvedCard] ?? 'entry_date';
+        const defaultSortMode: SortMode = SORT_MODE_MAP[resolvedCard] ?? 'entry_date';
+
+        // ── Validación de params de orden ──
+        if (sortDir !== undefined && !['asc', 'desc'].includes(sortDir)) {
+            throw new RpcException({ status: 400, message: `sort_dir inválido: "${sortDir}" (use asc|desc)` });
+        }
+
+        if (sortBy !== undefined && !['entry_date', 'delivered_at'].includes(sortBy)) {
+            throw new RpcException({ status: 400, message: `sort_by inválido: "${sortBy}" (use entry_date|delivered_at)` });
+        }
+
+        const DELIVERED_CARDS = [
+            'today_delivered',
+            'week_delivered',
+            'month_delivered',
+            'range_delivered',
+            'global_delivered',
+            'global_validation_checked',
+            'global_validation_unchecked',
+        ];
+
+        if (sortBy === 'delivered_at' && !DELIVERED_CARDS.includes(resolvedCard)) {
+            throw new RpcException({
+                status: 400,
+                message: 'sort_by=delivered_at solo aplica a cards de órdenes entregadas',
+            });
+        }
+
+        const sortMode: SortMode = (sortBy as SortMode | undefined) ?? defaultSortMode;
+        const direction: 1 | -1 = sortDir === 'asc' ? 1 : -1;
 
         const VALIDATION_CARDS = ['global_validation_checked', 'global_validation_unchecked'];
         const isValidationCard = VALIDATION_CARDS.includes(resolvedCard);
@@ -220,6 +251,7 @@ export class OrdersReportsService {
             sortMode === 'delivered_at' || isValidationCard,
             sortMode,
             postLookupMatch,
+            direction,
         );
     }
 
@@ -230,7 +262,8 @@ export class OrdersReportsService {
         includeValidation = false,
         sortMode: SortMode = 'entry_date',
         postLookupMatch: Record<string, any> | null = null,
-    ): Promise<{ data: any[]; total: number }> {
+        direction: 1 | -1 = -1,
+    ) {
 
         const skip = (page - 1) * limit;
         const now = new Date();
@@ -257,8 +290,8 @@ export class OrdersReportsService {
         })();
 
         const sortStage: PipelineStage = sortMode === 'entry_date'
-            ? { $sort: { entry_date: -1 } }
-            : { $sort: { _sort_date: -1 } };
+            ? { $sort: { entry_date: direction, _id: direction } }
+            : { $sort: { _sort_date: direction, _id: direction } };
 
         const validationProjection = includeValidation
             ? { _validation: { $arrayElemAt: ['$_validation', 0] } }

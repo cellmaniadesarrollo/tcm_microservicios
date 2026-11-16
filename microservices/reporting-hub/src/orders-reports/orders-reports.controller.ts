@@ -77,12 +77,11 @@ export class OrdersReportsController {
     card: string;
     page: number;
     limit: number;
+    sortBy?: string;
+    sortDir?: string;
   }) {
     return this.ordersReportsService.getDashboardDrill(
-      data.user.companyId,
-      data.card,
-      data.page,
-      data.limit,
+      data.user.companyId, data.card, data.page, data.limit, data.sortBy, data.sortDir,
     );
   }
 

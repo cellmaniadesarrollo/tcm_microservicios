@@ -18,6 +18,8 @@ import { OrdersController } from './orders/orders.controller';
 import { OrdersService } from './orders/orders.service';
 import { LabelsController } from './labels/labels.controller';
 import { LabelsService } from './labels/labels.service';
+import { SpareCancellationsController } from './spare-cancellations/spare-cancellations.controller';
+import { SpareCancellationsService } from './spare-cancellations/spare-cancellations.service';
 
 @Module({
   imports: [
@@ -35,9 +37,9 @@ import { LabelsService } from './labels/labels.service';
     AuthModule,
   ],
   controllers: [InventoryCoreController, SuppliersController, ReceiptsController, SriController, StockVouchersController,
-    EmployeesController, OrdersController, LabelsController
+    EmployeesController, OrdersController, LabelsController, SpareCancellationsController
   ],
   providers: [InventoryCoreService, InventoryCoreServiceClient, SuppliersService, ReceiptsService, SriService,
-    StockVouchersService, EmployeesService, OrdersService, LabelsService],
+    StockVouchersService, EmployeesService, OrdersService, LabelsService, SpareCancellationsService],
 })
 export class InventoryCoreModule { }

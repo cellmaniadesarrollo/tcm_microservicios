@@ -53,9 +53,11 @@ export class ReportsController {
     @Query('card') card: string,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('sort_by') sortBy: string | undefined,
+    @Query('sort_dir') sortDir: string | undefined,
     @User() user: any,
   ) {
-    return this.reportsService.getDashboardDrill(user, card, page, limit);
+    return this.reportsService.getDashboardDrill(user, card, page, limit, sortBy, sortDir);
   }
 
   @Patch('validations/:id')

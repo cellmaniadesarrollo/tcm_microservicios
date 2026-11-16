@@ -1239,4 +1239,86 @@ export class StockVouchersService {
 
         return this.outbox.enqueue(em, [...events, ...closing]);
     }
+
+    // ═════════════════════════ Aprobar cancelación ═════════════════════════
+
+    /**
+     * Bodega aprueba una solicitud de cancelación: registra un retorno por TODO lo pendiente de la
+     * línea con el motivo elegido. El retorno total cierra la solicitud (confirmForReturnedLines).
+     * Idempotente: el clientRequestId sale de la solicitud, así que un reintento devuelve el mismo vale.
+     */
+    async approveCancellation(id: string, dto: any, companyId: string, userId: string) {
+        const requestId = asUuid(id, 'La solicitud');
+        const reasonId = asUuid(dto?.reasonId, 'El motivo');
+        const note = typeof dto?.note === 'string' ? dto.note.trim() : '';
+        if (note.length > MAX_NOTE) throw bad(`La nota no puede superar ${MAX_NOTE} caracteres`);
+
+        const em = this.dataSource.manager;
+
+        const found: Array<{ id: string; movement_id: string; status: string }> = await em.query(
+            `SELECT id, movement_id, status
+               FROM spare_cancellation_requests
+              WHERE id = $1 AND company_id = $2`,
+            [requestId, companyId],
+        );
+        const req = found[0];
+        if (!req) throw notFound('La solicitud no existe');
+
+        // Reintento: si el vale de esta aprobación ya existe, se devuelve tal cual
+        const clientRequestId = this.approvalRequestId(req.id);
+        const already = await em.findOne(StockVoucher, {
+            where: { companyId, clientRequestId },
+            select: { id: true },
+        });
+        if (already) {
+            return { ...(await this.summary(em, companyId, already.id, true)), cancellationRequestId: req.id };
+        }
+
+        if (req.status === 'REJECTED') throw conflict('La solicitud ya fue rechazada');
+        if (req.status !== 'PENDING') throw conflict('La solicitud ya fue confirmada por otro retorno');
+
+        const line = await em.findOne(StockVoucherLine, { where: { id: String(req.movement_id).toLowerCase() } });
+        if (!line) throw notFound('La línea del repuesto no existe');
+
+        const origin = await em.findOne(StockVoucher, {
+            where: { id: line.voucherId, companyId, direction: VoucherDirection.OUT },
+        });
+        if (!origin) throw notFound('El vale de salida original no existe');
+
+        const reason = await em.findOne(StockMovementReason, { where: { id: reasonId, companyId, status: true } });
+        if (!reason) throw bad('El motivo no existe o está inactivo');
+        if (reason.direction !== VoucherDirection.IN) throw bad('El motivo elegido no es de retorno');
+
+        const progress = await this.returnProgress(em, [line.id]);
+        const pending = line.quantity - (progress.qty.get(line.id) ?? 0);
+        if (pending <= 0) {
+            throw conflict('El repuesto ya fue devuelto a bodega; la solicitud se confirmará automáticamente');
+        }
+
+        // Serializado: las unidades que aún no regresaron (createIn exige exactamente `pending`)
+        const issued = await em.find(StockVoucherLineUnit, { where: { lineId: line.id } });
+        const returnedUnits = progress.units.get(line.id) ?? new Set<string>();
+        const unitIds = issued.map((u) => u.unitId).filter((u) => !returnedUnits.has(u));
+
+        const result = await this.create(
+            {
+                clientRequestId,
+                reasonId: reason.id,
+                originVoucherId: origin.id,
+                note: note || undefined,
+                lines: [{ originLineId: line.id, quantity: pending, unitIds }],
+            },
+            companyId,
+            userId,
+        );
+
+        return { ...result, cancellationRequestId: req.id };
+    }
+
+    /** uuid determinista (v4 válido) derivado de la solicitud: una aprobación = un clientRequestId. */
+    private approvalRequestId(requestId: string): string {
+        const h = createHash('sha256').update(`spare_cancellation_approve:${requestId}`).digest('hex');
+        const variant = ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16);
+        return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-${variant}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+    }
 }
