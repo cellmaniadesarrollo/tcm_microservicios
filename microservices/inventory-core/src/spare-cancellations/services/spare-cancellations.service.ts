@@ -1,5 +1,5 @@
-import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import { DataSource, EntityManager, In } from 'typeorm';
 import { KafkaProducerService } from '../../kafka/kafka.producer';
@@ -10,6 +10,10 @@ import { StockVoucherLine } from '../../stock-vouchers/entities/stock-voucher-li
 import { StockVoucher } from '../../stock-vouchers/entities/stock-voucher.entity';
 import { CancellationStatus, SpareCancellationRequest } from '../entities/spare-cancellation-request.entity';
 import { OutboxInput, OutboxService } from '../../outbox/services/outbox.service';
+import { ListSpareCancellationsQuery, SpareCancellationSortBy, SpareCancellationStatusFilter } from '../types/spare-cancellation-list.types';
+import { escapeLike, norm, toTokens } from '../../common/helpers/search-sql';
+import { AuditLogService } from '../../audit-log/audit-log.service';
+import { AuditAction } from '../../audit-log/enums/audit-action.enum';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,6 +21,25 @@ const STARTUP_DELAY_MS = 15_000;                                           // de
 const SWEEP_MS = Number(process.env.SPARE_SWEEP_MS) || 60_000;
 const RECONCILE_MS = Number(process.env.SPARE_RECONCILE_MS) || 10 * 60_000;
 const SAFETY_MARGIN_MS = 5 * 60_000;
+
+const LIST_DEFAULT_LIMIT = 20;
+const LIST_MAX_LIMIT = 100;
+
+const LIST_SORT_SQL: Record<SpareCancellationSortBy, string> = {
+    createdAt: 'c.created_at',
+    orderNumber: 'COALESCE(o.order_number, v.order_number)',
+    productName: 'pn.name',
+    sku: 'p.sku',
+};
+
+const LIST_FROM_SQL = `
+    FROM spare_cancellation_requests c
+    JOIN stock_voucher_lines l ON l.id::text = lower(c.movement_id)
+    JOIN stock_vouchers v ON v.id = l.voucher_id AND v.company_id = c.company_id
+    JOIN products p ON p.id = l.product_id
+    JOIN product_names pn ON pn.id = p.product_name_id
+    JOIN lots lt ON lt.id = l.lot_id
+    LEFT JOIN orders_replica o ON o.id = v.order_id AND o.company_id = v.company_id::text`;
 
 @Injectable()
 export class SpareCancellationsService implements OnModuleInit, OnModuleDestroy {
@@ -28,6 +51,7 @@ export class SpareCancellationsService implements OnModuleInit, OnModuleDestroy 
         private readonly dataSource: DataSource,
         private readonly kafkaProducer: KafkaProducerService,
         private readonly outbox: OutboxService,
+        private readonly audit: AuditLogService,
         @Inject('ORDERS_CANCELLATIONS_SYNC') private readonly ordersClient: ClientProxy | null,
     ) { }
 
@@ -299,5 +323,222 @@ export class SpareCancellationsService implements OnModuleInit, OnModuleDestroy 
                 assignment_status: 'returned',
             },
         }));
+    }
+
+    /**
+ * Bandeja de bodega: solicitudes de cancelación con lo necesario para precargar el retorno
+ * (originVoucherId + originLineId). Solo lectura. Por defecto solo PENDING.
+ */
+    async list(query: ListSpareCancellationsQuery, companyId: string) {
+        const bad400 = (m: string) => new RpcException(new BadRequestException(m));
+
+        const page = Math.max(1, Number(query.page) || 1);
+        const limit = Math.min(LIST_MAX_LIMIT, Math.max(1, Number(query.limit) || LIST_DEFAULT_LIMIT));
+
+        const status: SpareCancellationStatusFilter = query.status ?? CancellationStatus.PENDING;
+        if (status !== 'ALL' && !Object.values(CancellationStatus).includes(status)) {
+            throw bad400('El estado de la solicitud no es válido');
+        }
+
+        const sortBy: SpareCancellationSortBy = query.sortBy && LIST_SORT_SQL[query.sortBy] ? query.sortBy : 'createdAt';
+        const sortDir = query.sortDir === 'ASC' || query.sortDir === 'DESC' ? query.sortDir : sortBy === 'createdAt' ? 'DESC' : 'ASC';
+
+        // $1 = empresa, $2 = estado; el resto se agrega según la búsqueda
+        // $1 = empresa; el estado solo se agrega si no es ALL
+        const params: unknown[] = [companyId];
+        const where: string[] = ['c.company_id = $1'];
+        if (status !== 'ALL') {
+            params.push(status);
+            where.push(`c.status = $${params.length}`);
+        }
+
+        // Cada palabra debe coincidir (AND) con algún campo (OR), sin tildes ni mayúsculas
+        for (const token of toTokens(query.search)) {
+            params.push(`%${escapeLike(token)}%`);
+            const like = `$${params.length}`;
+            const ors = [
+                `${norm('pn.name')} LIKE ${like}`,
+                `lower(p.sku) LIKE ${like}`,
+                `${norm('o.customer_name')} LIKE ${like}`,
+                `${norm(`concat_ws(' ', o.device_brand, o.device_model)`)} LIKE ${like}`,
+                `${norm('c.reason')} LIKE ${like}`,
+            ];
+            // Un entero también puede ser el número de orden o el código del vale
+            if (/^\d{1,9}$/.test(token)) {
+                params.push(Number(token));
+                const n = `$${params.length}`;
+                ors.push(`COALESCE(o.order_number, v.order_number) = ${n}`, `v.code = ${n}`);
+            }
+            where.push(`(${ors.join(' OR ')})`);
+        }
+        const whereSql = `WHERE ${where.join(' AND ')}`;
+
+        const countRows: Array<{ total: number }> = await this.dataSource.query(
+            `SELECT COUNT(*)::int AS total ${LIST_FROM_SQL} ${whereSql}`,
+            params,
+        );
+        const total = Number(countRows[0]?.total ?? 0);
+
+        const pageParams = [...params, limit, (page - 1) * limit];
+        const rows: any[] = await this.dataSource.query(
+            `SELECT c.id, c.request_id AS "requestId", c.status, c.reason,
+                    c.requested_by_id AS "requestedById", c.error_detail AS "errorDetail",
+                    c.confirmed_at AS "confirmedAt", c.created_at AS "createdAt",
+                    c.order_id AS "orderId",
+                    COALESCE(o.order_number, v.order_number) AS "orderNumber",
+                    o.customer_name AS "customerName",
+                    o.status_id AS "orderStatusId", o.status_name AS "orderStatusName",
+                    o.device_brand AS "deviceBrand", o.device_model AS "deviceModel",
+                    v.id AS "originVoucherId", v.code AS "originVoucherCode",
+                    l.id AS "originLineId", l.line_no AS "lineNo", l.quantity,
+                    COALESCE((SELECT SUM(r.quantity) FROM stock_voucher_lines r WHERE r.origin_line_id = l.id), 0)::int AS "returned",
+                    p.id AS "productId", p.sku, pn.name AS "productName",
+                    lt.id AS "lotId", lt.code AS "lotCode"
+             ${LIST_FROM_SQL}
+             ${whereSql}
+             ORDER BY ${LIST_SORT_SQL[sortBy]} ${sortDir}, c.id ASC
+             LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+            pageParams,
+        );
+
+        const items = rows.map((r) => {
+            const quantity = Number(r.quantity);
+            const returned = Number(r.returned);
+            return {
+                id: r.id,
+                requestId: r.requestId,
+                status: r.status,
+                reason: r.reason ?? null,
+                requestedById: r.requestedById ?? null,
+                errorDetail: r.errorDetail ?? null,
+                createdAt: r.createdAt,
+                confirmedAt: r.confirmedAt ?? null,
+                order: {
+                    id: r.orderId,
+                    number: r.orderNumber != null ? Number(r.orderNumber) : null,
+                    customerName: r.customerName ?? null,
+                    statusId: r.orderStatusId ?? null,
+                    statusName: r.orderStatusName ?? null,
+                    device: [r.deviceBrand, r.deviceModel].filter(Boolean).join(' ') || null,
+                },
+                // Para precargar el retorno NO_REQUERIDO
+                originVoucherId: r.originVoucherId,
+                originVoucherCode: Number(r.originVoucherCode),
+                originLineId: r.originLineId,
+                lineNo: Number(r.lineNo),
+                product: { id: r.productId, sku: r.sku, name: r.productName },
+                lot: { id: r.lotId, code: Number(r.lotCode) },
+                quantity,
+                returned,
+                pending: Math.max(0, quantity - returned),
+            };
+        });
+
+        const includeFilters = query.includeFilters === true || query.includeFilters === 'true';
+
+        return {
+            items,
+            meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+            ...(includeFilters
+                ? {
+                    filters: {
+                        statuses: [
+                            { value: 'ALL', label: 'Todas' },
+                            { value: CancellationStatus.PENDING, label: 'Pendientes' },
+                            { value: CancellationStatus.CONFIRMED, label: 'Confirmadas' },
+                            { value: CancellationStatus.REJECTED, label: 'Rechazadas' },
+                        ],
+                        sortOptions: [
+                            { value: 'createdAt', label: 'Más recientes' },
+                            { value: 'orderNumber', label: 'Número de orden' },
+                            { value: 'productName', label: 'Producto' },
+                            { value: 'sku', label: 'SKU' },
+                        ],
+                    },
+                }
+                : {}),
+        };
+    }
+
+    /**
+  * Bodega rechaza una solicitud PENDING: queda REJECTED y órdenes recibe
+  * SPARE_CANCELLED(active + error_detail) por outbox, en la misma transacción.
+  */
+    async reject(id: string, reason: unknown, companyId: string, userId: string) {
+        const bad400 = (m: string) => new RpcException(new BadRequestException(m));
+
+        if (!UUID_RE.test(id)) throw bad400('La solicitud no es válida');
+        const detail = typeof reason === 'string' ? reason.trim() : '';
+        if (detail.length < 3) throw bad400('Indica el motivo del rechazo (mínimo 3 caracteres)');
+        if (detail.length > 500) throw bad400('El motivo del rechazo es demasiado largo (máximo 500 caracteres)');
+
+        let outboxIds: string[] = [];
+        let replayed = false;
+
+        const result = await this.dataSource.transaction(async (em) => {
+            const found: any[] = await em.query(
+                `SELECT id, request_id, movement_id, order_id, status
+                   FROM spare_cancellation_requests
+                  WHERE id = $1 AND company_id = $2
+                    FOR UPDATE`,
+                [id.toLowerCase(), companyId],
+            );
+            const row = found[0];
+            if (!row) throw new RpcException(new NotFoundException('La solicitud no existe'));
+
+            if (row.status === CancellationStatus.REJECTED) {
+                replayed = true;
+                return { id: row.id, status: CancellationStatus.REJECTED };
+            }
+            if (row.status === CancellationStatus.CONFIRMED) {
+                throw new RpcException(new ConflictException('La solicitud ya fue confirmada por un retorno'));
+            }
+
+            // Si la línea ya no tiene saldo, el barrido la confirma: rechazarla dejaría a órdenes con "active" sobre un repuesto devuelto
+            const bal: any[] = await em.query(
+                `SELECT l.quantity - COALESCE((SELECT SUM(r.quantity) FROM stock_voucher_lines r WHERE r.origin_line_id = l.id), 0) AS pending
+                   FROM stock_voucher_lines l
+                  WHERE l.id::text = lower($1)`,
+                [row.movement_id],
+            );
+            if (!bal[0] || Number(bal[0].pending) <= 0) {
+                throw new RpcException(new ConflictException('El repuesto ya fue devuelto a bodega; la solicitud se confirmará automáticamente'));
+            }
+
+            await em.query(
+                `UPDATE spare_cancellation_requests
+                    SET status = $2, error_detail = $3, updated_at = now()
+                  WHERE id = $1`,
+                [row.id, CancellationStatus.REJECTED, detail],
+            );
+
+            await this.audit.log(em, {
+                companyId, entity: SpareCancellationRequest, entityId: row.id,
+                action: AuditAction.UPDATED, userId,
+                before: { status: CancellationStatus.PENDING },
+                after: { status: CancellationStatus.REJECTED, errorDetail: detail },
+            });
+
+            outboxIds = await this.outbox.enqueue(em, [{
+                companyId,
+                topic: SPARE_TOPICS.CANCELLED,
+                eventType: SPARE_EVENTS.CANCELLED,
+                key: row.movement_id, // misma key de la línea: conserva el orden con sus otros eventos
+                payload: {
+                    request_id: row.request_id,
+                    movement_id: row.movement_id,
+                    order_id: Number(row.order_id),
+                    assignment_status: 'active',
+                    error_detail: detail,
+                },
+            }]);
+
+            return { id: row.id, status: CancellationStatus.REJECTED };
+        });
+
+        // Fuera de la transacción: nunca lanza
+        if (outboxIds.length) void this.outbox.dispatchNow(outboxIds);
+
+        return { ...result, replayed };
     }
 }
