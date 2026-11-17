@@ -17,6 +17,7 @@ export class OrdersReportsController {
   }
 
   ) {
+
     return this.ordersReportsService.getOrderFiltersMetadata(data.user.companyId);
   }
 

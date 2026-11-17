@@ -18,6 +18,8 @@ import { ProductListQuery } from './queries/product-list.query';
 import { ProductDetailQuery } from './queries/product-detail.query';
 import { ReceiptSearchQuery } from './queries/receipt-search.query';
 import { OutboxModule } from '../outbox/outbox.module';
+import { SaleSearchController } from './sale-search.controller';
+import { SaleSearchQuery } from './queries/sale-search.query';
 
 @Module({
   imports: [
@@ -27,11 +29,10 @@ import { OutboxModule } from '../outbox/outbox.module';
     AuditLogModule,
     OutboxModule
   ],
-  controllers: [ProductsController, ProductImagesController],
-  providers: [ProductsService,
-    ProductListQuery,
-    ProductDetailQuery,
-    ReceiptSearchQuery, ProductImagesService],
+  // controllers:
+  controllers: [ProductsController, ProductImagesController, SaleSearchController],
+  // providers:
+  providers: [ProductsService, ProductListQuery, ProductDetailQuery, ReceiptSearchQuery, SaleSearchQuery, ProductImagesService],
   exports: [ProductsService],
 })
 export class ProductsModule { }

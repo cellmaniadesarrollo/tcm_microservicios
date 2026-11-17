@@ -15,6 +15,7 @@ import { ReorderProductImagesDto } from './dto/reorder-product-images.dto';
 import { parseAndProcessMultipart } from '../common/helpers/multipart-request.helper';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { UpdateProductGatewayDto } from './dto/update-product-gateway.dto';
+import { SearchSaleProductsQueryDto } from './dto/search-sale-products-query.dto';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5 MB por imagen ya convertida a WebP
 
@@ -172,5 +173,15 @@ export class InventoryCoreController {
     @User() user: any,
   ) {
     return this.inventoryCoreService.getProductHistory(id, page, limit, this.ctx(user));
+  }
+
+
+  @Get('products/search-sale')
+  searchSaleProducts(
+    @Query(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }))
+    query: SearchSaleProductsQueryDto,
+    @User() user: any,
+  ) {
+    return this.inventoryCoreService.searchSaleProducts(query, this.ctx(user));
   }
 }

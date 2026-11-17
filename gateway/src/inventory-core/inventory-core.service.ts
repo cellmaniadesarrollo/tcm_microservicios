@@ -3,6 +3,7 @@ import { InventoryCoreServiceClient } from '../common/microservices/inventory-co
 import { CreateProductGatewayDto } from './dto/create-product-gateway.dto';
 import { ListProductsQueryDto } from './dto/list-products-query.dto';
 import { UpdateProductGatewayDto } from './dto/update-product-gateway.dto';
+import { SearchSaleProductsQueryDto } from './dto/search-sale-products-query.dto';
 type UserCtx = { userId: string; companyId: string; branchId?: string };
 @Injectable()
 export class InventoryCoreService {
@@ -57,5 +58,8 @@ export class InventoryCoreService {
 
     getProductHistory(id: string, page: number, limit: number, user: UserCtx) {
         return this.inventoryClient.send('get_product_history', { id, page, limit, user });
+    }
+    searchSaleProducts(query: SearchSaleProductsQueryDto, user: UserCtx) {
+        return this.inventoryClient.send('search_sale_products', { query, user });
     }
 }
