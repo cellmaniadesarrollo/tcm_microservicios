@@ -66,6 +66,7 @@ export class OrdersReportsService {
 
         @InjectModel(EmployeeCommission.name)
         private readonly employeeCommissionModel: Model<EmployeeCommissionDocument>,
+
     ) { }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -697,7 +698,7 @@ export class OrdersReportsService {
                 },
                 { $project: { _id: 0, today: 1, activePending: 1 } },
             ]),
-            getPremiumCommissions(this.orderReplicaModel, companyId, userId),
+            getPremiumCommissions(this.orderReplicaModel, this.userEmployeeCacheModel, companyId, userId),
             // Queries de comisiones: una por comisión activa × período (today/week/month)
             ...commissionDescriptors.map(descriptor =>
                 this.orderReplicaModel
