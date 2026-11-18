@@ -31,6 +31,7 @@ export class CustomersEventsService {
     await this.cache.save({
       customerId: String(data.id),
       companyId: String(companyId),
+      idNumber,
       firstName,
       secondName,
       lastName,
