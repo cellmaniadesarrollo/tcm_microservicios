@@ -18,7 +18,7 @@ export const ESTADO_LABELS: Record<string, string> = {
     [S.SOLICITADO]: 'Solicitado',
     [S.EN_BUSQUEDA_PERSONAL]: 'En búsqueda personal',
     [S.ESPERA_DE_PAGO]: 'Espera de pago',
-    [S.EN_PROCESO_DE_PEDIDO]: 'En proceso de pedido',
+    [S.EN_PROCESO_DE_PEDIDO]: 'Pagado',
     [S.LLEGADO_PENDIENTE_VALIDACION]: 'Llegado, pendiente de validación',
     [S.LLEGADO_ASIGNADO]: 'Llegada aprobada y asignada',
     [S.PENDIENTE_INGRESO]: 'Pendiente de ingreso',
