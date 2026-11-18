@@ -81,6 +81,7 @@ export class OrdersReportsController {
     sortBy?: string;
     sortDir?: string;
   }) {
+
     return this.ordersReportsService.getDashboardDrill(
       data.user.companyId, data.card, data.page, data.limit, data.sortBy, data.sortDir,
     );

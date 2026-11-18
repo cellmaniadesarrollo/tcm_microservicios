@@ -19,7 +19,7 @@ services:
       - INTERNAL_SECRET=${INTERNAL_SECRET}
       - RABBIT_URL
       - KAFKA_BOOTSTRAP_SERVERS
-      - MONGO_URI=${MONGODB_URI}
+      - MONGO_URI=${MONGODB_URI_SCRAPER}
       - MONGO_DB=${MONGODB_DB_SCRAPER}
       - SCHEDULE_TZ=${SCHEDULE_TZ:-America/Guayaquil}
     networks:
