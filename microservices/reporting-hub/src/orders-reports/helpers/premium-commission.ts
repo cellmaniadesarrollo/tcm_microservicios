@@ -212,3 +212,57 @@ export async function getPremiumCommissions(
         month: summarize(periodEntries.month),
     };
 }
+
+export interface PremiumOrderResult {
+    surchargePercentage: number;
+    baseAmount: number;
+    premiumAmount: number;
+    shareAmount: number;
+    technicianCount: number;
+    perTechnician: { id: string; amount: number }[];
+    referenceDate: Date;
+}
+
+/** null si la orden no genera comisión Premium. */
+export function calcPremiumForOrder(order: any, validTechnicians: Set<string>): PremiumOrderResult | null {
+    if (order.priority?.name !== PREMIUM_PRIORITY_NAME) return null;
+    const pct = Number(order.priority_surcharge_percentage ?? 0);
+    if (!(pct > 0)) return null;
+
+    const delivered = (order.statusHistory ?? [])
+        .filter((h: any) => h.toStatus?.id === ORDER_STATUS.ENTREGADA)
+        .sort((a: any, b: any) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime())[0];
+    if (!delivered) return null;
+
+    const ids = new Set<string>();
+    for (const f of order.findings ?? []) {
+        if (f.is_active === false) continue;
+        for (const p of f.procedures ?? []) {
+            if (p.is_active === false) continue;
+            const id = p.performedBy?.id;
+            if (id && validTechnicians.has(id)) ids.add(id);
+        }
+    }
+    if (!ids.size) return null;
+
+    const base = (order.payments ?? []).reduce((s: number, p: any) => {
+        const a = Number(p.amount ?? 0);
+        return p.flow_type === 'INGRESO' ? s + a : p.flow_type === 'EGRESO' ? s - a : s;
+    }, 0);
+    if (!(base > 0)) return null;
+
+    const premium = base * (pct / 100);
+    const share = premium * (pct / 100);
+    const each = round2(share / ids.size);
+    if (each <= 0) return null;
+
+    return {
+        surchargePercentage: pct,
+        baseAmount: round2(base),
+        premiumAmount: round2(premium),
+        shareAmount: round2(share),
+        technicianCount: ids.size,
+        perTechnician: [...ids].map((id) => ({ id, amount: each })),
+        referenceDate: new Date(delivered.changed_at),
+    };
+}
