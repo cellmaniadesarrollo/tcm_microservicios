@@ -1240,7 +1240,6 @@ export class StockVouchersService {
         return this.outbox.enqueue(em, [...events, ...closing]);
     }
 
-    // ═════════════════════════ Aprobar cancelación ═════════════════════════
 
     /**
      * Bodega aprueba una solicitud de cancelación: registra un retorno por TODO lo pendiente de la

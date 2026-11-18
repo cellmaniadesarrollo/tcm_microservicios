@@ -13,7 +13,7 @@ import { OrdersFilterInternalDto } from '../orders-relay/schemas/order-filters-i
 import { DRILL_CARD_KEYS, DrillCardKey } from './constants/drill-cards.constants';
 import { OrderValidation, OrderValidationDocument } from '../order-validation/schemas/order-validation.schema';
 import { EmployeeCommission, EmployeeCommissionDocument } from '../users-employees-events/schemas/employee-commission.schema';
-import { buildCommissionQueries, calculateCommissions, hasActiveCommissions } from './helpers/commission.helper';
+import { buildCommissionQueries, calculateCommissions, calculateOrderCommission, hasActiveCommissions, toNumber } from './helpers/commission.helper';
 
 // ─── Helpers externos ─────────────────────────────────────────────────────────
 import {
@@ -29,9 +29,9 @@ import {
 } from './helpers/date-time.helpers';
 import { DAY_NAMES, buildWeekDays } from './helpers/dashboard-data.helpers';
 import { CASHIER_PENDING_STATUS_IDS, CASHIER_DELIVERED_STATUS_ID, SERVICE_TECNICO_TYPE_ID } from './helpers/cashier-dashboard.constants';
-import { getPremiumCommissions } from './helpers/premium-commission';
+import { calcPremiumForOrder, getPremiumCommissions } from './helpers/premium-commission';
 // ── Constantes de este dashboard ──────────────────────────────────────
-
+const round2 = (n: number) => Math.round(n * 100) / 100;
 type SortMode = 'entry_date' | 'finalized_at' | 'delivered_at' | 'last_paid_at';
 export const ORDER_STATUS = {
     INGRESADO: 1,
@@ -66,6 +66,7 @@ export class OrdersReportsService {
 
         @InjectModel(EmployeeCommission.name)
         private readonly employeeCommissionModel: Model<EmployeeCommissionDocument>,
+
     ) { }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -431,25 +432,31 @@ export class OrdersReportsService {
     // LISTA DE ÓRDENES
     // ─────────────────────────────────────────────────────────────────────────
 
-    async getOrdersList(companyId: string, dto: GetOrdersFilterDto): Promise<{ data: any[]; total: number }> {
+    async getOrdersList(companyId: string, dto: GetOrdersFilterDto) {
+        const page = dto.page ?? 1;
+        const limit = dto.limit ?? 20;
         const filter = this.buildMongoFilter(companyId, dto);
 
         const [raw, total] = await Promise.all([
             this.orderReplicaModel
                 .find(filter)
                 .select({
-                    id: 1, order_number: 1,
-                    previous_order_id: 1, revisadoAntes: 1,
-                    is_national: 1,
-                    currentStatus: 1, type: 1, branch: 1,
+                    id: 1, order_number: 1, previous_order_id: 1, revisadoAntes: 1,
+                    is_national: 1, currentStatus: 1, type: 1, branch: 1,
                     customer: 1, device: 1, technicians: 1,
-                    entry_date: 1, estimated_price: 1,
-                    statusHistory: 1, findings: 1, payments: 1
+                    entry_date: 1, estimated_price: 1, statusHistory: 1, findings: 1, payments: 1,
+                    priority: 1, priority_surcharge_percentage: 1,
                 })
-                .sort({ entry_date: -1 })
+                .sort({ entry_date: -1, _id: -1 }) // _id evita duplicados al paginar
+                .skip((page - 1) * limit)
+                .limit(limit)
                 .lean(),
             this.orderReplicaModel.countDocuments(filter),
         ]);
+
+        const commissionMap = dto.includeCommissions
+            ? await this._commissionsForOrders(companyId, raw)
+            : null;
 
         const now = new Date();
         const data = raw.map((order): any => {
@@ -495,22 +502,40 @@ export class OrdersReportsService {
             })) ?? [];
 
             return {
-                id: order.id, order_number: order.order_number,
-                revisadoAntes: order.revisadoAntes, currentStatus: order.currentStatus,
+                id: order.id,
+                order_number: order.order_number,
+                previous_order_id: order.previous_order_id,
+                revisadoAntes: order.revisadoAntes,
+                currentStatus: order.currentStatus,
                 is_national: order.is_national ?? false,
                 type: order.type,
-                branch: { id: order.branch.id, name: order.branch.name },
-                customer: { id: order.customer.id, firstName: order.customer.firstName, lastName: order.customer.lastName },
+                branch: { id: order.branch?.id, name: order.branch?.name },
+                customer: { id: order.customer?.id, firstName: order.customer?.firstName, lastName: order.customer?.lastName },
                 device,
                 technicians: order.technicians?.map(t => ({ id: t.id, first_name: t.first_name, last_name: t.last_name })) ?? [],
-                entry_date: order.entry_date, finalized_at: finalizedAt, completed_at: completedAt,
+                entry_date: order.entry_date,
+                finalized_at: finalizedAt,
+                completed_at: completedAt,
                 estimated_price: order.estimated_price ?? null,
-                total_procedures_cost: totalProceduresCost, total_paid: totalPaid,
-                findings, has_active_warranty: hasActiveWarranty,
+                total_procedures_cost: totalProceduresCost,
+                total_paid: totalPaid,
+                findings,
+                has_active_warranty: hasActiveWarranty,
+                priority: order.priority ?? null,
+                priority_surcharge_percentage: order.priority_surcharge_percentage ?? 0,
+                ...(commissionMap && {
+                    commissions: commissionMap.get(order.id) ?? { premium: null, regular: [], totals: { premium: 0, regular: 0 } }
+                }),
             };
         });
 
-        return { data, total };
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages: Math.max(1, Math.ceil(total / limit)),
+        };
     }
 
     buildMongoFilter(companyId: string, dto: GetOrdersFilterDto): Record<string, any> {
@@ -697,7 +722,7 @@ export class OrdersReportsService {
                 },
                 { $project: { _id: 0, today: 1, activePending: 1 } },
             ]),
-            getPremiumCommissions(this.orderReplicaModel, companyId, userId),
+            getPremiumCommissions(this.orderReplicaModel, this.userEmployeeCacheModel, companyId, userId),
             // Queries de comisiones: una por comisión activa × período (today/week/month)
             ...commissionDescriptors.map(descriptor =>
                 this.orderReplicaModel
@@ -1374,5 +1399,60 @@ export class OrdersReportsService {
         };
     }
 
+    private async _commissionsForOrders(companyId: string, orders: any[]) {
+        // Una query de empleados y una de comisiones para toda la página
+        const employees = await this.userEmployeeCacheModel
+            .find({ companyId }).select('id first_name last_name username groups').lean();
 
+        const nameOf = new Map(employees.map((e: any) =>
+            [e.id, `${e.first_name} ${e.last_name}`.trim() || e.username]));
+        const validTechnicians = new Set<string>(
+            employees
+                .filter((e: any) => e.groups?.some((g: any) => g.group_name === 'TECHNICIANS'))
+                .map((e: any) => e.id),
+        );
+
+        const schemes = await this.employeeCommissionModel
+            .find({ employeeId: { $in: employees.map((e: any) => e.id) } }).lean();
+        const activeByEmployee = schemes
+            .map((s: any) => ({
+                employeeId: s.employeeId,
+                commissions: (s.commissions ?? [])
+                    .filter((c: any) => c.active)
+                    .map((c: any) => ({ ...c, value: toNumber(c.value) })),
+            }))
+            .filter((s) => s.commissions.length);
+
+        const result = new Map<number, any>();
+        for (const order of orders) {
+            const regular: any[] = [];
+            for (const emp of activeByEmployee) {
+                for (const c of emp.commissions) {
+                    for (const entry of calculateOrderCommission(order, emp.employeeId, c)) {
+                        regular.push({
+                            technician: { id: emp.employeeId, name: nameOf.get(emp.employeeId) ?? emp.employeeId },
+                            commissionType: c.commissionType,
+                            ...entry,
+                        });
+                    }
+                }
+            }
+
+            const p = calcPremiumForOrder(order, validTechnicians);
+            const premium = p && {
+                ...p,
+                perTechnician: p.perTechnician.map((t) => ({ ...t, name: nameOf.get(t.id) ?? t.id })),
+            };
+
+            result.set(order.id, {
+                premium,
+                regular,
+                totals: {
+                    premium: premium ? round2(premium.perTechnician.reduce((s, t) => s + t.amount, 0)) : 0,
+                    regular: round2(regular.reduce((s, e) => s + e.commissionAmount, 0)),
+                },
+            });
+        }
+        return result;
+    }
 }
