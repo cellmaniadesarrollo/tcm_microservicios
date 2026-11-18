@@ -12,8 +12,12 @@ import { CompaniesModule } from './companies/companies.module';
 // import { DevicesReplicaModule } from './devices-replica/devices-replica.module';
 import { ProductsReplicaModule } from './products-replica/products-replica.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { SignaturesModule } from './signature/signatures.module';
 import { LotsReplicaModule } from './lots-replica/lots-replica.module';
 import { ClientsReplicaModule } from './clients-replica/clients-replica.module';
+import { IssuersModule } from './issuer/issuers.module';
+import { SriCatalogsModule } from './sri-catalogs/sri-catalogs.module';
+import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 
 @Module({
   imports: [
@@ -48,6 +52,10 @@ import { ClientsReplicaModule } from './clients-replica/clients-replica.module';
     // DevicesReplicaModule,
 
     // Dominio de billing (se agrega después)
+    SignaturesModule,
+    IssuersModule,
+    SriCatalogsModule,
+    SriDocumentsModule,
   ],
 })
 export class AppModule { }

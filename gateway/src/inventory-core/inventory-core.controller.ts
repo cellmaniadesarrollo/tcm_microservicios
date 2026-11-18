@@ -182,6 +182,7 @@ export class InventoryCoreController {
     query: SearchSaleProductsQueryDto,
     @User() user: any,
   ) {
+    console.log('USUARIO:', this.ctx(user));
     return this.inventoryCoreService.searchSaleProducts(query, this.ctx(user));
   }
 }

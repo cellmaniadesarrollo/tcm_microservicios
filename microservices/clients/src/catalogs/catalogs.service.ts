@@ -267,4 +267,16 @@ export class CatalogsService implements OnModuleInit {
       throw new RpcException('Error obteniendo datos iniciales del catálogo');
     }
   }
+
+  async getBillingFormCatalogs() {
+    try {
+      const idTypes = await this.idTypeRepo.find({ where: { allowsBilling: true }, order: { id: 'ASC' } });
+      const personTypes = await this.personTypeRepo.find({ order: { name: 'ASC' } });
+      const genders = await this.genderRepo.find({ order: { name: 'ASC' } });
+      return { idTypes, personTypes, genders };
+    } catch (error) {
+      console.error(error);
+      throw new RpcException('Error obteniendo catálogos del formulario de facturación');
+    }
+  }
 }

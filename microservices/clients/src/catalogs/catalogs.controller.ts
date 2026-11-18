@@ -34,4 +34,9 @@ export class CatalogsController {
   async getInitialCatalogsBilling(@Payload() data: any) {
     return this.catalogsService.getInitialCatalogsBilling();
   }
+
+  @MessagePattern({ cmd: 'get_billing_form_catalogs' })
+  async getBillingFormCatalogs() {
+    return this.catalogsService.getBillingFormCatalogs();
+  }
 }
