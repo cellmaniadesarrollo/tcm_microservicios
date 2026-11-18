@@ -109,11 +109,19 @@ export class WhatsappOfficialService {
         language: string,
         bodyParams: string[],
         buttonParams?: { index: number; text: string }[],
+        headerParams: string[] = [],
     ): Promise<{ messageId: string | null }> {
         const apiVersion = session.apiVersion ?? 'v20.0';
         const url = `https://graph.facebook.com/${apiVersion}/${session.phoneNumberId}/messages`;
 
         const components: any[] = [];
+
+        if (headerParams.length) {
+            components.push({
+                type: 'header',
+                parameters: headerParams.map((text) => ({ type: 'text', text })),
+            });
+        }
 
         if (bodyParams.length) {
             components.push({
@@ -152,7 +160,6 @@ export class WhatsappOfficialService {
 
         const data: any = await res.json().catch(() => null);
         return { messageId: data?.messages?.[0]?.id ?? null };
-
     }
 
     private toE164(phone: string): string {

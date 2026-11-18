@@ -4,6 +4,7 @@ import { CompaniesEventsListener } from '../companies/companies-events.listener'
 //import { UsersEventsListener } from '../users-employees-events/users-events.listener';
 import { OrdersEventsListener } from '../orders-relay/orders-events.listener';
 import { CustomersEventsListener } from '../customers-events/customers-events.listener';
+import { ReferralsEventsListener } from '../referrals/referrals-events.listener';
 
 @Injectable()
 export class KafkaListenersOrchestrator implements OnModuleInit {
@@ -13,6 +14,7 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
         // private readonly usersListener: UsersEventsListener,
         private readonly ordersListener: OrdersEventsListener,
         private readonly customersListener: CustomersEventsListener,
+        private readonly referralsListener: ReferralsEventsListener,
     ) { }
 
     async onModuleInit() {
@@ -27,6 +29,9 @@ export class KafkaListenersOrchestrator implements OnModuleInit {
 
         try { this.customersListener.registerHandlers(); }
         catch (e) { console.error('❌ Customers handler error:', e); }
+
+        try { this.referralsListener.registerHandlers(); }
+        catch (e) { console.error('❌ Referrals handler error:', e); }
 
         await this.kafkaConsumer.start();
     }

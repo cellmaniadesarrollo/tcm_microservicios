@@ -3,9 +3,8 @@ import { KafkaProducerService } from '../kafka/kafka.producer';
 import { ReferralProfilesService } from '../referral-profiles/referral-profiles.service';
 import { ReferralProfileSource } from '../referral-profiles/entities/referral-profile.entity';
 
-// ⚠️ Ajusta al tópico real de tu dispatcher de notificaciones
-const NOTIFICATION_TOPIC =
-  process.env.NOTIFICATIONS_WHATSAPP_TOPIC ?? 'ms.notification.whatsapp.send';
+// Tópico que escucha el dispatcher (referrals-events.listener.ts)
+const NOTIFICATION_TOPIC = 'ms.referral.welcome';
 
 export interface SendWelcomeInput {
   companyId: string;
@@ -36,8 +35,9 @@ export class ReferralWelcomeService {
     const baseUrl = process.env.FRONTEND_URL;
     if (!baseUrl) return { sent: false, reason: 'no_frontend_url' };
 
-    const phone = this.normalizePhone(p.phone);
-    if (!phone) return { sent: false, reason: 'invalid_phone' };
+  // El dispatcher resuelve el móvil desde su caché; aquí solo normalizamos si viene
+  const phone = this.normalizePhone(p.phone);
+  if (p.phone && !phone) return { sent: false, reason: 'invalid_phone' };
 
     // Idempotente: si ya existe, no toca el origen original
     const profile = await this.profiles.ensureForCustomer(
@@ -52,7 +52,6 @@ export class ReferralWelcomeService {
     }
 
     const link = this.profiles.buildCardLink(baseUrl, profile.publicToken);
-    const nombre = p.firstName ? ` ${p.firstName}` : '';
 
     const ok = await this.producer.emit(
       NOTIFICATION_TOPIC,
@@ -60,13 +59,10 @@ export class ReferralWelcomeService {
       {
         companyId: p.companyId,
         customerId: p.customerId,
-        channel: 'whatsapp',
-        to: phone,
-        template: 'referral_welcome',
-        text:
-          `¡Gracias por confiar en nosotros${nombre}! 🎉\n` +
-          `Este es tu código personal para recomendarnos y ganar beneficios:\n${link}`,
-        meta: { profileId: profile.id, sourceType: p.source.type, sourceId: p.source.id ?? null },
+        code: profile.publicToken, // ⚠️ ajusta si el perfil tiene un campo "code" propio
+        shareLink: link,
+        phone,                      // extra, por si el dispatcher lo aprovecha
+        firstName: p.firstName ?? null,
       },
       p.customerId,
     );
