@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -75,5 +76,15 @@ export class ReferralsController {
   ) {
     const { companyId } = this.ctx(req);
     return this.service.sendWelcome({ ...dto, customerId, companyId });
+  }
+
+    /** Público: consulta de referidos por cédula (página /mis-referidos) */
+  @Get('my-referrals/:document')
+  @Public()
+  async myReferrals(@Param('document') document: string) {
+    if (!/^\d{10}$/.test(document)) {
+      throw new BadRequestException('La cédula debe tener 10 dígitos');
+    }
+    return this.service.getClaimsByDocument(document);
   }
 }
