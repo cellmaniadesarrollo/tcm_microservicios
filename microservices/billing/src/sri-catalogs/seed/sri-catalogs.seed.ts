@@ -10,6 +10,7 @@ import { SriWithholdingType } from '../entities/sri-withholding-type.entity';
 import { SriWithholdingRate } from '../entities/sri-withholding-rate.entity';
 import { SriTaxType } from '../entities/sri-tax-type.entity';
 import { SriErrorCode } from '../entities/sri-error-code.entity';
+import { SriPaymentMethod } from '../entities/sri-payment-method.entity';
 
 @Injectable()
 export class SriCatalogsSeed implements OnModuleInit {
@@ -66,6 +67,17 @@ export class SriCatalogsSeed implements OnModuleInit {
         { code: '7',  name: 'Exento de IVA',         percentage: 0,  taxable: false },
         { code: '8',  name: 'IVA diferenciado',      percentage: 8,  taxable: true },
         { code: '10', name: '13%',                   percentage: 13, taxable: true },
+    ], ['code']);
+
+    await this.ds.getRepository(SriPaymentMethod).upsert([
+        { code: '01', name: 'SIN UTILIZACIÓN DEL SISTEMA FINANCIERO' },
+        { code: '15', name: 'COMPENSACIÓN DE DEUDAS' },
+        { code: '16', name: 'TARJETA DE DÉBITO' },
+        { code: '17', name: 'DINERO ELECTRÓNICO' },
+        { code: '18', name: 'TARJETA PREPAGO' },
+        { code: '19', name: 'TARJETA DE CRÉDITO' },
+        { code: '20', name: 'OTROS CON UTILIZACIÓN DEL SISTEMA FINANCIERO' },
+        { code: '21', name: 'ENDOSO DE TÍTULOS' },
     ], ['code']);
 
     await this.ds.getRepository(SriWithholdingType).upsert([

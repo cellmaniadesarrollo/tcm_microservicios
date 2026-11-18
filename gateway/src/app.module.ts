@@ -19,6 +19,7 @@ import { InventarioModule } from './inventario/inventario.module';
 import { InventoryCoreModule } from './inventory-core/inventory-core.module';
 import { ReferralsModule } from './referrals/referrals.module';
 import { SignaturesModule } from './signatures/signatures.module';
+import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 import { IssuersModule } from './issuers/issuers.module';
 
 @Module({
@@ -41,6 +42,7 @@ import { IssuersModule } from './issuers/issuers.module';
     InventoryCoreModule,
     ReferralsModule,
     SignaturesModule,
+    SriDocumentsModule,
     IssuersModule,
   ],
   controllers: [AppController],

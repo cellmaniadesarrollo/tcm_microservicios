@@ -4,7 +4,7 @@ import { User } from '../common/auth/decorators/user.decorator';
 import { CreateInvoiceGatewayDto } from './dto/create-invoice-gateway.dto';
 import { SriDocumentsService } from './sri-documents.service';
 
-@Controller('invoices')
+@Controller('sri-invoices')
 @Auth()
 export class SriDocumentsController {
   constructor(private readonly service: SriDocumentsService) {}
@@ -16,6 +16,16 @@ export class SriDocumentsController {
   @Get()
   list(@User() user: any) {
     return this.service.list(this.ctx(user));
+  }
+
+  @Get('vat-rates')
+  vatRates() {
+    return this.service.listVatRates();
+  }
+
+  @Get('payment-methods')
+  paymentMethods() {
+    return this.service.listPaymentMethods();
   }
 
   @Post()

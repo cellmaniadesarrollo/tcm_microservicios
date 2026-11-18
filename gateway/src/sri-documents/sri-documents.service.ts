@@ -12,6 +12,14 @@ export class SriDocumentsService {
     return this.billing.send('create_invoice', { dto, user });
   }
 
+  listVatRates() {
+    return this.billing.send('list_vat_rates', {});
+  }
+
+  listPaymentMethods() {
+    return this.billing.send('list_payment_methods', {});
+  }
+
   list(user: UserCtx) {
     return this.billing.send('list_invoices', { user });
   }

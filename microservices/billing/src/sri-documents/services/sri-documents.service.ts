@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
 import { IssuersService } from '../../issuer/services/issuers.service';
+import { SriPaymentMethod } from '../../sri-catalogs/entities/sri-payment-method.entity';
 import { SriVatRate } from '../../sri-catalogs/entities/sri-vat-rate.entity';
 import { CreateInvoiceDto } from '../dto/create-invoice.dto';
 import { SriDocument } from '../entities/sri-document.entity';
@@ -117,6 +118,26 @@ export class SriDocumentsService {
     return new Map(
       rows.map((r) => [r.code, { percentage: Number(r.percentage), kind: kindOf(r) }]),
     );
+  }
+
+  /** Tarifas de IVA activas. */
+  async listVatRates() {
+    const items = await this.ds.getRepository(SriVatRate).find({
+      where: { active: true },
+      order: { code: 'ASC' },
+      select: { code: true, name: true, percentage: true, taxable: true },
+    });
+    return { items: items.map((r) => ({ ...r, percentage: Number(r.percentage) })) };
+  }
+
+  /** Formas de pago activas (tabla 24 del SRI). */
+  async listPaymentMethods() {
+    const items = await this.ds.getRepository(SriPaymentMethod).find({
+      where: { active: true },
+      order: { code: 'ASC' },
+      select: { code: true, name: true },
+    });
+    return { items };
   }
 
   async list(companyId: string) {

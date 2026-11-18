@@ -17,4 +17,14 @@ export class SriDocumentsController {
   listInvoices(@Payload() d: any) {
     return this.service.list(d.user.companyId);
   }
+
+  @MessagePattern({ cmd: 'list_vat_rates' })
+  listVatRates() {
+    return this.service.listVatRates();
+  }
+
+  @MessagePattern({ cmd: 'list_payment_methods' })
+  listPaymentMethods() {
+    return this.service.listPaymentMethods();
+  }
 }

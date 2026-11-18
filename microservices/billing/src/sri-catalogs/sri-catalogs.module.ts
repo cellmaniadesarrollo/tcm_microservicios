@@ -10,12 +10,14 @@ import { SriVatRate } from './entities/sri-vat-rate.entity';
 import { SriWithholdingRate } from './entities/sri-withholding-rate.entity';
 import { SriWithholdingType } from './entities/sri-withholding-type.entity';
 import { SriCatalogsSeed } from './seed/sri-catalogs.seed';
+import { SriPaymentMethod } from './entities/sri-payment-method.entity';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       SriDocumentType, SriEnvironment, SriEmissionType, SriAuthorizationStatus,
       SriVatRate, SriWithholdingType, SriWithholdingRate, SriTaxType, SriErrorCode,
+      SriPaymentMethod,
     ]),
   ],
   providers: [SriCatalogsSeed],
