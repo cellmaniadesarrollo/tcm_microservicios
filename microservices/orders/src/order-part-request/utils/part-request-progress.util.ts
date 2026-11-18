@@ -1,7 +1,7 @@
 // microservices/orders/src/order-part-requests/part-request-progress.util.ts
 import { PartRequestStatus } from '../entities/enums/part-request-status.enum';
 
-export type StepStatus = 'COMPLETADO' | 'ACTUAL' | 'PENDIENTE';
+export type StepStatus = 'COMPLETADO' | 'ACTUAL' | 'PENDIENTE' | 'SALTADO';
 export type RutaSolicitud = 'NACIONAL' | 'PERSONAL' | null;
 
 export interface ProgressStep {
@@ -136,7 +136,7 @@ export function buildProgress(input: {
         fechas.set(h.estado_nuevo, h.fecha);
     }
 
-    const pasosSolicitud: ProgressStep[] = keys.map((key) => {
+    const pasosSolicitudBase: ProgressStep[] = keys.map((key) => {
         let status: StepStatus;
         if (key === estado) status = key === ultimoSolicitud ? 'COMPLETADO' : 'ACTUAL';
         else status = reached.has(key) ? 'COMPLETADO' : 'PENDIENTE';
@@ -145,9 +145,21 @@ export function buildProgress(input: {
             label: ESTADO_LABELS[key] ?? key,
             status,
             fecha: status === 'PENDIENTE' ? null : fechas.get(key) ?? null,
-            grupo: 'SOLICITUD',
+            grupo: 'SOLICITUD' as const,
         };
     });
+
+    // Un paso PENDIENTE que quedó "detrás" del último paso alcanzado fue omitido
+    let ultimoAlcanzado = -1;
+    pasosSolicitudBase.forEach((p, i) => {
+        if (p.status === 'COMPLETADO' || p.status === 'ACTUAL') ultimoAlcanzado = i;
+    });
+
+    const pasosSolicitud: ProgressStep[] = pasosSolicitudBase.map((p, i) =>
+        p.status === 'PENDIENTE' && i < ultimoAlcanzado
+            ? { ...p, status: 'SALTADO' as const }
+            : p,
+    );
 
     // ─── Pasos de la orden (solo si hay orden) ───
     const ordenRank = rankDeOrden(input.orderStatusName);
@@ -171,13 +183,18 @@ export function buildProgress(input: {
 
     const litigioResuelto = enLitigio && !!input.arrival?.resuelto;
     const cancelado = estado === S.CANCELADO;
-    const completados = pasos.filter((p) => p.status === 'COMPLETADO').length;
+    const saltados = pasos.filter((p) => p.status === 'SALTADO').length;
+    // Los saltados cuentan como superados para el avance y el éxito
+    const completados = pasos.filter((p) => p.status === 'COMPLETADO').length + saltados;
     const exito = !cancelado && !enLitigio && completados === pasos.length;
     const cerrada = exito || cancelado || litigioResuelto;
 
     let faltantes: string[] = [];
     if (enLitigio && !litigioResuelto) faltantes = ['Resolver litigio'];
-    else if (!cerrada) faltantes = pasos.filter((p) => p.status !== 'COMPLETADO').map((p) => p.label);
+    else if (!cerrada)
+        faltantes = pasos
+            .filter((p) => p.status !== 'COMPLETADO' && p.status !== 'SALTADO')
+            .map((p) => p.label);
 
     const estado_visual = litigioResuelto ? 'LITIGIO_RESUELTO' : estado;
 
@@ -185,6 +202,7 @@ export function buildProgress(input: {
         ruta,
         pasos,
         completados,
+        saltados,
         total: pasos.length,
         porcentaje: Math.round((completados / pasos.length) * 100),
         pasos_faltantes: faltantes,
