@@ -18,6 +18,9 @@ import { NotificationsDispatcherModule } from './notifications-dispatcher/notifi
 import { InventarioModule } from './inventario/inventario.module';
 import { InventoryCoreModule } from './inventory-core/inventory-core.module';
 import { ReferralsModule } from './referrals/referrals.module';
+import { SignaturesModule } from './signatures/signatures.module';
+import { SriDocumentsModule } from './sri-documents/sri-documents.module';
+import { IssuersModule } from './issuers/issuers.module';
 
 @Module({
   imports: [
@@ -37,7 +40,10 @@ import { ReferralsModule } from './referrals/referrals.module';
     NotificationsDispatcherModule,
     InventarioModule,
     InventoryCoreModule,
-    ReferralsModule
+    ReferralsModule,
+    SignaturesModule,
+    SriDocumentsModule,
+    IssuersModule,
   ],
   controllers: [AppController],
   providers: [AppService],

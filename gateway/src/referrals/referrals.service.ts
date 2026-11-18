@@ -89,4 +89,14 @@ export class ReferralsService {
   sendWelcome(data: Record<string, unknown>) {
     return this.send('referral.send_welcome', data);
   }
+
+  // ── Consulta pública por cédula (TCP) ──
+  getClaimsByDocument(document: string) {
+    // Ruta pública: no hay token, así que el companyId viene de configuración
+    const companyId = process.env.PUBLIC_COMPANY_ID;
+    if (!companyId) {
+      throw new ServiceUnavailableException('Servicio no disponible');
+    }
+    return this.send('referral.claims_by_document', { companyId, document });
+  }
 }

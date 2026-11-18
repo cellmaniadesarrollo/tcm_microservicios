@@ -26,66 +26,66 @@ import { CompanyReplica } from '../../companies/entities/company-replica.entity'
 export class BillingData {
 
   @PrimaryColumn({ type: 'varchar', length: 24 })
-  id: string;
+  id!: string;
 
   @ManyToOne(() => CompanyReplica, { eager: true, nullable: false })
-  company: CompanyReplica;
+  company!: CompanyReplica;
 
   @ManyToOne(() => IdType, { eager: true, nullable: false })
-  idType: IdType;
+  idType!: IdType;
 
   @Column({ type: 'varchar', length: 30 })
-  idNumber: string;
+  idNumber!: string;
 
   @Column({ type: 'varchar', length: 100 })
-  firstName: string;
+  firstName!: string;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
-  lastName: string;
+  lastName!: string;
 
   @Column({ type: 'varchar', length: 200, nullable: true })
-  tradeName: string;
+  tradeName!: string;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
-  cellphone: string;
+  cellphone!: string;
 
   @Column({ type: 'varchar', length: 150 })
-  mainEmail: string;
+  mainEmail!: string;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
-  phone: string;
+  phone!: string;
 
   @Column({ type: 'varchar', length: 20, nullable: true })
-  birthdate: string;
+  birthdate!: string;
 
   @ManyToOne(() => Gender, { eager: true, nullable: true })
-  gender: Gender;
+  gender!: Gender;
 
   @ManyToOne(() => PersonType, { eager: true, nullable: false })
-  personType: PersonType;
+  personType!: PersonType;
 
   @Column({ type: 'varchar', length: 300 })
-  address: string;
+  address!: string;
 
   // ===== Legacy: texto libre (se mantiene por compatibilidad) =====
   @Column({ type: 'varchar', length: 100, nullable: true })
-  city: string;
+  city!: string;
 
   // ===== Nuevo: ciudad normalizada (opcional, coexiste con la legacy) =====
   @ManyToOne(() => City, { eager: true, nullable: true })
-  cityRef: City;
+  cityRef!: City;
 
   @Column({ type: 'boolean', default: false })
-  isCompanyClient: boolean;
+  isCompanyClient!: boolean;
 
   @Column({ type: 'boolean', default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @OneToMany(() => CustomerBillingData, (cbd) => cbd.billingData)
-  customerLinks: CustomerBillingData[];
+  customerLinks!: CustomerBillingData[];
 
   @ManyToOne(() => Customer, (customer) => customer.billings, { nullable: true })
-  customer: Customer;
+  customer!: Customer;
 
   @BeforeInsert()
   generateObjectId() {
@@ -108,8 +108,8 @@ export class BillingData {
   }
 
   @CreateDateColumn({ type: 'timestamp' })
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn({ type: 'timestamp' })
-  updatedAt: Date;
+  updatedAt!: Date;
 }

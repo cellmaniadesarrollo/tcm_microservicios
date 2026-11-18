@@ -78,4 +78,9 @@ export class BillingController {
     const signer = await this.getSigner(rest.user, pin);
     return this.billingService.createCustomerWithBilling({ ...rest, signer });
   }
+
+  @MessagePattern({ cmd: 'list_billing' })
+  list(@Payload() data: any) {
+    return this.billingService.list(data);
+  }
 }
