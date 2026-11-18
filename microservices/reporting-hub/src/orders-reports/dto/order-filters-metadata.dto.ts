@@ -1,9 +1,12 @@
 import {
     IsArray, IsOptional, IsString,
     IsDateString, IsIn, ArrayUnique,
-    IsBoolean
+    IsBoolean,
+    IsInt,
+    Min,
+    Max
 } from 'class-validator';
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 
 export class GetOrdersFilterDto {
 
@@ -104,4 +107,20 @@ export class GetOrdersFilterDto {
     @IsOptional()
     @IsBoolean()
     onlyWithPayments?: boolean;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt() @Min(1)
+    page?: number = 1;
+
+    @IsOptional()
+    @Type(() => Number)
+    @IsInt() @Min(1) @Max(100)
+    limit?: number = 20;
+
+    /** Si es true, cada orden incluye las comisiones calculadas */
+    @IsOptional()
+    @Transform(({ value }) => value === true || value === 'true')
+    @IsBoolean()
+    includeCommissions?: boolean = false;
 }

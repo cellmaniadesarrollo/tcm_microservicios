@@ -625,3 +625,115 @@ export function calculateCommissions(
 export function hasActiveCommissions(commissions: Commission[]): boolean {
     return commissions.some(c => c.active);
 }
+
+
+
+export const toNumber = (v: any): number => {
+    if (v == null) return 0;
+    if (typeof v === 'number') return v;
+    if (typeof v === 'object' && v.$numberDecimal) return parseFloat(v.$numberDecimal);
+    return Number(v.toString());           // Decimal128
+};
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Entradas de comisión que `commission` genera en UNA orden para `userId`. */
+export function calculateOrderCommission(
+    order: any,
+    userId: string,
+    commission: Commission,
+): CommissionEntry[] {
+    if (!commission.active) return [];
+
+    const value = toNumber(commission.value);
+    const deviceTypeName = order.device?.type?.name ?? '';
+    const branchName = order.branch?.name ?? '';
+    const amountOf = (base: number) =>
+        commission.valueType === 'fixed' ? value
+            : commission.valueType === 'percentage' ? base * (value / 100)
+                : 0;
+
+    const firstEventOf = (statusId: number): Date | null => {
+        const ev = (order.statusHistory ?? [])
+            .filter((h: any) => h.toStatus?.id === statusId)
+            .sort((a: any, b: any) => new Date(a.changed_at).getTime() - new Date(b.changed_at).getTime())[0];
+        return ev ? new Date(ev.changed_at) : null;
+    };
+
+    const common = {
+        orderId: order.id,
+        orderNumber: order.order_number,
+        deviceTypeName,
+        commissionRate: value,
+        commissionValueType: commission.valueType,
+    };
+
+    // ── Por procedimiento del técnico ──
+    if (commission.commissionType === 'device_category') {
+        if (deviceTypeName !== commission.targetId) return [];
+        const referenceDate = firstEventOf(ORDER_STATUS.TRABAJO_FINALIZADO);
+        if (!referenceDate) return [];
+
+        const entries: CommissionEntry[] = [];
+        for (const f of order.findings ?? []) {
+            for (const p of f.procedures ?? []) {
+                if (p.performedBy?.id !== userId) continue;
+                const cost = p.procedure_cost ?? 0;
+                if (cost <= 0) continue;
+                const amount = amountOf(cost);
+                if (amount > 0) entries.push({
+                    ...common,
+                    procedureId: p.id,
+                    procedureDescription: p.description,
+                    procedureCost: cost,
+                    commissionAmount: round2(amount),
+                    referenceDate,
+                    referenceDateLabel: 'Fecha finalización',
+                });
+            }
+        }
+        return entries;
+    }
+
+    // ── Tipos por orden entregada (Servicio Técnico) ──
+    if (order.type?.id !== ORDER_TYPE.SERVICIO_TECNICO) return [];
+
+    const t = commission.commissionType;
+    let label: string, minCost: number;
+    if (t === 'branch_all_delivered') {
+        if (branchName !== commission.targetId || order.is_national) return [];
+        label = `Comisión por sucursal: ${branchName}`;
+        minCost = BRANCH_ALL_DELIVERED_MIN_PROCEDURE_COST;
+    } else if (t === 'all_devices_delivered') {
+        if (order.is_national || order.revisadoAntes === true) return [];
+        label = 'Comisión por entrega: todos los dispositivos';
+        minCost = ALL_DEVICES_DELIVERED_MIN_PROCEDURE_COST;
+    } else if (t === 'national_device_delivered') {
+        if (!order.is_national || order.revisadoAntes === true) return [];
+        label = 'Comisión por entrega: equipo nacional';
+        minCost = NATIONAL_DEVICE_DELIVERED_MIN_PROCEDURE_COST;
+    } else return [];
+
+    const referenceDate = firstEventOf(ORDER_STATUS.ENTREGADA);
+    if (!referenceDate) return [];
+
+    const procs = (order.findings ?? []).flatMap((f: any) => f.procedures ?? []);
+    const solved = (t === 'branch_all_delivered' && BRANCH_ALL_DELIVERED_REQUIRE_ALL_SOLVED)
+        ? procs.length > 0 && procs.every((p: any) => p.was_solved === true)
+        : procs.some((p: any) => p.was_solved === true);
+    if (!solved) return [];
+
+    const totalCost = procs.reduce((s: number, p: any) => s + (p.procedure_cost ?? 0), 0);
+    if (totalCost < minCost) return [];
+
+    const amount = amountOf(totalCost);
+    return amount > 0 ? [{
+        ...common,
+        procedureId: 0,
+        procedureDescription: label,
+        procedureCost: totalCost,
+        commissionAmount: round2(amount),
+        referenceDate,
+        referenceDateLabel: 'Fecha entrega',
+    }] : [];
+}
