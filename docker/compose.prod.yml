@@ -169,6 +169,7 @@ services:
       - LEGACY_JWT_SECRET
       - WHATSAPP_WEBHOOK_VERIFY_TOKEN
       - PRINT_SECRET=${PRINT_SECRET}
+      - PUBLIC_COMPANY_ID=${PUBLIC_COMPANY_ID}
     networks:
       - backend
     depends_on:
