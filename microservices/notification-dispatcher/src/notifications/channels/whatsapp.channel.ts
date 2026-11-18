@@ -11,6 +11,12 @@ function getByPath(obj: any, path: string): any {
     return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj);
 }
 
+/** ¿La cabecera de la plantilla tiene una variable {{1}}? */
+function headerHasVariable(components: any[]): boolean {
+    const header = components?.find((c) => c.type === 'HEADER' && c.format === 'TEXT');
+    return !!header?.text && /\{\{\d+\}\}/.test(header.text);
+}
+
 /** Reemplaza {{1}}, {{2}}... del BODY de la plantilla por los params enviados */
 function renderTemplateBody(components: any[], params: string[]): string | null {
     const body = components?.find((c) => c.type === 'BODY');
@@ -127,8 +133,19 @@ export class WhatsappChannel implements INotificationChannel {
                 }]
                 : undefined;
 
+            // 🆕 Cabecera con variable {{1}} (ej. plantilla "referidos")
+            const headerParams = headerHasVariable(template.components)
+                ? [String(getByPath(source, 'customer.firstName') ?? '')]
+                : [];
+
             const { messageId } = await this.official.sendTemplate(
-                session, recipient, template.metaTemplateName, template.language, params, buttonParams,
+                session,
+                recipient,
+                template.metaTemplateName,
+                template.language,
+                params,
+                buttonParams,
+                headerParams,
             );
 
             await this.msgLog.record({ ...base, body, waMessageId: messageId, status: 'SENT' });

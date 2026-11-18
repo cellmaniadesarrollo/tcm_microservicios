@@ -9,6 +9,20 @@ export class OrdersRelayService {
 
   constructor(private readonly welcome: ReferralWelcomeService) {}
 
+  /** Busca el celular en las formas más probables del payload. */
+  private extractPhone(payload: any): string | undefined {
+    const c = payload?.customer;
+    const direct =
+      c?.phone ?? c?.cellphone ?? c?.mobile ?? payload?.customer_phone;
+    if (direct) return String(direct);
+
+    const contacts: any[] = c?.contacts ?? payload?.contacts ?? [];
+    const mobile = contacts.find((x) =>
+      /m[oó]vil|celular|mobile|phone/i.test(x?.typeName ?? x?.type ?? ''),
+    );
+    return mobile?.value ? String(mobile.value) : undefined;
+  }
+
   async handleOrderUpdated(data: any): Promise<void> {
     try {
       // 1. Solo el evento de cierre; "payment_added" y otros se ignoran
@@ -47,9 +61,10 @@ export class OrdersRelayService {
       console.log(`🎯 Orden ${orderId} entregada (cliente ${customerId}, empresa ${companyId})`);
 
       // 5. Perfil de referido + WhatsApp de bienvenida
-      // ⚠️ Ajusta de dónde sale el celular (ver nota abajo)
+      console.log('PAYLOAD ENTREGADA:', JSON.stringify(data.payload, null, 2)); // quitar después de diagnosticar
+
       const customer = data.payload?.customer;
-      const phone = customer?.phone ?? customer?.cellphone ?? data.payload?.customer_phone;
+      const phone = this.extractPhone(data.payload);
 
       const result = await this.welcome.sendWelcome({
         companyId,

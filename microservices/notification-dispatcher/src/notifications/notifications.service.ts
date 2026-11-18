@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThanOrEqual } from 'typeorm';
+import { Repository, LessThanOrEqual, MoreThan } from 'typeorm';
 import type { INotificationChannel } from './channels/channel.interface';
 import { CHANNEL_WHATSAPP } from './channels/channel.interface';
 import { NotificationLog } from './entities/notification-log.entity';
@@ -22,6 +22,17 @@ const STATUS_ENTREGADA = 'ENTREGADA';
 @Injectable()
 export class NotificationsService {
     private readonly logger = new Logger(NotificationsService.name);
+
+    private readonly inFlight = new Map<string, number>();
+
+    private isDuplicate(orderId: number, status: string, ttlMs = 30_000): boolean {
+        const key = `${orderId}:${status}`;
+        const now = Date.now();
+        const last = this.inFlight.get(key);
+        if (last && now - last < ttlMs) return true;
+        this.inFlight.set(key, now);
+        return false;
+    }
 
     constructor(
         @InjectRepository(NotificationLog)
@@ -79,6 +90,11 @@ export class NotificationsService {
     async handleStatusChanged(orderId: number, newStatusName: string): Promise<void> {
         this.logger.log(`handleStatusChanged: orden ${orderId} → "${newStatusName}"`);
 
+        if (this.isDuplicate(orderId, newStatusName?.trim())) {
+            this.logger.warn(`handleStatusChanged: duplicado omitido (orden ${orderId}, "${newStatusName}")`);
+            return;
+        }
+
         const order = await this.findOrder(orderId);
         if (!order) {
             this.logger.warn(`handleStatusChanged: orden ${orderId} no encontrada`);
@@ -99,6 +115,22 @@ export class NotificationsService {
         const phone = await this.getMobileContact(order.customerId);
         if (!phone) return;
 
+        // 🆕 Evita enviar el mismo mensaje dos veces seguidas
+        const message = messageFn(order);
+        const recent = await this.logRepo.findOne({
+            where: {
+                orderId: order.id,
+                type: 'ORDER_STATUS_CHANGE',
+                message,
+                status: 'SENT',
+                sentAt: MoreThan(new Date(Date.now() - 60_000)),
+            },
+        });
+        if (recent) {
+            this.logger.warn(`handleStatusChanged: duplicado omitido (orden ${order.id}, "${statusKey}")`);
+            return;
+        }
+
         await this.dispatch({
             orderId: order.id,
             customerId: order.customerId,
@@ -106,7 +138,7 @@ export class NotificationsService {
             purpose: 'NOTIFICATIONS',
             type: 'ORDER_STATUS_CHANGE',
             recipient: phone,
-            message: messageFn(order),
+            message,
             order,
             event: ORDER_STATUS_TO_EVENT[statusKey],
         });
