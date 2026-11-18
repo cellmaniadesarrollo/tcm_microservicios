@@ -60,6 +60,7 @@ import { PartRequest } from '../order-part-request/entities/part-request.entity'
 import { OrderPriority } from '../catalogs/entities/order-priority.entity';
 import { OrderTotalsService } from './order-totals/order-totals.service';
 import { orderFingerprint } from './order-fingerprint';
+import { PartRequestArrivalService } from '../order-part-request/part-request-arrival.service';
 @Injectable()
 
 export class OrderWorkflowService {
@@ -110,7 +111,9 @@ export class OrderWorkflowService {
 
     @InjectRepository(PartRequest)
     private readonly partRequestRepo: Repository<PartRequest>,
-    private readonly orderTotalsService: OrderTotalsService
+    private readonly orderTotalsService: OrderTotalsService,
+
+    private readonly partRequestArrivalService: PartRequestArrivalService,
   ) { }
 
   private async getPublicExtraCharges(orderId: number): Promise<{ name: string; price: number }[]> {
@@ -1968,7 +1971,12 @@ export class OrderWorkflowService {
         createdAt: deliveredAt,
         updatedAt: deliveredAt,
       });
-
+      const solicitudesActualizadas =
+        await this.partRequestArrivalService.marcarLlegadaAsignadaPorEntregaOrden(
+          manager,
+          order.id,
+          user,
+        );
       return {
         delivery,
         fromStatusName,
@@ -1981,6 +1989,7 @@ export class OrderWorkflowService {
         spareAssignments,
         billing: dto.billing,
         order,
+        part_requests_actualizadas: solicitudesActualizadas,
       };
     });
 

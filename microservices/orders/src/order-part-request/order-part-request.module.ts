@@ -53,5 +53,6 @@ import { OrderStatus } from '../catalogs/entities/order_status.entity';
     PartRequestSourcingService,
     PartRequestPaymentService,
     PartRequestArrivalService, PartRequestTravelItemsService, PartRequestReportService],
+  exports: [PartRequestArrivalService]
 })
 export class OrderPartRequestModule { }

@@ -339,6 +339,7 @@ export class OrderPartRequestController {
   /** Aprobar la llegada del repuesto */
   @MessagePattern({ cmd: 'aprobar_llegada_part_request' })
   async aprobarLlegada(@Payload() data: any) {
+
     try {
       if (!data.dto || !data.user) {
         throw new RpcException('Payload incompleto: falta dto o user');
@@ -546,6 +547,7 @@ export class OrderPartRequestController {
       if (!data.partRequestId || !data.user) {
         throw new RpcException('Payload incompleto: falta partRequestId o user');
       }
+
       return await this.partRequestPaymentService.marcarRevisada(data.partRequestId, data.user);
     } catch (error: any) {
       console.error('🔥 Error en MS Órdenes (marcarRevisada):', error);

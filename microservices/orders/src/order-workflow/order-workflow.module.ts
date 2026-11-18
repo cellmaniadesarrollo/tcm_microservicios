@@ -34,6 +34,7 @@ import { OrderPendingProduct } from '../order-extras/entities/order-pending-prod
 import { PartRequest } from '../order-part-request/entities/part-request.entity';
 import { OrderPaymentsListService } from './order-payments-list.service';
 import { OrderTotalsService } from './order-totals/order-totals.service';
+import { OrderPartRequestModule } from '../order-part-request/order-part-request.module';
 
 @Module({
   imports: [UsersEmployeesEventsModule, NotificationsModule, AwsS3Module,
@@ -43,7 +44,7 @@ import { OrderTotalsService } from './order-totals/order-totals.service';
       SpareAssignment, OrderPriceAgreement, WarehousePayment, OrderExtraService,
       OrderPendingProduct, PartRequest
     ]),
-    BroadcastModule, SearchHistoryModule, DevicesModule, OrderValidationLockModule, InvoicesModule],
+    BroadcastModule, SearchHistoryModule, DevicesModule, OrderValidationLockModule, InvoicesModule, OrderPartRequestModule],
   controllers: [OrderWorkflowController],
   providers: [OrderWorkflowService, PaymentCatalogSeederService, OrderShippingService, OrderPaymentsListService, OrderTotalsService],
 
