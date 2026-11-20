@@ -323,6 +323,7 @@ services:
       - DB_NAME=${DISPATCHER_DB_NAME}
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - MAIL_ENCRYPTION_KEY=${MAIL_ENCRYPTION_KEY}
     networks:
       - backend
     depends_on:
