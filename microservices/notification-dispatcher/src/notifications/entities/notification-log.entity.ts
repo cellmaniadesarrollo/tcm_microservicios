@@ -4,11 +4,12 @@ import {
 } from 'typeorm';
 
 export type NotificationChannel = 'WHATSAPP' | 'EMAIL';
-export type NotificationStatus = 'SENT' | 'FAILED';
+export type NotificationStatus = 'PENDING' | 'SENT' | 'FAILED';
 export type NotificationType =
     | 'ORDER_STATUS_CHANGE'
     | 'PICKUP_REMINDER'
-    | 'REFERRAL_WELCOME';
+    | 'REFERRAL_WELCOME'
+    | 'BIRTHDAY';
 
 @Entity('notification_logs')
 export class NotificationLog {
@@ -20,9 +21,15 @@ export class NotificationLog {
     @Column({ type: 'int', nullable: true })
     orderId?: number | null;
 
+    // Antes: customerId!: number. Ahora puede ser null (billing sin cliente vinculado)
     @Index()
-    @Column()
-    customerId!: number;
+    @Column({ type: 'int', nullable: true })
+    customerId?: number | null;
+
+    /** Evita envíos duplicados. Ej: birthday:{billingId}:{año} */
+    @Index({ unique: true })
+    @Column({ type: 'varchar', length: 100, nullable: true })
+    dedupeKey?: string | null;
 
     @Column({ type: 'varchar' })
     type!: NotificationType;

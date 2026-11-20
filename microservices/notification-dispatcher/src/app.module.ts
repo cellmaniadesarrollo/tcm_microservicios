@@ -14,8 +14,7 @@ import { HealthController } from './health/health.controller';
 
 @Module({
   controllers: [AppController, HealthController],
-  providers: [AppService,
-    KafkaListenersOrchestrator
+  providers: [AppService
   ],
   imports: [TypeOrmModule.forRoot({
     type: 'postgres',
@@ -26,10 +25,10 @@ import { HealthController } from './health/health.controller';
     database: process.env.DB_NAME,
     autoLoadEntities: true,
     synchronize: true,
-  }), NotificationsModule,
+  }), KafkaModule, NotificationsModule,
     MailModule,
     WhatsappModule,
-    KafkaModule,
+
     CustomersEventsModule,
     CompaniesModule,
     OrdersRelayModule

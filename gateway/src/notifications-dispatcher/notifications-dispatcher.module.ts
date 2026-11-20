@@ -4,6 +4,7 @@ import { NotificationsDispatcherController } from './notifications-dispatcher.co
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { AuthModule } from '../common/auth/auth.module';
 import { WhatsappWebhookController } from './whatsapp-webhook.controller';
+import { MailConfigController } from './mail-config.controller';
 @Module({
   imports: [
     ClientsModule.register([
@@ -19,7 +20,7 @@ import { WhatsappWebhookController } from './whatsapp-webhook.controller';
     ]),
     AuthModule
   ],
-  controllers: [NotificationsDispatcherController, WhatsappWebhookController],
+  controllers: [NotificationsDispatcherController, WhatsappWebhookController, MailConfigController],
   providers: [NotificationsDispatcherService],
 })
 export class NotificationsDispatcherModule { }

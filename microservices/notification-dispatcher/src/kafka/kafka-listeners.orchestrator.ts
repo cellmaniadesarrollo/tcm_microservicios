@@ -3,7 +3,8 @@ import { KafkaConsumerService } from './kafka.consumer';
 import { CompaniesEventsListener } from '../companies/companies-events.listener';
 //import { UsersEventsListener } from '../users-employees-events/users-events.listener';
 import { OrdersEventsListener } from '../orders-relay/orders-events.listener';
-import { CustomersEventsListener } from '../customers-events/customers-events.listener';
+import { CustomersEventsListener } from '../customers-events/listeners/customers-events.listener';
+
 
 @Injectable()
 export class KafkaListenersOrchestrator implements OnModuleInit {
