@@ -5,12 +5,14 @@ import { KafkaListenersOrchestrator } from './kafka-listeners.orchestrator';
 import { CompaniesModule } from '../companies/companies.module';
 import { CustomersEventsModule } from '../customers-events/customers-events.module';
 import { OrdersRelayModule } from '../orders-relay/orders-relay.module';
+import { ReferralsEventsModule } from '../referrals/referrals-events.module';
 @Global()
 @Module({
     imports: [
         CompaniesModule,
         CustomersEventsModule,
-        OrdersRelayModule
+        OrdersRelayModule,
+        ReferralsEventsModule,
 
     ],
     providers: [KafkaConsumerService, KafkaListenersOrchestrator],
