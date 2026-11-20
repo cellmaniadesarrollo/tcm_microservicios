@@ -10,7 +10,7 @@ export class SriDocumentsController {
 
   @MessagePattern({ cmd: 'create_invoice' })
   createInvoice(@Payload() d: any) {
-    return this.service.createInvoice(d.user.companyId, d.dto);
+    return this.service.createInvoice(d.user.companyId, d.user.userId, d.dto);
   }
 
   @MessagePattern({ cmd: 'list_invoices' })

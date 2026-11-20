@@ -1,6 +1,6 @@
 // microservicio-inventario/src/integrations/income-backend.service.ts
 
-import { Injectable, Logger, Inject, forwardRef, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, ConflictException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -448,6 +448,68 @@ export class IncomeBackendService {
   // ✅ SAVE INCOME FROM ORDER
   // ============================================
 
+  async assertDeviceNotInInventory(
+    imeis: string[],
+    orderPublicId?: string | null,
+  ): Promise<void> {
+    const codes = (imeis || []).map((i) => String(i).trim()).filter(Boolean);
+
+    if (codes.length) {
+      const batches = await this.batchModel
+        .find({ 'identifiers.code': { $in: codes } })
+        .select('_id batchNumber sku orderPublicId incomes_id')
+        .lean();
+
+      if (batches.length) {
+        const stocks = await this.branchBatchStockModel
+          .find({ batchId: { $in: batches.map((b) => b._id) }, quantity: { $gt: 0 } })
+          .select('batchId')
+          .lean();
+
+        const activeBatch = batches.find((b) =>
+          stocks.some((s) => String(s.batchId) === String(b._id)),
+        );
+
+        if (activeBatch) {
+          const prev = await this.getPreviousOrderLabel(activeBatch);
+          throw new ConflictException(
+            `No se puede ingresar de nuevo este dispositivo: ya está en inventario desde la orden ${prev} (lote ${activeBatch.batchNumber}). Verifica esa orden.`,
+          );
+        }
+      }
+    }
+
+    if (orderPublicId) {
+      const sameOrder = await this.batchModel
+        .findOne({ orderPublicId, isCompleteDevice: true })
+        .select('batchNumber')
+        .lean();
+      if (sameOrder) {
+        throw new ConflictException(
+          `Esta orden ya fue ingresada a inventario (lote ${sameOrder.batchNumber}).`,
+        );
+      }
+    }
+  }
+
+  private async getPreviousOrderLabel(batch: any): Promise<string> {
+    try {
+      const income = await this.incomeModel
+        .findById(batch.incomes_id)
+        .select('id_document_number')
+        .lean();
+      const doc = income
+        ? await this.documentNumberIncomeModel
+            .findById(income.id_document_number)
+            .select('document_number')
+            .lean()
+        : null;
+      // document_number se guardó como "ORD-<orderNumber>"
+      if (doc?.document_number) return doc.document_number.replace(/^ORD-/, '#');
+    } catch {}
+    return batch.orderPublicId ? `(public id ${batch.orderPublicId})` : 'desconocida';
+  }
+
   async saveIncomeFromOrder(data: any): Promise<any> {
     try {
       this.logger.log(`📤 Guardando income desde orden...`);
@@ -483,6 +545,14 @@ export class IncomeBackendService {
       } else {
         supplierId = new Types.ObjectId('67f98baed875ff138dfcb942');
         this.logger.warn(`⚠️ No hay customerId, usando ID por defecto: ${supplierId}`);
+      }
+
+      const isCompleteDevice = data.isComplete || data.type === 'COMPLETO';
+      if (isCompleteDevice) {
+        await this.assertDeviceNotInInventory(
+          data.imeis || [],
+          data.orderPublicId || data.public_id || null,
+        );
       }
 
       const idnumber = await this.findOrCreateDocument(

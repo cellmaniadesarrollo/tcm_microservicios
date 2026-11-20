@@ -3,7 +3,7 @@ export class InvoiceLineDto {
   description!: string;
   quantity!: number;
   unitPrice!: number;      // SIN IVA
-  discount?: number;
+  discountId?: string;
   vatRateCode!: string;    // código del catálogo sri_vat_rate
 }
 

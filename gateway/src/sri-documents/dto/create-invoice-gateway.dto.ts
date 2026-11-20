@@ -10,7 +10,7 @@ export class InvoiceLineGatewayDto {
 
   @IsNumber({ maxDecimalPlaces: 6 }) @Min(0.000001) quantity!: number;
   @IsNumber({ maxDecimalPlaces: 6 }) @Min(0) unitPrice!: number;
-  @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0) discount?: number;
+  @IsOptional() @IsUUID('4') discountId?: string;
 
   @IsString() @MaxLength(2) vatRateCode!: string;
 }

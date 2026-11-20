@@ -23,4 +23,8 @@ export class SriDocumentsService {
   list(user: UserCtx) {
     return this.billing.send('list_invoices', { user });
   }
+
+  previewXml(documentId: string, user: UserCtx) {
+    return this.billing.send('preview_document_xml', { documentId, user });
+  }
 }
