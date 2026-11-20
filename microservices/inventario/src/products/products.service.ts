@@ -518,6 +518,15 @@ export class ProductsService {
 
   async createFromOrder(data: any): Promise<any> {
     try {
+
+      // ✅ Bloquear reingreso del mismo equipo ANTES de crear nada
+      if (data?.type === 'COMPLETO') {
+        await this.incomeBackendService.assertDeviceNotInInventory(
+          data.imeis || [],
+          data.orderPublicId || data.public_id || null,
+        );
+      }
+
       this.logger.log(`📦 Procesando orden ${data.orderNumber} - Tipo: ${data.type}`);
       this.logger.log(`📦 inventoryFlowId recibido: ${data.inventoryFlowId}`);
       this.logger.log(`📦 sku recibido: ${data.sku}`);

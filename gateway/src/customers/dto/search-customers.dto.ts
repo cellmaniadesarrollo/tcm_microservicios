@@ -2,10 +2,10 @@ import { IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class SearchCustomersDto {
   @IsNumber()
-  page: number;
+  page!: number;
 
   @IsNumber()
-  limit: number;
+  limit!: number;
 
   @IsOptional()
   @IsString()

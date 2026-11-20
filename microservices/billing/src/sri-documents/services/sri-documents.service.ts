@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
+import { DiscountInput, DiscountsService } from '../../discounts/services/discounts.service';
 import { IssuersService } from '../../issuer/services/issuers.service';
 import { SriPaymentMethod } from '../../sri-catalogs/entities/sri-payment-method.entity';
 import { SriVatRate } from '../../sri-catalogs/entities/sri-vat-rate.entity';
@@ -8,6 +9,9 @@ import { SriDocument } from '../entities/sri-document.entity';
 import { buildAccessKey } from '../helpers/access-key.helper';
 import { calculateTotals, LineInput, VatKind } from '../helpers/totals.helper';
 import { SriSequenceService } from './sri-sequence.service';
+import { SriDocumentLine } from '../entities/sri-document-line.entity';
+
+const money = (cents: number) => (cents / 100).toFixed(2);
 
 @Injectable()
 export class SriDocumentsService {
@@ -15,9 +19,10 @@ export class SriDocumentsService {
     private readonly ds: DataSource,
     private readonly issuers: IssuersService,
     private readonly sequences: SriSequenceService,
+    private readonly discounts: DiscountsService,
   ) {}
 
-  async createInvoice(companyId: string, dto: CreateInvoiceDto) {
+  async createInvoice(companyId: string, userId: string, dto: CreateInvoiceDto) {
     // idempotencia
     const prev = await this.ds.getRepository(SriDocument).findOne({
       where: { companyId, clientRequestId: dto.clientRequestId },
@@ -31,20 +36,55 @@ export class SriDocumentsService {
 
     // tarifas desde el catálogo (nunca confiar en el porcentaje del front)
     const rates = await this.loadVatRates(dto.lines.map((l) => l.vatRateCode));
-    const lineInputs: LineInput[] = dto.lines.map((l) => {
-      const rate = rates.get(l.vatRateCode);
-      if (!rate) throw new BadRequestException(`Tarifa de IVA no válida: ${l.vatRateCode}`);
-      return { ...l, vatPercentage: rate.percentage, vatKind: rate.kind };
-    });
-
-    const t = calculateTotals(lineInputs, { tip: dto.tip });
-
-    // los pagos deben cuadrar con el total
-    const paid = dto.payments.reduce((s, p) => s + Math.round(p.amount * 100), 0);
-    if (paid !== Math.round(Number(t.total) * 100))
-      throw new BadRequestException('La suma de los pagos no coincide con el total.');
 
     return this.ds.transaction(async (m) => {
+      // 1) Resolver descuentos del catálogo en el servidor
+      const applied: (DiscountInput & { position: number })[] = [];
+      const lineInputs: LineInput[] = [];
+
+      for (const [i, l] of dto.lines.entries()) {
+        const rate = rates.get(l.vatRateCode);
+        if (!rate) throw new BadRequestException(`Tarifa de IVA no válida: ${l.vatRateCode}`);
+
+        const gross = Math.round(l.quantity * l.unitPrice * 100 + Number.EPSILON);
+        let disc = 0;
+
+        if (l.discountId) {
+          const res = await this.discounts.resolveForLine(m, companyId, l.discountId, gross);
+          disc = Math.min(res.cents, gross);
+          if (disc > 0) {
+            applied.push({
+              position: i + 1,
+              lineId: null,
+              discountId: l.discountId,
+              type: res.discount.type,
+              amount: money(disc),
+              base: money(gross),
+              reason: res.discount.name,
+            });
+          }
+        }
+
+        lineInputs.push({
+          mainCode: l.mainCode,
+          description: l.description,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          discount: disc / 100, // dólares, como espera calculateTotals
+          vatRateCode: l.vatRateCode,
+          vatPercentage: rate.percentage,
+          vatKind: rate.kind,
+        });
+      }
+
+      // 2) Totales y validación de pagos
+      const t = calculateTotals(lineInputs, { tip: dto.tip });
+
+      const paid = dto.payments.reduce((s, p) => s + Math.round(p.amount * 100), 0);
+      if (paid !== Math.round(Number(t.total) * 100))
+        throw new BadRequestException('La suma de los pagos no coincide con el total.');
+
+      // 3) Secuencia, clave de acceso y guardado
       const sequence = await this.sequences.next(
         { companyId, issuerId: r.issuer.id, documentTypeCode: '01', series },
         m,
@@ -96,6 +136,20 @@ export class SriDocumentsService {
           timeUnit: p.timeUnit ?? null,
         })),
       });
+
+      // 4) Descuentos aplicados, en la misma transacción
+      const savedLines = (doc.lines ?? []) as unknown as SriDocumentLine[];
+
+      await this.discounts.record(
+        m,
+        { companyId, branchId: dto.branchId, userId },
+        'FACTURA',
+        doc.id,
+        applied.map(({ position, ...d }) => ({
+          ...d,
+          lineId: savedLines.find((x) => x.position === position)?.id ?? null,
+        })),
+      );
 
       return { ...doc, replayed: false };
     });

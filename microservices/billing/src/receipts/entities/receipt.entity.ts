@@ -29,6 +29,7 @@ export class Receipt {
   // Cliente (snapshot)
   @Column({ name: 'buyer_id_number', type: 'varchar', length: 20, nullable: true }) buyerIdNumber!: string | null;
   @Column({ name: 'buyer_name', type: 'varchar', length: 300 }) buyerName!: string;
+    @Column({ name: 'payment_method', type: 'varchar', length: 2, default: '01' }) paymentMethod!: string;
 
   // Totales
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 }) subtotal!: string;

@@ -12,6 +12,9 @@ export class ReceiptLine {
 
   @Column({ type: 'int' }) position!: number;
   @Column({ name: 'product_id', type: 'uuid', nullable: true }) productId!: string | null;
+  @Column({ name: 'lot_id', type: 'uuid', nullable: true }) lotId!: string | null;
+  @Column({ name: 'unit_id', type: 'uuid', nullable: true }) unitId!: string | null;
+  @Column({ type: 'varchar', length: 50, nullable: true }) batch!: string | null;
   @Column({ name: 'main_code', type: 'varchar', length: 25 }) mainCode!: string;
   @Column({ type: 'varchar', length: 300 }) description!: string;
   @Column({ type: 'decimal', precision: 14, scale: 6 }) quantity!: string;
