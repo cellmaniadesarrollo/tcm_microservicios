@@ -9,24 +9,7 @@ export class CustomersEventsController {
     @Inject('CUSTOMER_ASYNC') private readonly customerClient: ClientProxy,
   ) { }
 
-  async onModuleInit() {
-    try {
-      const timestamps = await this.cacheService.getLastTimestamps();
 
-      const response = await firstValueFrom(
-        this.customerClient.send(
-          { cmd: 'async_customers_start' },
-          {
-            internalToken: process.env.INTERNAL_SECRET,
-            fromCache: timestamps,
-          }
-        )
-      );
-      await this.cacheService.syncCustomersBulk(response)
-    } catch (err) {
-      console.error('❌ Error solicitando sincronización inicial :', err);
-    }
-  }
 
 
 }
