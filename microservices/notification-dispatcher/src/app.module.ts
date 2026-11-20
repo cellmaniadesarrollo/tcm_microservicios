@@ -15,8 +15,7 @@ import { ReferralsEventsModule } from './referrals/referrals-events.module';
 
 @Module({
   controllers: [AppController, HealthController],
-  providers: [AppService,
-    KafkaListenersOrchestrator
+  providers: [AppService
   ],
   imports: [TypeOrmModule.forRoot({
     type: 'postgres',
@@ -27,10 +26,10 @@ import { ReferralsEventsModule } from './referrals/referrals-events.module';
     database: process.env.DB_NAME,
     autoLoadEntities: true,
     synchronize: true,
-  }), NotificationsModule,
+  }), KafkaModule, NotificationsModule,
     MailModule,
     WhatsappModule,
-    KafkaModule,
+
     CustomersEventsModule,
     CompaniesModule,
     OrdersRelayModule,

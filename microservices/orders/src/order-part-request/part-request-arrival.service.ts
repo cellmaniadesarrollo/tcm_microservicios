@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, IsNull, Not, Repository } from 'typeorm';
 import { RpcException } from '@nestjs/microservices';
 import { AwsS3Service } from '../aws-s3/aws-s3.service';
 import { PartRequest } from './entities/part-request.entity';
@@ -799,5 +799,61 @@ export class PartRequestArrivalService {
         );
 
         return { ...resultado, pending_product_id: pendingProduct.id };
+    }
+    // part-request-arrival.service.ts (o el servicio de part-requests que prefieras)
+    // Imports: EntityManager, Not, IsNull de 'typeorm'
+
+    async marcarLlegadaAsignadaPorEntregaOrden(
+        manager: EntityManager,
+        orderId: number,
+        user: { userId: string; companyId: string },
+    ): Promise<number[]> {
+        // Los productos con deletedAt (cancelados o en litigio) quedan fuera automáticamente
+        const pendingProducts = await manager.find(OrderPendingProduct, {
+            where: {
+                order_id: orderId,
+                company_id: user.companyId,
+                part_request_id: Not(IsNull()),
+            },
+            relations: ['partRequest'],
+        });
+
+        const ESTADOS_PERMITIDOS = [
+            PartRequestStatus.EN_PROCESO_DE_PEDIDO,
+            PartRequestStatus.LLEGADO_PENDIENTE_VALIDACION,
+        ];
+
+        const actualizadas: number[] = [];
+
+        for (const pp of pendingProducts) {
+            const pr = pp.partRequest;
+            if (!pr) continue;
+
+            // Seguridad extra: nunca tocar en litigio
+            if (pp.resultado_validacion === 'LITIGIO') continue;
+
+            // Solo los dos estados previstos (también cubre idempotencia)
+            if (!ESTADOS_PERMITIDOS.includes(pr.estado)) continue;
+
+            const estadoAnterior = pr.estado;
+
+            pr.estado = PartRequestStatus.LLEGADO_ASIGNADO;
+            pr.responsable_recepcion_id = user.userId;
+            await manager.save(pr);
+
+            await manager.save(
+                manager.create(PartRequestStatusHistory, {
+                    part_request_id: pr.id,
+                    estado_anterior: estadoAnterior,
+                    estado_nuevo: PartRequestStatus.LLEGADO_ASIGNADO,
+                    actor_id: user.userId,
+                    notas: `Cierre automático por entrega de la orden #${orderId} (se omitió registro de envío y validación de llegada)`,
+                }),
+            );
+
+            actualizadas.push(pr.id);
+        }
+
+        return actualizadas;
     }
 }
