@@ -4,8 +4,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { KafkaModule } from '../kafka/kafka.module';
 
 @Module({
-  imports: [KafkaModule, NotificationsModule],
+  imports: [NotificationsModule],
   providers: [ReferralsEventsListener],
   exports: [ReferralsEventsListener],
 })
-export class ReferralsEventsModule {}
+export class ReferralsEventsModule { }
