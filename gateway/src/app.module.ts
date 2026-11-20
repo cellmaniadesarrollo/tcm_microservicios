@@ -21,6 +21,8 @@ import { ReferralsModule } from './referrals/referrals.module';
 import { SignaturesModule } from './signatures/signatures.module';
 import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 import { IssuersModule } from './issuers/issuers.module';
+import { ReceiptsModule } from './receipts/receipts.module';
+import { BillingDiscountsModule } from './billing-discounts/billing-discounts.module';
 
 @Module({
   imports: [
@@ -44,6 +46,8 @@ import { IssuersModule } from './issuers/issuers.module';
     SignaturesModule,
     SriDocumentsModule,
     IssuersModule,
+    ReceiptsModule,
+    BillingDiscountsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -18,6 +18,8 @@ import { ClientsReplicaModule } from './clients-replica/clients-replica.module';
 import { IssuersModule } from './issuer/issuers.module';
 import { SriCatalogsModule } from './sri-catalogs/sri-catalogs.module';
 import { SriDocumentsModule } from './sri-documents/sri-documents.module';
+import { ReceiptsModule } from './receipts/receipts.module';
+import { DiscountsModule } from './discounts/discounts.module';
 
 @Module({
   imports: [
@@ -56,6 +58,8 @@ import { SriDocumentsModule } from './sri-documents/sri-documents.module';
     IssuersModule,
     SriCatalogsModule,
     SriDocumentsModule,
+    ReceiptsModule,
+    DiscountsModule,
   ],
 })
 export class AppModule { }

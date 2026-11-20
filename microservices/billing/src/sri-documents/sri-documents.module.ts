@@ -10,11 +10,12 @@ import { SriDocumentsService } from './services/sri-documents.service';
 import { SriSequenceService } from './services/sri-sequence.service';
 import { SriDocumentsController } from './controllers/sri-documents.controller';
 import { SriPaymentMethod } from '../sri-catalogs/entities/sri-payment-method.entity';
+import { DiscountsModule } from '../discounts/discounts.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([SriDocument, SriDocumentLine, SriDocumentPayment, SriSequence, SriVatRate]),
-    IssuersModule, SriPaymentMethod
+    IssuersModule, SriPaymentMethod, DiscountsModule
   ],
   controllers: [SriDocumentsController],
   providers: [SriSequenceService, SriDocumentsService],
