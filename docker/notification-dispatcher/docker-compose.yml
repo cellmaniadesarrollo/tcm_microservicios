@@ -1,11 +1,11 @@
 name: tcm-notifications
 
 services:
-  notifications:
+  notifications-dis:
     build:
       context: ../../microservices/notification-dispatcher
       dockerfile: Dockerfile.dev
-    container_name: ms-notifications
+    container_name: ms-notification-dispatcher
     restart: always
     volumes:
       - ../../microservices/notification-dispatcher:/app

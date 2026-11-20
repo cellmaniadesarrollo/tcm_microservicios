@@ -11,6 +11,7 @@ import { OrdersRelayModule } from './orders-relay/orders-relay.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CustomersEventsModule } from './customers-events/customers-events.module';
 import { HealthController } from './health/health.controller';
+import { ReferralsEventsModule } from './referrals/referrals-events.module';
 
 @Module({
   controllers: [AppController, HealthController],
@@ -31,7 +32,8 @@ import { HealthController } from './health/health.controller';
 
     CustomersEventsModule,
     CompaniesModule,
-    OrdersRelayModule
+    OrdersRelayModule,
+    ReferralsEventsModule
   ],
 })
 export class AppModule { }
