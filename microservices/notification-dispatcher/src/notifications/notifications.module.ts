@@ -15,6 +15,8 @@ import { WhatsappModule } from '../whatsapp/whatsapp.module';
 import { OrdersRelayModule } from '../orders-relay/orders-relay.module'; // ← Agregar
 import { OrderReplica } from '../orders-relay/entities';
 import { CustomerCache } from '../customers-events/entities/customer-cache.entity';
+import { MailModule } from '../mail/mail.module';
+import { EmailNotificationsService } from './email-notifications.service';
 
 @Module({
   imports: [
@@ -28,11 +30,13 @@ import { CustomerCache } from '../customers-events/entities/customer-cache.entit
     ScheduleModule.forRoot(),
     forwardRef(() => WhatsappModule),
     forwardRef(() => OrdersRelayModule),   // ← AGREGAR ESTO
+    MailModule
   ],
   controllers: [NotificationsConsumer],
   providers: [
     NotificationsService,
     NotificationsScheduler,
+    EmailNotificationsService
   ],
   exports: [NotificationsService],
 })
