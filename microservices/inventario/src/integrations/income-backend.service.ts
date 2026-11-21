@@ -492,6 +492,41 @@ export class IncomeBackendService {
     }
   }
 
+  async findActiveDeviceByImeis(imeis: string[]): Promise<{
+    previousOrder: string;
+    batchNumber: string | number;
+    batchId?: string;
+  } | null> {
+    const codes = (imeis || []).map((i) => String(i).trim()).filter(Boolean);
+    if (!codes.length) return null;
+
+    const batches = await this.batchModel
+      .find({ 'identifiers.code': { $in: codes } })
+      .select('_id batchNumber sku orderPublicId incomes_id')
+      .lean();
+
+    if (!batches.length) return null;
+
+    const stocks = await this.branchBatchStockModel
+      .find({ batchId: { $in: batches.map((b) => b._id) }, quantity: { $gt: 0 } })
+      .select('batchId')
+      .lean();
+
+    const activeBatch = batches.find((b) =>
+      stocks.some((s) => String(s.batchId) === String(b._id)),
+    );
+
+    if (!activeBatch) return null;
+
+    const previousOrder = await this.getPreviousOrderLabel(activeBatch);
+
+    return {
+      previousOrder,
+      batchNumber: activeBatch.batchNumber,
+      batchId: String(activeBatch._id),
+    };
+  }
+
   private async getPreviousOrderLabel(batch: any): Promise<string> {
     try {
       const income = await this.incomeModel

@@ -2,25 +2,25 @@ import { IsNumber, IsOptional, IsArray, IsString, IsBoolean } from 'class-valida
 
 export class CreateOrderDto {
   @IsNumber()
-  order_type_id: number;
+  order_type_id!: number;
   @IsOptional()
   @IsNumber()
   previous_order_id?: number;
   @IsNumber()
-  order_priority_id: number;
+  order_priority_id!: number;
 
   @IsNumber()
-  customer_id: number;
+  customer_id!: number;
 
   @IsOptional()
   @IsNumber()
   device_id?: number;
 
   @IsArray()
-  technician_ids: string[];
+  technician_ids!: string[];
 
   @IsString()
-  detalleIngreso: string;
+  detalleIngreso!: string;
 
   @IsOptional()
   @IsString()
