@@ -1,6 +1,8 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  Inject,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -15,7 +17,7 @@ import { OrderStatus } from '../catalogs/entities/order_status.entity';
 import { OrderStatusHistory } from './entities/order_status_history.entity';
 import { ChangeOrderStatusDto } from './dto/change-order-status.dto';
 import { Brackets } from 'typeorm';
-import { RpcException } from '@nestjs/microservices';
+import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { OrderPayment } from './entities/order-payment.entity';
 import { PaymentType } from './entities/payment-type.entity';
 import { PaymentMethod } from './entities/payment-method.entity';
@@ -34,7 +36,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { UsersEmployeesEventsService } from '../users-employees-events/users-employees-events.service';
 import { GetOrderPaymentDto } from './dto/get-order-payment.dto';
 import { BroadcastService } from '../broadcast/broadcast.service';
-import { ConnectableObservable } from 'rxjs';
+import { ConnectableObservable, firstValueFrom } from 'rxjs';
 import { SearchHistoryService } from '../search-history/search-history.service';
 import { buildDateRangeUTC } from './helpers/date-range.helper';
 import { DeviceResponseDto } from '../devices/dto/device-response.dto';
@@ -251,6 +253,10 @@ export class OrderWorkflowService {
         technicians,
       });
 
+      if (!isPersonalizado && dto.device_id) {
+        await this.assertDeviceNotInWarehouseOrInventory(manager, dto.device_id, user.companyId);
+      }
+
       // ✅ 1️⃣ GUARDAR ORDEN (aquí nace el ID)
       const savedOrder = await manager.save(order);
 
@@ -392,6 +398,99 @@ export class OrderWorkflowService {
   }
 
   // ─── Helper privado para emitir notificaciones ────────────────────────────
+  // IDs de order_type que representan compra/ingreso de equipo.
+  // TODO: confirma el/los IDs reales (ej: [1] o [4, 5])
+  private readonly PURCHASE_ORDER_TYPE_IDS: number[] = [];
+
+  private readonly ESTADO_BODEGA = 9;
+  private readonly ESTADO_INVENTARIO = 10;
+
+private async assertDeviceNotInWarehouseOrInventory(
+  manager: EntityManager,
+  deviceId: number | undefined | null,
+  companyId: string,
+  excludeOrderId?: number,
+): Promise<void> {
+  if (!deviceId) return;
+
+  const device = await manager.findOne(Device, {
+    where: { device_id: deviceId, company_id: companyId },
+    relations: ['imeis'],
+  });
+
+  const imeis = (device?.imeis ?? [])
+    .map((i) => String(i.imei_number).trim())
+    .filter(Boolean);
+
+  if (!imeis.length) return; // sin IMEI no hay con qué comparar
+
+  // 1) Otra orden con el mismo IMEI que ya está en BODEGA (9) o EN INVENTARIO (10)
+  const qb = manager
+    .getRepository(Order)
+    .createQueryBuilder('o')
+    .select(['o.id', 'o.order_number', 'o.current_status_id'])
+    .innerJoin('o.device', 'd')
+    .innerJoin('d.imeis', 'i')
+    .where('o.company_id = :companyId', { companyId })
+    .andWhere('i.imei_number IN (:...imeis)', { imeis })
+    .andWhere('o.current_status_id IN (:...statuses)', {
+      statuses: [this.ESTADO_BODEGA, this.ESTADO_INVENTARIO],
+    });
+
+  if (excludeOrderId) {
+    qb.andWhere('o.id != :excludeOrderId', { excludeOrderId });
+  }
+
+  const existing = await qb.getOne();
+  if (existing) {
+    const estadoTexto =
+      existing.current_status_id === this.ESTADO_INVENTARIO
+        ? 'en inventario'
+        : 'en bodega';
+
+    throw new RpcException(
+      new ConflictException(
+        `Este dispositivo ya está ${estadoTexto} en la orden #${existing.order_number}. No se puede ingresar de nuevo. Verifica esa orden.`,
+      ),
+    );
+  }
+
+  // 2) Ya está en inventario (microservicio de inventario por HTTP)
+  const baseUrl = process.env.INVENTORY_URL;
+  if (!baseUrl) {
+    console.warn('⚠️ INVENTORY_URL no configurada, se omite verificación en inventario');
+    return;
+  }
+
+  let res: any = null;
+  try {
+    const r = await fetch(`${baseUrl}/api/income-backend/check-device`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ imeis }),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    if (r.ok) {
+      res = await r.json();
+    } else {
+      console.warn(`⚠️ Inventario respondió ${r.status}, se continúa`);
+    }
+  } catch (e) {
+    console.warn('⚠️ No se pudo verificar inventario, se continúa:', (e as any)?.message);
+  }
+
+  if (res?.inInventory) {
+    throw new RpcException(
+      new ConflictException(
+        `Este dispositivo ya está en inventario desde la orden ${res.previousOrder} (lote ${res.batchNumber}). No se puede ingresar de nuevo. Verifica esa orden.`,
+      ),
+    );
+  }
+}
+
   private async emitNotification(
     orderId: number,
     companyId: string,
@@ -3453,7 +3552,6 @@ export class OrderWorkflowService {
       return saved;
     });
   }
-  private readonly ESTADO_BODEGA = 9;
   private readonly DEVICE_TYPE_CELLPHONE_ID = 1;
 
   async pasarABodega(
@@ -3527,6 +3625,14 @@ export class OrderWorkflowService {
 
       const observation =
         dto.observation?.trim() || 'Orden enviada a bodega para gestión de inventario';
+
+      // 🔒 Validación: dispositivo ya en bodega o en inventario
+      await this.assertDeviceNotInWarehouseOrInventory(
+        manager,
+        order.device_id,
+        user.companyId,
+        order.id,
+      );
 
       const { toStatus, history, fromStatusId, fromStatusName } =
         await this.applyStatusChange(manager, order, this.ESTADO_BODEGA, observation, user);

@@ -140,4 +140,16 @@ export class IncomeBackendController {
     this.logger.log(`📤 GET /labels/${batchId}`);
     return this.incomeBackendService.getLabelData(batchId);
   }
+
+  @Post('check-device')
+  @ApiOperation({ summary: 'Verifica si un dispositivo (IMEI) ya está en inventario con stock' })
+  @ApiResponse({ status: HttpStatus.OK, description: 'Resultado de la verificación' })
+  async checkDevice(@Body() body: { imeis: string[] }) {
+    this.logger.log(`📤 POST /check-device - imeis: ${(body.imeis || []).join(', ')}`);
+    const active = await this.incomeBackendService.findActiveDeviceByImeis(body.imeis || []);
+    return {
+      inInventory: !!active,
+      ...(active || {}),
+    };
+  }
 }
