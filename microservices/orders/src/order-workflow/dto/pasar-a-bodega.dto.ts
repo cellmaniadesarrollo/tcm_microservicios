@@ -1,5 +1,5 @@
 // pasar-a-bodega.dto.ts (microservicio)
 export class PasarABodegaDto {
-    orderId: number;
+    orderId!: number;
     observation?: string;
 }
