@@ -31,4 +31,8 @@ export class SriDocumentsService {
   signDocument(documentId: string, user: UserCtx) {
     return this.billing.send('sign_document', { documentId, user });
   }
+
+  sendDocument(documentId: string, user: UserCtx) {
+    return this.billing.send('send_document', { documentId, user });
+  }
 }

@@ -42,4 +42,9 @@ export class SriDocumentsController {
   sign(@Param('id', ParseUUIDPipe) id: string, @User() user: any) {
     return this.service.signDocument(id, this.ctx(user));
   }
+
+  @Post(':id/send')
+  send(@Param('id', ParseUUIDPipe) id: string, @User() user: any) {
+    return this.service.sendDocument(id, this.ctx(user));
+  }
 }

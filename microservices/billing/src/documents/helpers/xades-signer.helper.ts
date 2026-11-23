@@ -81,11 +81,16 @@ export function signXadesBes(xml: string, p12: Buffer, password: string): string
     .join(',');
   const serial = BigInt('0x' + cert.serialNumber).toString();
 
+  // Hora de Ecuador (UTC-5, sin horario de verano)
+  const signingTime = new Date(Date.now() - 5 * 3600_000)
+    .toISOString()
+    .replace(/\.\d{3}Z$/, '-05:00');
+
   const signedProps = el(
     'etsi:SignedProperties',
     `Id="${spId}"`,
     '<etsi:SignedSignatureProperties>' +
-      `<etsi:SigningTime>${new Date().toISOString().replace(/\.\d{3}Z$/, '-00:00')}</etsi:SigningTime>` +
+      `<etsi:SigningTime>${signingTime}</etsi:SigningTime>` +
       '<etsi:SigningCertificate><etsi:Cert><etsi:CertDigest>' +
       `<ds:DigestMethod Algorithm="${NS_DS}sha1"></ds:DigestMethod>` +
       `<ds:DigestValue>${certDigest}</ds:DigestValue></etsi:CertDigest>` +

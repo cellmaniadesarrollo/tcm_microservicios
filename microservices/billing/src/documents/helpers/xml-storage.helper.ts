@@ -1,7 +1,8 @@
-export type XmlStage = 'unsigned' | 'signed' | 'authorized';
+/** Bucket de los comprobantes SRI. Si está vacío, AwsS3Service usa AWS_BUCKET_NAME. */
+export const SRI_BUCKET = process.env.SRI_S3_BUCKET || 'teamcellmania1';
 
-/** Prefijo: sri-xml/<empresa>/<yyyy>/<mm>/<etapa>/ */
-export function xmlPrefix(companyId: string, issueDate: string, stage: XmlStage): string {
-  const [y, m] = issueDate.slice(0, 10).split('-');
-  return `sri-xml/${companyId}/${y}/${m}/${stage}/`;
-}
+export const sriXmlKey = {
+  generated: (accessKey: string) => `FACTURACION/GENERADOS/${accessKey}.xml`,
+  signed: (accessKey: string) => `FACTURACION/FIRMADOS/${accessKey}.xml`,
+  authorized: (accessKey: string) => `FACTURACION/AUTORIZADOS/${accessKey}.xml`,
+};

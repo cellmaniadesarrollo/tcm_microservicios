@@ -142,4 +142,27 @@ export class AwsS3Service {
       throw new InternalServerErrorException('Error al descargar archivo de S3');
     }
   }
+
+  /** Sube con una key exacta (sin UUID). Si no pasas bucket, usa el del servicio. */
+  async putObject(
+    key: string,
+    body: Buffer | string,
+    contentType = 'application/xml',
+    bucket?: string,
+  ): Promise<string> {
+    try {
+      await this.s3Client.send(
+        new PutObjectCommand({
+          Bucket: bucket ?? this.bucketName,
+          Key: key,
+          Body: body,
+          ContentType: contentType,
+        }),
+      );
+      return key;
+    } catch (error) {
+      console.error(`Error subiendo ${key} a S3:`, error);
+      throw new InternalServerErrorException('Error al subir archivo a S3');
+    }
+  }
 }

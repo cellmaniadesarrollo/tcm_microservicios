@@ -79,4 +79,6 @@ export class SriDocument {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' }) updatedAt!: Date;
+
+  @Column({ name: 'sri_messages', type: 'jsonb', nullable: true }) sriMessages!: unknown[] | null;
 }

@@ -2,6 +2,16 @@ import { InvoiceDoc } from '../../../models/document.model';
 import { impuestoLinea, infoTributaria, totalConImpuestos } from '../common/common.xml';
 import { esc, sriDate, tag } from '../helpers/xml.helper';
 
+/** Campos monetarios obligatorios: si vienen vacíos, el SRI espera 0.00. */
+const money = (v: string | number | null | undefined) =>
+  v === null || v === undefined || String(v).trim() === '' ? '0.00' : v;
+
+/** contribuyenteEspecial solo se emite si es un número de resolución real. */
+const specialTaxpayer = (v: string | null | undefined) => {
+  const s = (v ?? '').trim();
+  return /^(no|n\/a|ninguno)?$/i.test(s) ? null : s;
+};
+
 export function buildInvoiceXml(i: InvoiceDoc): string {
   const b = i.buyer;
 
@@ -9,16 +19,16 @@ export function buildInvoiceXml(i: InvoiceDoc): string {
     '<infoFactura>' +
     tag('fechaEmision', sriDate(i.issueDate)) +
     tag('dirEstablecimiento', i.issuer.establishmentAddress) +
-    tag('contribuyenteEspecial', i.issuer.specialTaxpayer) +
+    tag('contribuyenteEspecial', specialTaxpayer(i.issuer.specialTaxpayer)) +
     tag('obligadoContabilidad', i.issuer.accountingRequired ? 'SI' : 'NO') +
     tag('tipoIdentificacionComprador', b.idTypeCode) +
     tag('razonSocialComprador', b.name) +
     tag('identificacionComprador', b.idNumber) +
     tag('direccionComprador', b.address) +
     tag('totalSinImpuestos', i.totalWithoutTax) +
-    tag('totalDescuento', i.totalDiscount) +
+    tag('totalDescuento', money(i.totalDiscount)) +
     totalConImpuestos(i.lines) +
-    tag('propina', i.tip) +
+    tag('propina', money(i.tip)) +
     tag('importeTotal', i.total) +
     tag('moneda', 'DOLAR') +
     '<pagos>' +
@@ -46,7 +56,7 @@ export function buildInvoiceXml(i: InvoiceDoc): string {
           tag('descripcion', l.description) +
           tag('cantidad', l.quantity) +
           tag('precioUnitario', l.unitPrice) +
-          tag('descuento', l.discount) +
+          tag('descuento', money(l.discount)) +
           tag('precioTotalSinImpuesto', l.lineTotal) +
           impuestoLinea(l) +
           '</detalle>',

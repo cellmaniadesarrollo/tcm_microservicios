@@ -3,6 +3,7 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import { InternalAuthInterceptor } from '../../interceptors/internal-auth.interceptor';
 import { DocumentsService } from '../services/documents.service';
 import { SigningService } from '../services/signing.service';
+import { SriSubmissionService } from '../services/sri-submission.service';
 
 @Controller()
 @UseInterceptors(InternalAuthInterceptor)
@@ -12,6 +13,7 @@ export class DocumentsController {
   constructor(
     private readonly service: DocumentsService,
     private readonly signing: SigningService,
+    private readonly submission: SriSubmissionService,
   ) {}
 
   @MessagePattern({ cmd: 'preview_document_xml' })
@@ -34,6 +36,17 @@ export class DocumentsController {
       return await this.signing.signDocument(d.user.companyId, d.documentId);
     } catch (e: any) {
       this.log.error(`Falló la firma: ${e?.message}`, e?.stack);
+      throw e;
+    }
+  }
+
+  @MessagePattern({ cmd: 'send_document' })
+  async send(@Payload() d: any) {
+    this.log.log(`Enviando documento ${d.documentId} al SRI`);
+    try {
+      return await this.submission.send(d.user.companyId, d.documentId);
+    } catch (e: any) {
+      this.log.error(`Falló el envío al SRI: ${e?.message}`, e?.stack);
       throw e;
     }
   }
