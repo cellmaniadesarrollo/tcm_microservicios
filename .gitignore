@@ -49,3 +49,5 @@ tmp
 .git
 *.log
 .env.prod
+
+xml-debug/

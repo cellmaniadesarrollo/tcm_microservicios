@@ -127,4 +127,19 @@ export class AwsS3Service {
       console.error(`Error eliminando ${fileKey} de S3:`, error);
     }
   }
+
+  /** Descarga un objeto privado como Buffer (por ejemplo el .p12). Lanza si falla. */
+  async getObjectBuffer(fileKey: string): Promise<Buffer> {
+    try {
+      const res = await this.s3Client.send(
+        new GetObjectCommand({ Bucket: this.bucketName, Key: fileKey }),
+      );
+      const bytes = await res.Body?.transformToByteArray();
+      if (!bytes) throw new Error('Objeto vacío');
+      return Buffer.from(bytes);
+    } catch (error) {
+      console.error(`Error descargando ${fileKey} de S3:`, error);
+      throw new InternalServerErrorException('Error al descargar archivo de S3');
+    }
+  }
 }

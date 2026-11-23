@@ -1,4 +1,4 @@
-/** Escapa texto para XML y limpia caracteres que el SRI rechaza. */
+/** Escapa texto de un nodo (compatible con C14N): solo & < > */
 export function esc(v: string | number | null | undefined): string {
   return String(v ?? '')
     .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
@@ -6,15 +6,28 @@ export function esc(v: string | number | null | undefined): string {
     .trim()
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/>/g, '&gt;');
 }
 
-/** <tag>valor</tag>, o cadena vacía si el valor es null/undefined/''. */
-export function tag(name: string, v: string | number | null | undefined): string {
+/** Escapa el valor de un atributo (además de & < >, las comillas dobles). */
+export function escAttr(v: string | number | null | undefined): string {
+  return esc(v).replace(/"/g, '&quot;');
+}
+
+/** <tag>valor</tag>, o '' si es null/undefined/''. `max` recorta al límite del SRI. */
+export function tag(
+  name: string,
+  v: string | number | null | undefined,
+  max?: number,
+): string {
   if (v === null || v === undefined || v === '') return '';
-  return `<${name}>${esc(v)}</${name}>`;
+  const s = max ? String(v).slice(0, max) : v;
+  return `<${name}>${esc(s)}</${name}>`;
+}
+
+/** <campoAdicional nombre="..">valor</campoAdicional> */
+export function campoAdicional(name: string, value: string): string {
+  return `<campoAdicional nombre="${escAttr(name).slice(0, 300)}">${esc(value).slice(0, 300)}</campoAdicional>`;
 }
 
 /** YYYY-MM-DD -> dd/mm/yyyy (formato del SRI). */

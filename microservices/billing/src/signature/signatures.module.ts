@@ -12,6 +12,6 @@ import { BranchReplica } from '../companies/entities/branch-replica.entity';
     imports: [TypeOrmModule.forFeature([Signature, SignatureBranch, BranchReplica]), AwsS3Module],
     controllers: [SignaturesController],
     providers: [SignaturesService, SignatureCryptoService],
-    exports: [SignaturesService], // el servicio que firma facturas lo necesitará
+    exports: [SignaturesService, SignatureCryptoService], // SigningService (documents) usa el cifrado
 })
 export class SignaturesModule {}
