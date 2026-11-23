@@ -1590,45 +1590,82 @@ private async assertDeviceNotInWarehouseOrInventory(
   ) {
     const { orderId, toStatusId, observation } = dto;
 
-    const order = await this.orderRepo.findOne({
-      where: { id: orderId, company_id: user.companyId },
-      relations: ['currentStatus'],
+    // Estados destino que se permiten aunque la orden esté validada
+    const DESTINOS_PERMITIDOS_VALIDADA: Record<number, string> = {
+      [this.ESTADO_BODEGA]: 'PASAR A BODEGA',
+      [this.ESTADO_INVENTARIO]: 'EN INVENTARIO',
+    };
+
+    // 1. Todo lo crítico dentro de una transacción
+    const result = await this.orderRepo.manager.transaction(async (manager) => {
+      const order = await manager.findOne(Order, {
+        where: { id: orderId, company_id: user.companyId },
+        relations: ['currentStatus'],
+      });
+
+      if (!order) {
+        throw new RpcException(new NotFoundException('Orden no encontrada'));
+      }
+
+      // Si el destino es BODEGA o INVENTARIO, se permite aunque la orden esté validada
+      const nombrePermitido = DESTINOS_PERMITIDOS_VALIDADA[toStatusId];
+
+      await this.orderValidationLockService.assertEditable(
+        order.id,
+        nombrePermitido ? [nombrePermitido] : undefined,
+      );
+
+      const { toStatus, history, fromStatusId, fromStatusName } =
+        await this.applyStatusChange(manager, order, toStatusId, observation, user);
+
+      return {
+        orderId: order.id,
+        fromStatusId,
+        fromStatusName,
+        toStatusId,
+        toStatusName: toStatus.name,
+        historyId: history.id,
+        changedAt: history.changed_at,
+      };
     });
 
-    if (!order) {
-      throw new RpcException(new NotFoundException('Orden no encontrada'));
-    }
-
-    await this.orderValidationLockService.assertEditable(order.id);
-
-    const { toStatus, history, fromStatusId, fromStatusName } =
-      await this.applyStatusChange(this.orderRepo.manager, order, toStatusId, observation, user);
-
+    // 2. Notificaciones y broadcast FUERA de la transacción (después del commit)
     const userEntity = await this.userCacheService.getUserById(user.userId, user.companyId);
 
     await this.emitNotification(
-      order.id, user.companyId, user.userId,
-      'status_changed', 'Se actualizó el estado de la orden',
+      result.orderId,
+      user.companyId,
+      user.userId,
+      'status_changed',
+      'Se actualizó el estado de la orden',
     );
 
-    await this.broadcastService.publishOrderUpdated(order.id, 'status_changed', {
-      currentStatus: { id: toStatusId, name: toStatus.name },
+    await this.broadcastService.publishOrderUpdated(result.orderId, 'status_changed', {
+      currentStatus: {
+        id: result.toStatusId,
+        name: result.toStatusName,
+      },
       statusHistoryEntry: {
-        id: history.id,
-        fromStatus: fromStatusId ? { id: fromStatusId, name: fromStatusName } : null,
-        toStatus: { id: toStatusId, name: toStatus.name },
+        id: result.historyId,
+        fromStatus: result.fromStatusId
+          ? { id: result.fromStatusId, name: result.fromStatusName }
+          : null,
+        toStatus: {
+          id: result.toStatusId,
+          name: result.toStatusName,
+        },
         changedBy: mapUser(userEntity),
         observation: observation ?? null,
-        changed_at: history.changed_at,
+        changed_at: result.changedAt,
       },
     });
 
     return {
       success: true,
       message: 'Estado de la orden actualizado correctamente',
-      orderId: order.id,
-      fromStatusId,
-      toStatusId,
+      orderId: result.orderId,
+      fromStatusId: result.fromStatusId,
+      toStatusId: result.toStatusId,
     };
   }
 

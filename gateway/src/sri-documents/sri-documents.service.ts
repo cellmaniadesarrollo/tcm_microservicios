@@ -27,4 +27,12 @@ export class SriDocumentsService {
   previewXml(documentId: string, user: UserCtx) {
     return this.billing.send('preview_document_xml', { documentId, user });
   }
+
+  signDocument(documentId: string, user: UserCtx) {
+    return this.billing.send('sign_document', { documentId, user });
+  }
+
+  sendDocument(documentId: string, user: UserCtx) {
+    return this.billing.send('send_document', { documentId, user });
+  }
 }

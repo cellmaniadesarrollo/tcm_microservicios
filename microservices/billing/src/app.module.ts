@@ -20,6 +20,7 @@ import { SriCatalogsModule } from './sri-catalogs/sri-catalogs.module';
 import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 import { DiscountsModule } from './discounts/discounts.module';
+import { DocumentsModule } from './documents/documents.module';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { DiscountsModule } from './discounts/discounts.module';
     SriDocumentsModule,
     ReceiptsModule,
     DiscountsModule,
+    DocumentsModule,
   ],
 })
 export class AppModule { }
