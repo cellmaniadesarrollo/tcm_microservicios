@@ -11,11 +11,24 @@ import { SriSequenceService } from './services/sri-sequence.service';
 import { SriDocumentsController } from './controllers/sri-documents.controller';
 import { SriPaymentMethod } from '../sri-catalogs/entities/sri-payment-method.entity';
 import { DiscountsModule } from '../discounts/discounts.module';
+import { DocumentsModule } from '../documents/documents.module';
+import { AwsS3Module } from '../aws-s3/aws-s3.module';
+import { SigningService } from '../documents/services/signing.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([SriDocument, SriDocumentLine, SriDocumentPayment, SriSequence, SriVatRate]),
-    IssuersModule, SriPaymentMethod, DiscountsModule
+    TypeOrmModule.forFeature([
+      SriDocument,
+      SriDocumentLine,
+      SriDocumentPayment,
+      SriSequence,
+      SriVatRate,
+      SriPaymentMethod,
+    ]),
+    IssuersModule,
+    DiscountsModule,
+    DocumentsModule,
+    AwsS3Module,
   ],
   controllers: [SriDocumentsController],
   providers: [SriSequenceService, SriDocumentsService],

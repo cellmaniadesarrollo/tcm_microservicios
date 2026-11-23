@@ -24,6 +24,10 @@ export class DocumentMapper {
     });
     if (!issuer) throw new NotFoundException('Emisor no encontrado.');
 
+    // dirMatriz es obligatorio en infoTributaria: se falla aquí y no en el SRI.
+    if (!issuer.headquartersAddress?.trim())
+      throw new BadRequestException('El emisor no tiene dirección matriz (dirMatriz).');
+
     const branch = doc.branchId
       ? await this.ds.getRepository(BranchReplica).findOne({ where: { id: doc.branchId } })
       : null;

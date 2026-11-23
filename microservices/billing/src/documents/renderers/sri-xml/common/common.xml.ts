@@ -1,5 +1,5 @@
 import { BaseDoc, DocLine } from '../../../models/document.model';
-import { tag } from '../helpers/xml.helper';
+import { escAttr, tag } from '../helpers/xml.helper';
 
 /** infoTributaria: común a todos los comprobantes. */
 export function infoTributaria(i: BaseDoc, docTypeCode: string): string {
@@ -8,15 +8,15 @@ export function infoTributaria(i: BaseDoc, docTypeCode: string): string {
     '<infoTributaria>' +
     tag('ambiente', i.environmentCode) +
     tag('tipoEmision', i.emissionTypeCode) +
-    tag('razonSocial', issuer.businessName) +
-    tag('nombreComercial', issuer.tradeName) +
+    tag('razonSocial', issuer.businessName, 300) +
+    tag('nombreComercial', issuer.tradeName, 300) +
     tag('ruc', issuer.ruc) +
     tag('claveAcceso', i.accessKey) +
     tag('codDoc', docTypeCode) +
     tag('estab', i.series.slice(0, 3)) +
     tag('ptoEmi', i.series.slice(3, 6)) +
     tag('secuencial', String(i.sequence).padStart(9, '0')) +
-    tag('dirMatriz', issuer.headOfficeAddress) +
+    tag('dirMatriz', issuer.headOfficeAddress, 300) +
     tag('agenteRetencion', issuer.withholdingAgent) +
     (issuer.rimpe === 'RIMPE' ? tag('contribuyenteRimpe', 'CONTRIBUYENTE RÉGIMEN RIMPE') : '') +
     (issuer.rimpe === 'POPULAR'
@@ -57,6 +57,20 @@ export function totalConImpuestos(lines: DocLine[]): string {
       )
       .join('') +
     '</totalConImpuestos>'
+  );
+}
+
+export function detallesAdicionales(l: DocLine): string {
+  if (!l.additionalDetails?.length) return '';
+  return (
+    '<detallesAdicionales>' +
+    l.additionalDetails
+      .map(
+        (d) =>
+          `<detAdicional nombre="${escAttr(d.name).slice(0, 300)}" valor="${escAttr(d.value).slice(0, 300)}"/>`,
+      )
+      .join('') +
+    '</detallesAdicionales>'
   );
 }
 

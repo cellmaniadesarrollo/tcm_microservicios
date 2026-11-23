@@ -1,25 +1,37 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { DataSource, In } from 'typeorm';
 import { DiscountInput, DiscountsService } from '../../discounts/services/discounts.service';
+import { DocumentsService } from '../../documents/services/documents.service';
 import { IssuersService } from '../../issuer/services/issuers.service';
 import { SriPaymentMethod } from '../../sri-catalogs/entities/sri-payment-method.entity';
 import { SriVatRate } from '../../sri-catalogs/entities/sri-vat-rate.entity';
 import { CreateInvoiceDto } from '../dto/create-invoice.dto';
 import { SriDocument } from '../entities/sri-document.entity';
+import { SriDocumentLine } from '../entities/sri-document-line.entity';
 import { buildAccessKey } from '../helpers/access-key.helper';
 import { calculateTotals, LineInput, VatKind } from '../helpers/totals.helper';
 import { SriSequenceService } from './sri-sequence.service';
-import { SriDocumentLine } from '../entities/sri-document-line.entity';
+import { saveDebugXml } from '../../documents/helpers/xml-file.helper';
+import { AwsS3Service } from '../../aws-s3/aws-s3.service';
+import { SRI_BUCKET, sriXmlKey } from '../../documents/helpers/xml-storage.helper';
+import { SigningService } from '../../documents/services/signing.service';
+import { SriSubmissionService } from '../../documents/services/sri-submission.service';
 
 const money = (cents: number) => (cents / 100).toFixed(2);
 
 @Injectable()
 export class SriDocumentsService {
+  private readonly logger = new Logger(SriDocumentsService.name);
+
   constructor(
     private readonly ds: DataSource,
     private readonly issuers: IssuersService,
     private readonly sequences: SriSequenceService,
     private readonly discounts: DiscountsService,
+    private readonly documents: DocumentsService,
+    private readonly s3: AwsS3Service,
+    private readonly signing: SigningService,
+    private readonly submission: SriSubmissionService,
   ) {}
 
   async createInvoice(companyId: string, userId: string, dto: CreateInvoiceDto) {
@@ -37,7 +49,7 @@ export class SriDocumentsService {
     // tarifas desde el catálogo (nunca confiar en el porcentaje del front)
     const rates = await this.loadVatRates(dto.lines.map((l) => l.vatRateCode));
 
-    return this.ds.transaction(async (m) => {
+    const created = await this.ds.transaction(async (m) => {
       // 1) Resolver descuentos del catálogo en el servidor
       const applied: (DiscountInput & { position: number })[] = [];
       const lineInputs: LineInput[] = [];
@@ -153,6 +165,88 @@ export class SriDocumentsService {
 
       return { ...doc, replayed: false };
     });
+
+    await this.buildAndStoreXml(companyId, created.id);
+    const signed = await this.trySign(companyId, created.id);
+
+    // Envío al SRI en segundo plano: el usuario no espera los 8-10 s de recepción + autorización.
+    if (signed && process.env.SRI_AUTO_SEND !== 'false') {
+      void this.sendInBackground(companyId, created.id);
+    }
+
+    // Si firmó, devolvemos el estado real (FIRMADO) sin los XML pesados.
+    if (signed) {
+      const fresh = await this.ds.getRepository(SriDocument).findOne({
+        where: { id: created.id, companyId },
+        relations: { lines: true, payments: true },
+      });
+      if (fresh) {
+        const { xmlUnsigned, xmlSigned, xmlAuthorized, ...rest } = fresh as any;
+        return { ...rest, replayed: false };
+      }
+    }
+    return created;
+  }
+
+  /** Genera el XML sin firmar y lo guarda. Si falla, la factura queda en BORRADOR. */
+  private async buildAndStoreXml(companyId: string, documentId: string) {
+    try {
+      const xml = (await this.documents.render(companyId, documentId, 'SRI_XML')) as string;
+      const repo = this.ds.getRepository(SriDocument);
+      await repo.update({ id: documentId, companyId }, { xmlUnsigned: xml });
+
+      const doc = await repo.findOne({
+        where: { id: documentId, companyId },
+        select: { accessKey: true },
+      });
+      const accessKey = doc?.accessKey ?? documentId;
+
+      // Copia en disco para depuración
+      const path = await saveDebugXml(`${accessKey}.xml`, xml);
+
+      // S3: FACTURACION/GENERADOS/<claveAcceso>.xml
+      let s3Key: string | null = null;
+      try {
+        s3Key = await this.s3.putObject(
+          sriXmlKey.generated(accessKey),
+          Buffer.from(xml, 'utf8'),
+          'application/xml',
+          SRI_BUCKET,
+        );
+        await repo.update({ id: documentId, companyId }, { xmlUnsignedKey: s3Key });
+      } catch (e: any) {
+        this.logger.error(`XML ${documentId} no subió a S3: ${e?.message}`);
+      }
+
+      this.logger.log(
+        `XML generado para ${documentId} (${xml.length} caracteres)` +
+          (path ? ` -> ${path}` : '') +
+          (s3Key ? ` -> s3:${s3Key}` : ''),
+      );
+    } catch (e: any) {
+      this.logger.error(`No se pudo generar el XML de ${documentId}: ${e?.message}`, e?.stack);
+    }
+  }
+
+  /** Firma tras generar el XML. Si falla, la factura queda en BORRADOR y se reintenta con POST /:id/sign. */
+  private async trySign(companyId: string, documentId: string): Promise<boolean> {
+    try {
+      await this.signing.signDocument(companyId, documentId);
+      return true;
+    } catch (e: any) {
+      this.logger.error(`No se pudo firmar ${documentId}: ${e?.message}`, e?.stack);
+      return false;
+    }
+  }
+
+  /** Recepción + autorización. Si falla, la factura queda FIRMADO/RECIBIDO y se reintenta con POST /:id/send. */
+  private async sendInBackground(companyId: string, documentId: string) {
+    try {
+      const res = await this.submission.send(companyId, documentId);
+      this.logger.log(`Envío SRI de ${documentId}: ${res.statusCode}`);
+    } catch (e: any) {
+      this.logger.error(`No se pudo enviar ${documentId} al SRI: ${e?.message}`, e?.stack);
+    }
   }
 
   /** Tarifas activas del catálogo, con el tipo derivado del código. */

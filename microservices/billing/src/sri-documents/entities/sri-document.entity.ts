@@ -55,6 +55,10 @@ export class SriDocument {
   @Column({ name: 'xml_unsigned', type: 'text', nullable: true }) xmlUnsigned!: string | null;
   @Column({ name: 'xml_signed', type: 'text', nullable: true }) xmlSigned!: string | null;
   @Column({ name: 'xml_authorized', type: 'text', nullable: true }) xmlAuthorized!: string | null;
+    /** Keys de S3 (nunca URLs). */
+  @Column({ name: 'xml_unsigned_key', type: 'varchar', length: 500, nullable: true }) xmlUnsignedKey!: string | null;
+  @Column({ name: 'xml_signed_key', type: 'varchar', length: 500, nullable: true }) xmlSignedKey!: string | null;
+  @Column({ name: 'xml_authorized_key', type: 'varchar', length: 500, nullable: true }) xmlAuthorizedKey!: string | null;
   @Column({ name: 'authorized_at', type: 'timestamptz', nullable: true }) authorizedAt!: Date | null;
   @Column({ name: 'authorization_number', type: 'varchar', length: 49, nullable: true }) authorizationNumber!: string | null;
 
@@ -75,4 +79,6 @@ export class SriDocument {
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' }) updatedAt!: Date;
+
+  @Column({ name: 'sri_messages', type: 'jsonb', nullable: true }) sriMessages!: unknown[] | null;
 }
