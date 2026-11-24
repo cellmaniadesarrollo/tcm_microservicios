@@ -101,7 +101,13 @@ export class DiscountsService {
    * Valida el descuento al vender y calcula el monto en el servidor.
    * gross y el resultado `cents` van en centavos.
    */
-  async resolveForLine(m: EntityManager, companyId: string, discountId: string, gross: number) {
+  async resolveForLine(
+    m: EntityManager,
+    companyId: string,
+    discountId: string,
+    gross: number,
+    vatPercentage = 0, // % de IVA de la línea (0 si no es gravada)
+  ) {
     const d = await m
       .getRepository(Discount)
       .createQueryBuilder('x')
@@ -116,7 +122,8 @@ export class DiscountsService {
     const raw =
       d.valueKind === 'PERCENT'
         ? Math.round((gross * Number(d.value)) / 100)
-        : Math.round(Number(d.value) * 100);
+        // AMOUNT: el monto es con IVA incluido, se convierte a base sin IVA
+        : Math.round((Number(d.value) * 100) / (1 + vatPercentage / 100));
 
     return { discount: d, cents: Math.min(raw, gross) };
   }
