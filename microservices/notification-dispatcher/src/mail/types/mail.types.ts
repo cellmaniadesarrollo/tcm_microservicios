@@ -1,7 +1,35 @@
 export type MailProviderKind = 'GMAIL' | 'SES' | 'SMTP';
 
-export type MailPurpose = 'ALL' | 'NOTIFICATIONS' | 'BILLING';
-export const MAIL_PURPOSES: MailPurpose[] = ['ALL', 'NOTIFICATIONS', 'BILLING'];
+/** Fuente única de verdad. Agregar un propósito = una entrada aquí. El orden es el de la pantalla. */
+export const MAIL_PURPOSE_META = {
+    NOTIFICATIONS: {
+        label: 'Notificaciones',
+        description: 'Avisos al cliente, como el saludo de cumpleaños',
+        emptyHint: 'Sin conexión propia. Se usará la conexión General si existe.',
+        enabled: true,
+    },
+    AUTHORIZATIONS: {
+        label: 'Autorizaciones',
+        description: 'Solicitudes de aprobación, como la creación de clientes',
+        emptyHint: 'Sin conexión propia. Se usará la conexión General si existe.',
+        enabled: true,
+    },
+    ALL: {
+        label: 'General',
+        description: 'Se usa para cualquier propósito que no tenga conexión propia',
+        emptyHint: 'Aún no configuraste una conexión general.',
+        enabled: true,
+    },
+    BILLING: {
+        label: 'Facturación',
+        description: 'Emails de facturación (reservado)',
+        emptyHint: 'Sin conexión propia. Se usará la conexión General si existe.',
+        enabled: false, // ponlo en true cuando se implemente
+    },
+} as const;
+
+export type MailPurpose = keyof typeof MAIL_PURPOSE_META;
+export const MAIL_PURPOSES = Object.keys(MAIL_PURPOSE_META) as MailPurpose[];
 
 export interface MailAttachment {
     filename: string;
@@ -26,6 +54,7 @@ export interface CompanyBrand {
 /** Cada tipo de email de negocio implementa esto, en código. */
 export interface MailType<TPayload> {
     readonly key: string;
+    readonly label: string;
     readonly purpose: MailPurpose;
     build(payload: TPayload, brand: CompanyBrand): MailContent | Promise<MailContent>;
 }

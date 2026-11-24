@@ -6,6 +6,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Matches,
   ValidateNested
 } from 'class-validator';
@@ -57,6 +58,9 @@ class CreateAddressDto {
 }
 
 export class CreateCustomerDto {
+  // dentro de CreateCustomerDto
+  @IsUUID()
+  authorizationId!: string;
   @IsNumber()
   idTypeId!: number;
 

@@ -30,7 +30,14 @@ async function bootstrap() {
       queueOptions: { durable: true },
     },
   });
-
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.RMQ,
+    options: {
+      urls: [process.env.RABBIT_URL || 'amqp://guest:guest@ms-notifications-rabbitmq:5672'],
+      queue: 'realtime_authorization_queue',
+      queueOptions: { durable: true },
+    },
+  });
   // 4. Iniciar todos los microservicios
   await app.startAllMicroservices();
 

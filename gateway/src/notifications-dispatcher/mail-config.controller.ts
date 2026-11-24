@@ -1,11 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Put, BadRequestException, Inject } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Put, Inject } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { User } from '../common/auth/decorators/user.decorator';
 import { Auth } from '../common/auth/decorators/auth.decorator';
 import { UpsertMailConfigDto } from './dto/upsert-mail-config.dto';
-
-const PURPOSES = ['ALL', 'NOTIFICATIONS', 'BILLING'];
 
 @Controller('mail-config')
 @Auth()
@@ -14,10 +12,11 @@ export class MailConfigController {
         @Inject('NOTIFICATIONS_DISPATCHER_SERVICE') private readonly client: ClientProxy,
     ) { }
 
-    private checkPurpose(p: string) {
-        if (!PURPOSES.includes(p)) {
-            throw new BadRequestException(`Propósito inválido. Use: ${PURPOSES.join(', ')}`);
-        }
+    @Get('purposes')
+    async purposes() {
+        return firstValueFrom(
+            this.client.send({ cmd: 'mail_config_purposes' }, { internalToken: process.env.INTERNAL_SECRET }),
+        );
     }
 
     @Get()
@@ -36,7 +35,6 @@ export class MailConfigController {
         @Body() body: UpsertMailConfigDto,
         @User() user: any,
     ) {
-        this.checkPurpose(purpose);
         return firstValueFrom(
             this.client.send(
                 { cmd: 'mail_config_upsert' },
@@ -55,7 +53,6 @@ export class MailConfigController {
         @Param('purpose') purpose: string,
         @User() user: any,
     ) {
-        this.checkPurpose(purpose);
         return firstValueFrom(
             this.client.send(
                 { cmd: 'mail_config_delete' },

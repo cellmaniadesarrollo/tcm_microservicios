@@ -9,7 +9,8 @@ export type NotificationType =
     | 'ORDER_STATUS_CHANGE'
     | 'PICKUP_REMINDER'
     | 'REFERRAL_WELCOME'
-    | 'BIRTHDAY';
+    | 'BIRTHDAY'
+    | 'CUSTOMER_AUTHORIZATION';
 
 @Entity('notification_logs')
 export class NotificationLog {
