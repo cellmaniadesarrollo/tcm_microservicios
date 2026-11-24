@@ -410,6 +410,7 @@ private async assertDeviceNotInWarehouseOrInventory(
   deviceId: number | undefined | null,
   companyId: string,
   excludeOrderId?: number,
+  strict = false,
 ): Promise<void> {
   if (!deviceId) return;
 
@@ -458,6 +459,11 @@ private async assertDeviceNotInWarehouseOrInventory(
   // 2) Ya está en inventario (microservicio de inventario por HTTP)
   const baseUrl = process.env.INVENTORY_URL;
   if (!baseUrl) {
+    if (strict) {
+      throw new RpcException(
+        new InternalServerErrorException('No se puede verificar el inventario (INVENTORY_URL no configurada)'),
+      );
+    }
     console.warn('⚠️ INVENTORY_URL no configurada, se omite verificación en inventario');
     return;
   }
@@ -466,19 +472,18 @@ private async assertDeviceNotInWarehouseOrInventory(
   try {
     const r = await fetch(`${baseUrl}/api/income-backend/check-device`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ imeis }),
       signal: AbortSignal.timeout(5000),
     });
-
-    if (r.ok) {
-      res = await r.json();
-    } else {
-      console.warn(`⚠️ Inventario respondió ${r.status}, se continúa`);
-    }
+    if (!r.ok) throw new Error(`Inventario respondió ${r.status}`);
+    res = await r.json();
   } catch (e) {
+    if (strict) {
+      throw new RpcException(
+        new InternalServerErrorException('No se pudo verificar el inventario. Intenta de nuevo en unos segundos.'),
+      );
+    }
     console.warn('⚠️ No se pudo verificar inventario, se continúa:', (e as any)?.message);
   }
 
@@ -3663,12 +3668,28 @@ private async assertDeviceNotInWarehouseOrInventory(
       const observation =
         dto.observation?.trim() || 'Orden enviada a bodega para gestión de inventario';
 
+      // 🔒 Celular sin IMEI registrado: no se puede garantizar unicidad
+      if (isCellphone) {
+        const dev = await manager.findOne(Device, {
+          where: { device_id: order.device_id, company_id: user.companyId },
+          relations: ['imeis'],
+        });
+        if (!dev?.imeis?.some((i) => String(i.imei_number).trim())) {
+          throw new RpcException(
+            new BadRequestException(
+              'El celular no tiene IMEI registrado. Regístralo antes de pasar a bodega.',
+            ),
+          );
+        }
+      }
+
       // 🔒 Validación: dispositivo ya en bodega o en inventario
       await this.assertDeviceNotInWarehouseOrInventory(
         manager,
         order.device_id,
         user.companyId,
         order.id,
+        true, // strict: si no se puede verificar inventario, se bloquea
       );
 
       const { toStatus, history, fromStatusId, fromStatusName } =
