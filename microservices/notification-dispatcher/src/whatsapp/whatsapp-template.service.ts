@@ -1,11 +1,17 @@
 // src/whatsapp/whatsapp-template.service.ts
 
-import { Injectable, Logger } from '@nestjs/common';
+import {
+    BadGatewayException,
+    BadRequestException,
+    Injectable,
+    Logger,
+    NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { WhatsappSession } from './entities/whatsapp-session.entity';
 import { WhatsappTemplate, WhatsappTemplateEvent } from './entities/whatsapp-template.entity';
-import { TEMPLATE_VARIABLE_CONTRACT } from './whatsapp-template.contract';
+import { TEMPLATE_VARIABLE_CONTRACT, TemplateComponentType } from './whatsapp-template.contract';
 import { MessagePurpose } from './entities/whatsapp-routing.entity';
 
 @Injectable()
@@ -28,7 +34,7 @@ export class WhatsappTemplateService {
     async syncFromMeta(companyId: string, sessionId: string): Promise<WhatsappTemplate[]> {
         const session = await this.sessionRepo.findOne({ where: { id: sessionId, companyId } });
         if (!session || session.provider !== 'OFFICIAL') {
-            throw new Error('Sesión oficial no encontrada');
+            throw new NotFoundException('Sesión oficial no encontrada');
         }
 
         const url = `https://graph.facebook.com/${session.apiVersion}/${session.wabaId}/message_templates?limit=100`;
@@ -39,11 +45,10 @@ export class WhatsappTemplateService {
         if (!res.ok) {
             const body = await res.text().catch(() => '');
             this.logger.warn(`Sync de plantillas falló (${res.status}): ${body}`);
-            throw new Error('No se pudo sincronizar plantillas con Meta');
+            throw new BadGatewayException('No se pudo sincronizar plantillas con Meta');
         }
 
         const { data } = await res.json();
-        const results: WhatsappTemplate[] = [];
 
         for (const remote of data) {
             const existing = await this.templateRepo.findOne({
@@ -63,7 +68,7 @@ export class WhatsappTemplateService {
                 event: existing?.event ?? null,
             });
 
-            results.push(await this.templateRepo.save(entity));
+            await this.templateRepo.save(entity);
         }
 
         return this.templateRepo.find({ where: { companyId, sessionId } });
@@ -80,18 +85,34 @@ export class WhatsappTemplateService {
         event: WhatsappTemplateEvent,
     ): Promise<WhatsappTemplate> {
         const template = await this.templateRepo.findOne({ where: { id: templateId, companyId } });
-        if (!template) throw new Error(`Plantilla ${templateId} no encontrada`);
-
-        if (template.status !== 'APPROVED') {
-            throw new Error(`La plantilla "${template.metaTemplateName}" no está aprobada por Meta todavía`);
+        if (!template) {
+            throw new NotFoundException(`Plantilla ${templateId} no encontrada`);
         }
 
-        const expected = TEMPLATE_VARIABLE_CONTRACT[event].length;
-        const actual = this.countBodyVariables(template.components);
-        if (actual !== expected) {
-            throw new Error(
-                `La plantilla "${template.metaTemplateName}" tiene ${actual} variables en el body, ` +
-                `pero el evento "${event}" requiere ${expected}`,
+        if (template.status !== 'APPROVED') {
+            throw new BadRequestException(
+                `La plantilla "${template.metaTemplateName}" no está aprobada por Meta todavía`,
+            );
+        }
+
+        const contract = TEMPLATE_VARIABLE_CONTRACT[event];
+        if (!contract) {
+            throw new BadRequestException(`Evento "${event}" no válido`);
+        }
+
+        const expected: Record<TemplateComponentType, number> = { HEADER: 0, BODY: 0, BUTTON: 0 };
+        for (const v of contract) expected[v.component ?? 'BODY']++;
+
+        const actual = this.countVariablesByComponent(template.components);
+
+        const diffs = (['HEADER', 'BODY', 'BUTTON'] as const)
+            .filter((c) => actual[c] !== expected[c])
+            .map((c) => `${c}: tiene ${actual[c]}, requiere ${expected[c]}`);
+
+        if (diffs.length) {
+            throw new BadRequestException(
+                `La plantilla "${template.metaTemplateName}" (${template.language}) no cumple el contrato ` +
+                `de "${event}" → ${diffs.join(' | ')}`,
             );
         }
 
@@ -104,11 +125,12 @@ export class WhatsappTemplateService {
 
         template.event = event;
         template.isActive = true;
-        template.variablesMapping = TEMPLATE_VARIABLE_CONTRACT[event].map((v) => ({
+        template.variablesMapping = contract.map((v) => ({
             index: v.index,
+            component: v.component ?? 'BODY',
             source: 'field',
             value: v.fieldPath,
-        }));
+        })) as any;
 
         return this.templateRepo.save(template);
     }
@@ -117,12 +139,22 @@ export class WhatsappTemplateService {
         return this.templateRepo.find({ where: { companyId, sessionId }, order: { metaTemplateName: 'ASC' } });
     }
 
-    private countBodyVariables(components: any[]): number {
+    /** Cuenta variables distintas por componente ({{1}} repetido cuenta una sola vez). */
+    private countVariablesByComponent(components: any[]): Record<TemplateComponentType, number> {
+        const count = (text?: string) =>
+            new Set((text ?? '').match(/\{\{\d+\}\}/g) ?? []).size;
+
+        const header = components?.find((c) => c.type === 'HEADER' && c.format === 'TEXT');
         const body = components?.find((c) => c.type === 'BODY');
-        if (!body?.text) return 0;
-        const matches = body.text.match(/\{\{\d+\}\}/g);
-        return matches ? matches.length : 0;
+        const buttons: any[] = components?.find((c) => c.type === 'BUTTONS')?.buttons ?? [];
+
+        return {
+            HEADER: count(header?.text),
+            BODY: count(body?.text),
+            BUTTON: buttons.filter((b) => b.type === 'URL' && /\{\{\d+\}\}/.test(b.url ?? '')).length,
+        };
     }
+
     async findActiveForEvent(
         companyId: string,
         purpose: MessagePurpose,
@@ -150,6 +182,7 @@ export class WhatsappTemplateService {
 
         return null;
     }
+
     hasDynamicUrlButton(components: any[]): boolean {
         const buttons = components?.find((c) => c.type === 'BUTTONS');
         if (!buttons?.buttons?.length) return false;

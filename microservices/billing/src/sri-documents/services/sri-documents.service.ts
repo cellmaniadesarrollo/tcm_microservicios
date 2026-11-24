@@ -62,7 +62,13 @@ export class SriDocumentsService {
         let disc = 0;
 
         if (l.discountId) {
-          const res = await this.discounts.resolveForLine(m, companyId, l.discountId, gross);
+          const res = await this.discounts.resolveForLine(
+            m,
+            companyId,
+            l.discountId,
+            gross,
+            rate.kind === 'VAT' ? rate.percentage : 0,
+          );
           disc = Math.min(res.cents, gross);
           if (disc > 0) {
             applied.push({

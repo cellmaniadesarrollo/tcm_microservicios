@@ -59,9 +59,10 @@ export class ReferralWelcomeService {
       {
         companyId: p.companyId,
         customerId: p.customerId,
-        code: profile.publicToken, // ⚠️ ajusta si el perfil tiene un campo "code" propio
+        code: profile.code,            // 👈 código legible (PDHX-6AZC)
+        token: profile.publicToken,    // 👈 solo para el botón URL
         shareLink: link,
-        phone,                      // extra, por si el dispatcher lo aprovecha
+        phone,
         firstName: p.firstName ?? null,
       },
       p.customerId,

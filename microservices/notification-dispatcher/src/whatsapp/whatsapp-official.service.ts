@@ -102,6 +102,7 @@ export class WhatsappOfficialService {
         );
         return { ok: true, phoneNumber };
     }
+
     async sendTemplate(
         session: WhatsappSession,
         to: string,
@@ -113,6 +114,25 @@ export class WhatsappOfficialService {
     ): Promise<{ messageId: string | null }> {
         const apiVersion = session.apiVersion ?? 'v20.0';
         const url = `https://graph.facebook.com/${apiVersion}/${session.phoneNumberId}/messages`;
+
+        // ── Diagnóstico: qué valores se van a enviar y cuáles están vacíos ──
+        this.logger.debug(
+            `sendTemplate "${templateName}" → header=${JSON.stringify(headerParams)} ` +
+            `body=${JSON.stringify(bodyParams)} buttons=${JSON.stringify(buttonParams)}`,
+        );
+
+        const empty = [
+            ...headerParams.map((v, i) => ['header', i, v] as const),
+            ...bodyParams.map((v, i) => ['body', i, v] as const),
+            ...(buttonParams ?? []).map((b, i) => ['button', i, b.text] as const),
+        ].filter(([, , v]) => !v || !String(v).trim());
+
+        if (empty.length) {
+            throw new Error(
+                `Parámetros vacíos para "${templateName}": ` +
+                empty.map(([c, i]) => `${c}[${i}]`).join(', '),
+            );
+        }
 
         const components: any[] = [];
 

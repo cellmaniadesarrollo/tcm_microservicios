@@ -13,36 +13,36 @@ export class DiscountsController {
 
   // ── Catálogo ──
 
-  @MessagePattern('discounts.listAvailable')
+  @MessagePattern({ cmd: 'discounts.listAvailable' })
   listAvailable(@Payload() d: { companyId: string }) {
     return this.service.listAvailable(d.companyId);
   }
 
-  @MessagePattern('discounts.create')
+  @MessagePattern({ cmd: 'discounts.create' })
   create(@Payload() d: { companyId: string; userId: string; dto: CreateDiscountInput }) {
     return this.service.create(d.companyId, d.userId, d.dto);
   }
 
-  @MessagePattern('discounts.deactivateDiscount')
+  @MessagePattern({ cmd: 'discounts.deactivateDiscount' })
   deactivateDiscount(@Payload() d: { companyId: string; id: string; userId: string }) {
     return this.service.deactivateDiscount(d.companyId, d.id, d.userId);
   }
 
   // ── Aplicados a documentos ──
 
-  @MessagePattern('discounts.listByDocument')
+  @MessagePattern({ cmd: 'discounts.listByDocument' })
   listByDocument(
     @Payload() d: { companyId: string; documentType: DiscountDocType; documentId: string },
   ) {
     return this.service.listByDocument(d.companyId, d.documentType, d.documentId);
   }
 
-  @MessagePattern('discounts.search')
+  @MessagePattern({ cmd: 'discounts.search' })
   search(@Payload() d: SearchDiscountsFilter) {
     return this.service.search(d);
   }
 
-  @MessagePattern('discounts.deactivateApplied')
+  @MessagePattern({ cmd: 'discounts.deactivateApplied' })
   deactivateApplied(
     @Payload() d: { companyId: string; id: string; userId: string; reason?: string | null },
   ) {

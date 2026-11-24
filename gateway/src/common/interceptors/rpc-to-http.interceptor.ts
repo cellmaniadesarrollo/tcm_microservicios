@@ -1,72 +1,90 @@
 import {
+  BadRequestException,
   CallHandler,
   ExecutionContext,
   HttpException,
   Injectable,
   InternalServerErrorException,
+  Logger,
   NestInterceptor,
 } from '@nestjs/common';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { RpcException } from '@nestjs/microservices';
 
+const isHttpStatus = (n: unknown): n is number =>
+  typeof n === 'number' && n >= 100 && n < 600;
+
 @Injectable()
 export class RpcToHttpInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(RpcToHttpInterceptor.name);
+
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     return next.handle().pipe(
       catchError((err: any) => {
-        console.log('DEBUG RPC ERROR recibido:', JSON.stringify(err, null, 2)); // ← log temporal para depurar
+        this.logger.debug(`RPC error recibido: ${JSON.stringify(err)}`);
 
-        // Caso principal: Excepción directa (NotFoundException, etc.) en RMQ
-        // Llega con err.status (número) y err.message o err.response
-        if (err && typeof err.status === 'number') {
+        // Si ya es una HttpException del propio gateway, se deja pasar tal cual
+        if (err instanceof HttpException) {
+          return throwError(() => err);
+        }
+
+        // 1) Formato estándar que envía toRpc() desde los microservicios:
+        //    { statusCode: 400, message: '...', error: 'Bad Request' }
+        if (err && isHttpStatus(err.statusCode)) {
+          return throwError(() =>
+            new HttpException(
+              {
+                statusCode: err.statusCode,
+                message: err.message ?? 'Error en el microservicio',
+                error: typeof err.error === 'string' ? err.error : 'Error',
+              },
+              err.statusCode,
+            ),
+          );
+        }
+
+        // 2) Excepción directa (NotFoundException, etc.) con err.status numérico
+        if (err && isHttpStatus(err.status)) {
           const status = err.status;
           let message = err.message || 'Error en el microservicio';
-          let errorDetail = err.error || 'Error';
+          let errorDetail = typeof err.error === 'string' ? err.error : 'Error';
 
-          // Si hay response anidado (muy común en RMQ)
           if (err.response && typeof err.response === 'object') {
             message = err.response.message || message;
             errorDetail = err.response.error || errorDetail;
           }
 
           return throwError(() =>
-            new HttpException(
-              {
-                statusCode: status,
-                message,
-                error: errorDetail,
-              },
-              status,
-            ),
+            new HttpException({ statusCode: status, message, error: errorDetail }, status),
           );
         }
 
-        // Caso RpcException explícita
+        // 3) RpcException explícita (cuando no viene deserializada)
         if (err instanceof RpcException) {
           const rpcResp = err.getError();
           if (typeof rpcResp === 'object' && rpcResp !== null) {
-            const statusCode = (rpcResp as any).statusCode ?? (rpcResp as any).status ?? 500;
+            const statusCode = (rpcResp as any).statusCode ?? (rpcResp as any).status;
+            const code = isHttpStatus(statusCode) ? statusCode : 500;
             return throwError(() =>
               new HttpException(
                 {
-                  statusCode,
+                  statusCode: code,
                   message: (rpcResp as any).message ?? 'Error RPC',
                   error: (rpcResp as any).error ?? 'Internal Error',
                 },
-                statusCode,
+                code,
               ),
             );
           }
-          // RpcException con string
           return throwError(() => new InternalServerErrorException(String(rpcResp)));
         }
 
-        // Caso plano o envuelto
+        // 4) Payload anidado en response / error (objeto)
         const payload = err?.response ?? err?.error ?? err;
-        if (payload && typeof payload === 'object' && payload !== null) {
-          const statusCode = payload.statusCode ?? payload.status ?? 500;
-          if (typeof statusCode === 'number' && statusCode >= 100 && statusCode < 600) {
+        if (payload && typeof payload === 'object') {
+          const statusCode = payload.statusCode ?? payload.status;
+          if (isHttpStatus(statusCode)) {
             return throwError(() =>
               new HttpException(
                 {
@@ -78,6 +96,13 @@ export class RpcToHttpInterceptor implements NestInterceptor {
               ),
             );
           }
+        }
+
+        // 5) Red de seguridad temporal: RpcException(string) de handlers que
+        //    aún no usan toRpc() llegan como { status: 'error', message }.
+        //    Se tratan como 400. Quitar cuando todos los microservicios usen toRpc().
+        if (err?.status === 'error' && typeof err.message === 'string') {
+          return throwError(() => new BadRequestException(err.message));
         }
 
         // Fallback
