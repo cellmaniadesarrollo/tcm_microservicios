@@ -157,6 +157,7 @@ export class NotificationsService {
         companyId: string;
         customerId: string;
         code: string;
+        token: string;
         shareLink: string | null;
     }): Promise<void> {
         const customerId = Number(data.customerId);
@@ -192,16 +193,21 @@ export class NotificationsService {
             channel: 'WHATSAPP' as const,
         };
 
+        const firstName = customer.firstName?.trim() || 'cliente';
+
         try {
             await this.whatsapp.send(phone, message, {
                 companyId: data.companyId,
                 purpose: 'NOTIFICATIONS',
                 event: 'REFERRAL_WELCOME',
                 data: {
-                    customer: { firstName: customer.firstName },
-                    referral: { code: data.code, cardLink: link },
+                    customer: { firstName },
+                    referral: {
+                        code: data.code,        // body → PDHX-6AZC
+                        token: data.token,      // botón → public_token
+                        cardLink: link,
+                    },
                 },
-                buttonText: link ? link.split('/').pop() : undefined, // ajusta según tu botón en Meta
             });
             await this.logRepo.save(
                 this.logRepo.create({ ...logBase, status: 'SENT', sentAt: new Date() }),

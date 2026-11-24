@@ -6,6 +6,7 @@ import { SyncRabbitmqController } from './sync-rabbitmq.controller';
 @Module({
   imports: [JwtModule],
   controllers: [SyncRabbitmqController],
-  providers: [SyncGateway]
+  providers: [SyncGateway],
+  exports: [SyncGateway],
 })
 export class SyncModule { }

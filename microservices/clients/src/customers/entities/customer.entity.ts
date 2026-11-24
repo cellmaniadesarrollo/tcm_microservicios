@@ -82,4 +82,5 @@ export class Customer {
   @UpdateDateColumn({ type: 'timestamp' })
   updatedAt!: Date;
 
+
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query, Inject, ParseIntPipe } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, Query, Inject, ParseIntPipe, Req } from '@nestjs/common';
 import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom } from 'rxjs';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -64,21 +64,54 @@ export class CustomersController {
   }
   @Post('save')
 
-  async SaveCustomers(@Body() customerDto: CreateCustomerDto, @User() user: any,) {
-    // 🔐 El PIN viaja aparte, a nivel superior del payload, y no dentro del cliente
-    const { pin, ...customer } = customerDto as CreateCustomerDto & { pin?: string };
+  async SaveCustomers(@Body() customerDto: CreateCustomerDto, @User() user: any) {
+    const { pin, authorizationId, ...customer } =
+      customerDto as CreateCustomerDto & { pin?: string; authorizationId: string };
     return firstValueFrom(
       this.CustomerService.send(
         { cmd: 'save_one_customer' },
         {
           internalToken: process.env.INTERNAL_SECRET,
-          customer,   // 👈 DTO validado, sin el PIN
+          customer,          // sin PIN ni authorizationId
           user,
           pin,
-        }
-      )
+          authorizationId,
+        },
+      ),
     );
   }
+  @Post('authorization')
+  async requestAuthorization(@User() user: any, @Req() req: any) {
+
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'request_customer_authorization' },
+        { internalToken: process.env.INTERNAL_SECRET, user, ip: req.ip },
+      ),
+    );
+  }
+  // Declararlos ANTES de cualquier @Get(':id') / @Post(':id')
+  @Post('authorization/approve')
+  async approveAuthorization(@Body('token') token: string, @User() user: any, @Req() req: any) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'approve_customer_authorization' },
+        { internalToken: process.env.INTERNAL_SECRET, user, token, ip: req.ip },
+      ),
+    );
+  }
+
+  @Get('authorization/active')
+  async activeAuthorization(@User() user: any) {
+    return firstValueFrom(
+      this.CustomerService.send(
+        { cmd: 'get_active_customer_authorization' },
+        { internalToken: process.env.INTERNAL_SECRET, user },
+      ),
+    );
+  }
+
+
 
   @Post('update')
   async updateCustomer(

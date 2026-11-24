@@ -7,6 +7,11 @@ import { WhatsappMessageLogService } from '../../whatsapp/whatsapp-message-log.s
 import { TemplateVariableMapping } from '../../whatsapp/entities/whatsapp-template.entity';
 import { WhatsappProvider } from '../../whatsapp/entities/whatsapp-session.entity';
 
+/** El mapping guardado puede traer `component`; los antiguos no lo tienen (= BODY). */
+type MappingWithComponent = TemplateVariableMapping & {
+    component?: 'HEADER' | 'BODY' | 'BUTTON';
+};
+
 function getByPath(obj: any, path: string): any {
     return path.split('.').reduce((acc, key) => (acc == null ? acc : acc[key]), obj);
 }
@@ -114,17 +119,35 @@ export class WhatsappChannel implements INotificationChannel {
             // Fuente de variables: data (eventos sin orden) o la orden
             const source = context.data ?? context.order;
 
-            params = [...(template.variablesMapping ?? [])]
-                .sort((a: TemplateVariableMapping, b: TemplateVariableMapping) => a.index - b.index)
-                .map((m: TemplateVariableMapping) =>
-                    m.source === 'static' ? m.value : String(getByPath(source, m.value) ?? ''),
-                );
+            const mapping = (template.variablesMapping ?? []) as MappingWithComponent[];
+            const resolve = (m: MappingWithComponent): string =>
+                m.source === 'static' ? String(m.value ?? '') : String(getByPath(source, m.value) ?? '');
+
+            const valuesFor = (component: 'HEADER' | 'BODY' | 'BUTTON'): string[] =>
+                mapping
+                    .filter((m) => (m.component ?? 'BODY') === component)
+                    .sort((a, b) => a.index - b.index)
+                    .map(resolve);
+
+            // BODY: mappings sin `component` (plantillas antiguas) cuentan como BODY
+            params = valuesFor('BODY');
             body = renderTemplateBody(template.components, params);
 
+            // HEADER: si el mapping lo define se usa; si no, comportamiento anterior
+            const headerValues = valuesFor('HEADER');
+            const headerParams = headerValues.length
+                ? headerValues
+                : headerHasVariable(template.components)
+                    ? [String(getByPath(source, 'customer.firstName') ?? '')]
+                    : [];
+
+            // BUTTON: el mapping manda; si no hay, comportamiento anterior (órdenes)
+            const buttonValues = valuesFor('BUTTON');
             const buttonParams = this.templates.hasDynamicUrlButton(template.components)
                 ? [{
                     index: 0,
                     text: String(
+                        buttonValues[0] ??
                         context.buttonText ??
                         context.order?.publicId ??
                         context.order?.orderNumber ??
@@ -132,11 +155,6 @@ export class WhatsappChannel implements INotificationChannel {
                     ),
                 }]
                 : undefined;
-
-            // 🆕 Cabecera con variable {{1}} (ej. plantilla "referidos")
-            const headerParams = headerHasVariable(template.components)
-                ? [String(getByPath(source, 'customer.firstName') ?? '')]
-                : [];
 
             const { messageId } = await this.official.sendTemplate(
                 session,

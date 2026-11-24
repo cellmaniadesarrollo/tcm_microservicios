@@ -22,6 +22,7 @@ export class ReferralsEventsListener {
     companyId: string;
     customerId: string;
     code: string;
+    token: string;
     shareLink: string | null;
   }) {
     this.logger.log(`🎁 REFERRAL_WELCOME · cliente ${data.customerId} · código ${data.code}`);

@@ -17,6 +17,8 @@ import { OrderReplica } from '../orders-relay/entities';
 import { CustomerCache } from '../customers-events/entities/customer-cache.entity';
 import { MailModule } from '../mail/mail.module';
 import { EmailNotificationsService } from './email-notifications.service';
+import { AuthorizationMailController } from './authorization-mail.controller';
+import { AuthorizationMailService } from './authorization-mail.service';
 
 @Module({
   imports: [
@@ -32,11 +34,12 @@ import { EmailNotificationsService } from './email-notifications.service';
     forwardRef(() => OrdersRelayModule),   // ← AGREGAR ESTO
     MailModule
   ],
-  controllers: [NotificationsConsumer],
+  controllers: [NotificationsConsumer, AuthorizationMailController],
   providers: [
     NotificationsService,
     NotificationsScheduler,
-    EmailNotificationsService
+    EmailNotificationsService,
+    AuthorizationMailService
   ],
   exports: [NotificationsService],
 })
