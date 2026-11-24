@@ -10,6 +10,7 @@ import { BroadcastModule } from '../broadcast/broadcast.module';
 import { KafkaModule } from '../kafka/kafka.module';
 import { AuditModule } from '../audit/audit.module';
 import { OrdersPinService } from '../pin/orders-pin.service';
+import { CustomerAuthorizationModule } from '../authorization/authorization.module';
 
 @Module({
   imports: [
@@ -28,9 +29,10 @@ import { OrdersPinService } from '../pin/orders-pin.service';
         },
       },
     ]),
+    CustomerAuthorizationModule
   ],
   providers: [CustomersService, OrdersPinService],
   controllers: [CustomersController],
   exports: [OrdersPinService], // 🆕 por si lo usa el módulo de billing
 })
-export class CustomersModule {}
+export class CustomersModule { }

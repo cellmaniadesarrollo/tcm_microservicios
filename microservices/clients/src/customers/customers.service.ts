@@ -9,6 +9,8 @@ import { firstValueFrom } from 'rxjs';
 import { BroadcastService } from '../broadcast/broadcast.service';
 import { KafkaProducerService } from '../kafka/kafka.producer';
 import { AuditService } from '../audit/audit.service'; // 👈 NUEVO
+import { CustomerAuthorizationService } from '../authorization/services/customer-authorization.service';
+import { sessionUserId } from '../authorization/constants/constants';
 
 @Injectable()
 export class CustomersService {
@@ -24,6 +26,7 @@ export class CustomersService {
         private readonly addressRepo: Repository<Address>,
         private readonly broadcast: BroadcastService,
         private readonly audit: AuditService, // 👈 NUEVO
+        private readonly authorizations: CustomerAuthorizationService
     ) { }
 
     // 📸 NUEVO: foto del cliente para comparar antes/después
@@ -71,6 +74,12 @@ export class CustomersService {
                 throw new RpcException(new BadRequestException('Firmante no resuelto'));
             }
 
+            // BILLING ya autorizó en su propio backend
+            const needsAuth = (data.user?.source ?? 'ORDERS') !== 'BILLING';
+            if (needsAuth && !data.authorizationId) {
+                throw new RpcException(new BadRequestException('authorizationId es requerido'));
+            }
+
             // ── Normalización ────────────────────────────────────────
             const c = data.customer;
             if (c.firstName) c.firstName = c.firstName.trim().toUpperCase();
@@ -78,18 +87,18 @@ export class CustomersService {
             if (c.idNumber) c.idNumber = c.idNumber.trim().toUpperCase();
 
             if (c.contacts) {
-                c.contacts = c.contacts.map(ct => ({
+                c.contacts = c.contacts.map((ct: any) => ({
                     ...ct,
-                    value: ct.contactTypeId === 1  // MÓVIL ya tiene normalizeMobilePhone
+                    value: ct.contactTypeId === 1 // MÓVIL ya tiene normalizeMobilePhone
                         ? ct.value
                         : typeof ct.value === 'string'
-                            ? ct.value.trim().toLowerCase()  // EMAIL en minúsculas
+                            ? ct.value.trim().toLowerCase() // EMAIL en minúsculas
                             : ct.value,
                 }));
             }
 
             if (c.addresses) {
-                c.addresses = c.addresses.map(a => ({
+                c.addresses = c.addresses.map((a: any) => ({
                     ...a,
                     zone: a.zone?.trim().toUpperCase(),
                     sector: a.sector?.trim().toUpperCase(),
@@ -100,6 +109,7 @@ export class CustomersService {
                 }));
             }
             // ─────────────────────────────────────────────────────────
+
             // 2️⃣ Crear instancia
             const customer = this.customerRepo.create({
                 idType: { id: data.customer.idTypeId },
@@ -110,15 +120,15 @@ export class CustomersService {
                 gender: { id: data.customer.genderId },
                 company: { id: data.user.companyId },
 
-                contacts: data.customer.contacts?.map(c => ({
-                    contactType: { id: c.contactTypeId },
-                    value: c.contactTypeId === 1
-                        ? this.normalizeMobilePhone(c.value)
-                        : c.value,
-                    isPrimary: c.isPrimary ?? false,
+                contacts: data.customer.contacts?.map((ct: any) => ({
+                    contactType: { id: ct.contactTypeId },
+                    value: ct.contactTypeId === 1
+                        ? this.normalizeMobilePhone(ct.value)
+                        : ct.value,
+                    isPrimary: ct.isPrimary ?? false,
                 })),
 
-                addresses: data.customer.addresses?.map(a => ({
+                addresses: data.customer.addresses?.map((a: any) => ({
                     city: { id: a.cityId },
                     zone: a.zone,
                     sector: a.sector,
@@ -132,8 +142,21 @@ export class CustomersService {
                 createdByUsername: signer.username,
             });
 
-            // 3️⃣ Guardar
-            const customerSaved = await this.customerRepo.save(customer);
+            // 3️⃣ Guardar (autorización + cliente en una sola transacción)
+            const customerSaved = await this.customerRepo.manager.transaction(async (manager) => {
+                if (needsAuth) {
+                    await this.authorizations.consume(manager, {
+                        authorizationId: data.authorizationId,
+                        userId: sessionUserId(data.user), // la SESIÓN, no el firmante
+                        companyId: data.user.companyId,
+                    });
+                }
+                const saved = await manager.save(customer);
+                if (needsAuth) {
+                    await this.authorizations.linkCustomer(manager, data.authorizationId, String(saved.id));
+                }
+                return saved;
+            });
 
             // 📝 NUEVO: registrar quién creó el cliente
             await this.audit.log({
@@ -159,16 +182,16 @@ export class CustomersService {
                     new InternalServerErrorException('Error al cargar el cliente creado'),
                 );
             }
+
             // 5️⃣ Evento (NO bloquea creación)
             try {
                 await this.broadcast.publishClientCreated(customerWithRelations);
             } catch (eventError) {
                 console.error('Error publicando evento CLIENT_CREATED:', eventError);
             }
+
             return customerWithRelations;
-
         } catch (error) {
-
             // 🔴 Constraint UNIQUE (cliente duplicado)
             if (error instanceof QueryFailedError) {
                 const driverError: any = error.driverError;

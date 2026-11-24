@@ -2,33 +2,34 @@
 import { CompanyBrand, MailType } from '../../types/mail.types';
 
 export interface BirthdayPayload {
-    firstName: string;
-    logoUrl?: string;
-    bannerUrl?: string;
+  firstName: string;
+  logoUrl?: string;
+  bannerUrl?: string;
 }
 
 const esc = (s: string) =>
-    s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 export const birthdayMail: MailType<BirthdayPayload> = {
-    key: 'BIRTHDAY',
-    purpose: 'NOTIFICATIONS',
+  key: 'BIRTHDAY',
+  label: 'Saludo de cumpleaños',
+  purpose: 'NOTIFICATIONS',
 
-    build({ firstName, logoUrl, bannerUrl }: BirthdayPayload, brand: CompanyBrand) {
-        const name = esc(firstName);
-        const company = esc(brand.name);
-        const safeLogo = 'https://teamcellmania-public.s3.us-east-1.amazonaws.com/eventologos/logo-teamcellmania.png';
-        const safeBanner = bannerUrl ? esc(bannerUrl) : '';
+  build({ firstName, logoUrl, bannerUrl }: BirthdayPayload, brand: CompanyBrand) {
+    const name = esc(firstName);
+    const company = esc(brand.name);
+    const safeLogo = 'https://teamcellmania-public.s3.us-east-1.amazonaws.com/eventologos/logo-teamcellmania.png';
+    const safeBanner = bannerUrl ? esc(bannerUrl) : '';
 
-        return {
-            subject: `¡Felicidades, ${firstName}! Mañana es tu cumpleaños 🎂`,
-            text: [
-                `¡Hola, ${firstName}!`,
-                `¡Felicidades! En ${brand.name} queremos adelantarnos a tu día para desearte un feliz cumpleaños. ¡Que tengas un día increíble!`,
-                `Como regalo especial, acércate mañana a nuestro local con tu cédula y muestra este correo para reclamar una mica de vidrio GRATIS.`,
-                `¡Te esperamos!`,
-            ].join('\n\n'),
-            html: `
+    return {
+      subject: `¡Felicidades, ${firstName}! Mañana es tu cumpleaños 🎂`,
+      text: [
+        `¡Hola, ${firstName}!`,
+        `¡Felicidades! En ${brand.name} queremos adelantarnos a tu día para desearte un feliz cumpleaños. ¡Que tengas un día increíble!`,
+        `Como regalo especial, acércate mañana a nuestro local con tu cédula y muestra este correo para reclamar una mica de vidrio GRATIS.`,
+        `¡Te esperamos!`,
+      ].join('\n\n'),
+      html: `
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -47,9 +48,9 @@ export const birthdayMail: MailType<BirthdayPayload> = {
           <tr>
             <td align="center" bgcolor="#111827" style="background-color:#111827;padding:28px 24px 24px;">
               ${safeLogo
-                    ? `<img src="${safeLogo}" alt="${company}" width="140" style="display:block;max-height:52px;width:auto;margin:0 auto 14px;" />`
-                    : `<div style="font-size:14px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#93c5fd;margin-bottom:10px;">${company}</div>`
-                }
+          ? `<img src="${safeLogo}" alt="${company}" width="140" style="display:block;max-height:52px;width:auto;margin:0 auto 14px;" />`
+          : `<div style="font-size:14px;font-weight:bold;letter-spacing:1.5px;text-transform:uppercase;color:#93c5fd;margin-bottom:10px;">${company}</div>`
+        }
               <div style="font-size:38px;line-height:1;margin-bottom:10px;">🎂🎉🎈</div>
               <p style="margin:0 0 6px;font-size:14px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#fbbf24;">
                 ¡Felicidades, ${name}!
@@ -60,14 +61,14 @@ export const birthdayMail: MailType<BirthdayPayload> = {
 
           <!-- Banner opcional (URL pública S3) -->
           ${safeBanner
-                    ? `
+          ? `
           <tr>
             <td style="padding:0;">
               <img src="${safeBanner}" alt="Feliz Cumpleaños ${name}" width="580" style="display:block;width:100%;max-width:580px;height:auto;border:0;" />
             </td>
           </tr>`
-                    : ''
-                }
+          : ''
+        }
 
           <!-- Cuerpo del mensaje -->
           <tr>
@@ -128,6 +129,6 @@ export const birthdayMail: MailType<BirthdayPayload> = {
   </table>
 </body>
 </html>`,
-        };
-    },
+    };
+  },
 };

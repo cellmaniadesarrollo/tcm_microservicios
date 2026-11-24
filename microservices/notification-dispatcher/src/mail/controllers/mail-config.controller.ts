@@ -38,4 +38,8 @@ export class MailConfigController {
             throw new RpcException(e.message);
         }
     }
+    @MessagePattern({ cmd: 'mail_config_purposes' })
+    async purposes() {
+        return this.service.listPurposes();
+    }
 }
