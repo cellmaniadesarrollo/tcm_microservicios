@@ -16,6 +16,7 @@ import { AwsS3Service } from '../../aws-s3/aws-s3.service';
 import { SRI_BUCKET, sriXmlKey } from '../../documents/helpers/xml-storage.helper';
 import { SigningService } from '../../documents/services/signing.service';
 import { SriSubmissionService } from '../../documents/services/sri-submission.service';
+import { StockClientService } from '../../documents/services/stock-client.service';
 
 const money = (cents: number) => (cents / 100).toFixed(2);
 
@@ -32,6 +33,7 @@ export class SriDocumentsService {
     private readonly s3: AwsS3Service,
     private readonly signing: SigningService,
     private readonly submission: SriSubmissionService,
+    private readonly stock: StockClientService,
   ) {}
 
   async createInvoice(companyId: string, userId: string, dto: CreateInvoiceDto) {
@@ -50,6 +52,7 @@ export class SriDocumentsService {
     const rates = await this.loadVatRates(dto.lines.map((l) => l.vatRateCode));
 
     const created = await this.ds.transaction(async (m) => {
+      try {
       // 1) Resolver descuentos del catálogo en el servidor
       const applied: (DiscountInput & { position: number })[] = [];
       const lineInputs: LineInput[] = [];
@@ -84,6 +87,9 @@ export class SriDocumentsService {
         }
 
         lineInputs.push({
+          productId: l.productId,
+          lotId: l.lotId,
+          unitId: l.unitId,
           mainCode: l.mainCode,
           description: l.description,
           quantity: l.quantity,
@@ -169,7 +175,28 @@ export class SriDocumentsService {
         })),
       );
 
-      return { ...doc, replayed: false };
+      // 5) Descontar stock. Si no alcanza, lanza y se revierte la factura completa.
+      const stockLines = this.stock.buildLines(savedLines);
+      let stockState = 'NONE';
+      if (stockLines.length) {
+        try {
+          await this.stock.outbound({
+            companyId, userId, branchId: dto.branchId,
+            refType: 'FACTURA', documentId: doc.id, lines: stockLines,
+          });
+        } catch (e: any) {
+          this.logger.error(`Stock outbound falló: ${JSON.stringify(e?.message ?? e)}`, e?.stack);
+          throw new BadRequestException(this.stock.errorMessage(e));
+        }
+        stockState = 'ISSUED';
+        await m.update(SriDocument, { id: doc.id }, { stockState });
+      }
+
+      return { ...doc, stockState, replayed: false };
+      } catch (e: any) {
+        this.logger.error(`createInvoice falló: ${e?.message}`, e?.stack);
+        throw e;
+      }
     });
 
     await this.buildAndStoreXml(companyId, created.id);

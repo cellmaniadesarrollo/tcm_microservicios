@@ -37,6 +37,9 @@ export class Receipt {
   @Column({ name: 'vat_value', type: 'decimal', precision: 14, scale: 2, default: 0 }) vatValue!: string;
   @Column({ type: 'decimal', precision: 14, scale: 2, default: 0 }) total!: string;
 
+  /** NONE | ISSUED (descontado) | RETURNED (devuelto) */
+  @Column({ name: 'stock_state', type: 'varchar', length: 10, default: 'NONE' }) stockState!: string;
+
   @Column({ name: 'client_request_id', type: 'varchar', length: 64 }) clientRequestId!: string;
 
   @OneToMany(() => ReceiptLine, (l) => l.receipt, { cascade: true })

@@ -5,6 +5,7 @@ import { SriDocument } from '../../sri-documents/entities/sri-document.entity';
 import { SriEnvironment } from '../../sri-catalogs/entities/sri-environment.entity';
 import { SRI_BUCKET, sriXmlKey } from '../helpers/xml-storage.helper';
 import { SriClientService, SriMessage } from './sri-client.service';
+import { StockClientService } from './stock-client.service';
 
 const ST = {
   RECEIVED: 'RECIBIDO',
@@ -32,6 +33,7 @@ export class SriSubmissionService {
     private readonly ds: DataSource,
     private readonly s3: AwsS3Service,
     private readonly sri: SriClientService,
+    private readonly stock: StockClientService,
   ) {}
 
   /** Envía al SRI y consulta la autorización. Se puede repetir sin riesgo. */
@@ -118,6 +120,7 @@ export class SriSubmissionService {
         { id: doc.id, companyId },
         { statusCode: ST.NOT_AUTHORIZED, ...errorFields(a.messages) },
       );
+      await this.stock.giveBack(companyId, doc.id);
       this.logger.warn(`Documento ${doc.id} NO AUTORIZADO: ${JSON.stringify(a.messages)}`);
       return { id: doc.id, statusCode: ST.NOT_AUTHORIZED, messages: a.messages };
     }

@@ -80,5 +80,8 @@ export class SriDocument {
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' }) createdAt!: Date;
   @UpdateDateColumn({ name: 'updated_at', type: 'timestamptz' }) updatedAt!: Date;
 
+  /** NONE | ISSUED (descontado) | RETURNED (devuelto) */
+  @Column({ name: 'stock_state', type: 'varchar', length: 10, default: 'NONE' }) stockState!: string;
+
   @Column({ name: 'sri_messages', type: 'jsonb', nullable: true }) sriMessages!: unknown[] | null;
 }

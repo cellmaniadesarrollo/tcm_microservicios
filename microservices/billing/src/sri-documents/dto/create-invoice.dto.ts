@@ -5,6 +5,9 @@ export class InvoiceLineDto {
   unitPrice!: number;      // SIN IVA
   discountId?: string;
   vatRateCode!: string;    // código del catálogo sri_vat_rate
+  productId?: string;
+  lotId?: string;
+  unitId?: string;
 }
 
 export class InvoicePaymentDto {

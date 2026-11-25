@@ -5,6 +5,7 @@ import { CreateReceiptDto } from '../dto/create-receipt.dto';
 import { Receipt } from '../entities/receipt.entity';
 import { formatReceiptNumber } from '../helpers/receipt-number.helper';
 import { ReceiptSequenceService } from './receipt-sequence.service';
+import { StockClientService } from '../../documents/services/stock-client.service';
 
 const toCents = (n: number) => Math.round(n * 100 + Number.EPSILON);
 const money = (cents: number) => (cents / 100).toFixed(2);
@@ -15,6 +16,7 @@ export class ReceiptsService {
     private readonly ds: DataSource,
     private readonly sequences: ReceiptSequenceService,
     private readonly discounts: DiscountsService,
+    private readonly stock: StockClientService,
   ) {}
 
   private present(r: Receipt, replayed: boolean) {
@@ -130,8 +132,20 @@ export class ReceiptsService {
           })),
         );
 
-        // TODO: stock. Aquí se descontará por lote/unidad cuando exista el mecanismo
-        // (dentro de esta misma transacción, usando lotId / unitId de cada línea).
+        // Descontar stock en inventory-core. Si no alcanza, lanza y se revierte el recibo completo.
+        const stockLines = this.stock.buildLines(lines);
+        if (stockLines.length) {
+          try {
+            await this.stock.outbound({
+              companyId, userId, branchId: dto.branchId,
+              refType: 'RECIBO', documentId: receipt.id, lines: stockLines,
+            });
+          } catch (e: any) {
+            throw new BadRequestException(this.stock.errorMessage(e));
+          }
+          await m.update(Receipt, { id: receipt.id }, { stockState: 'ISSUED' });
+          receipt.stockState = 'ISSUED';
+        }
 
         return this.present(receipt, false);
       });

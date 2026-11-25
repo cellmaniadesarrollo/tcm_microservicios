@@ -5,6 +5,9 @@ import {
 } from 'class-validator';
 
 export class InvoiceLineGatewayDto {
+  @IsOptional() @IsUUID() productId?: string;
+  @IsOptional() @IsUUID() lotId?: string;
+  @IsOptional() @IsUUID() unitId?: string;
   @IsString() @IsNotEmpty() @MaxLength(25) mainCode!: string;
   @IsString() @IsNotEmpty() @MaxLength(300) description!: string;
 

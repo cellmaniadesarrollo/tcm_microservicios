@@ -7,6 +7,7 @@ import { StockMovement } from './entities/stock-movement.entity';
 import { StockService } from './stock.service';
 import { OutboxModule } from '../outbox/outbox.module';
 import { LotsSyncController } from './lots-sync.controller';
+import { StockController } from './stock.controller';
 
 /**
  * Inventario: lotes, saldos, unidades y kardex.
@@ -14,7 +15,7 @@ import { LotsSyncController } from './lots-sync.controller';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([Lot, StockBalance, StockUnit, StockMovement]), OutboxModule],
-  controllers: [LotsSyncController],
+  controllers: [LotsSyncController, StockController],
   providers: [StockService],
   exports: [StockService],
 })

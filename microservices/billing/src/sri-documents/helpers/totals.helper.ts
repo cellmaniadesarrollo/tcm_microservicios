@@ -11,6 +11,9 @@ export interface LineInput {
   vatRateCode: string;
   vatPercentage: number;
   vatKind: VatKind;
+  productId?: string;
+  lotId?: string;
+  unitId?: string;
 }
 
 export interface LineResult {
@@ -26,6 +29,9 @@ export interface LineResult {
   vatPercentage: string;
   vatBase: string;
   vatAmount: string;
+  productId: string | null;
+  lotId: string | null;
+  unitId: string | null;
 }
 
 export interface TotalsResult {
@@ -88,6 +94,9 @@ export function calculateTotals(
       vatPercentage: l.vatPercentage.toFixed(2),
       vatBase: fmt(base),
       vatAmount: fmt(tax),
+      productId: l.productId ?? null,
+      lotId: l.lotId ?? null,
+      unitId: l.unitId ?? null,
     };
   });
 

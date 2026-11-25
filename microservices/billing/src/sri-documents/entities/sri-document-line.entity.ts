@@ -25,4 +25,8 @@ export class SriDocumentLine {
   @Column({ name: 'vat_percentage', type: 'decimal', precision: 5, scale: 2 }) vatPercentage!: string;
   @Column({ name: 'vat_base', type: 'decimal', precision: 14, scale: 2 }) vatBase!: string;
   @Column({ name: 'vat_amount', type: 'decimal', precision: 14, scale: 2 }) vatAmount!: string;
+
+  @Column({ name: 'product_id', type: 'uuid', nullable: true }) productId!: string | null;
+  @Column({ name: 'lot_id', type: 'uuid', nullable: true }) lotId!: string | null;
+  @Column({ name: 'unit_id', type: 'uuid', nullable: true }) unitId!: string | null;
 }
