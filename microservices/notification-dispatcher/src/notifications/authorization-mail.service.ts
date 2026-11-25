@@ -6,7 +6,7 @@ import { NotificationLog } from './entities/notification-log.entity';
 import { MailService } from '../mail/services/mail.service';
 
 const APPROVAL_MINUTES = 5;
-const DEFAULT_AUTHORIZE_PATH = '/app/clientes/authorize';
+const DEFAULT_AUTHORIZE_PATH = '/customer-authorize';
 
 export interface SendAuthorizationMailInput {
     companyId: string;
