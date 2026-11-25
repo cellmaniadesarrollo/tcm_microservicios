@@ -5,5 +5,6 @@ export const CUSTOMER_AUTH_RECIPIENT_GROUPS = [
     CUSTOMER_AUTHORIZERS_GROUP,
     'ORDER_AUDIT',
     'COMPANY_ADMIN',
+    'ADMINS'
     // 'TECHNICIANS', // agregado para pruebas
 ];
