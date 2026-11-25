@@ -325,6 +325,7 @@ services:
       - RABBIT_URL=amqp://guest:guest@rabbitmq:5672/
       - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
       - MAIL_ENCRYPTION_KEY=${MAIL_ENCRYPTION_KEY}
+      - FRONTEND_URL=${FRONTEND_URL}
     networks:
       - backend
     depends_on:
