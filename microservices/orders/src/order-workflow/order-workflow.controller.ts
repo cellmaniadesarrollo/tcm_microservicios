@@ -77,32 +77,17 @@ export class OrderWorkflowController {
   @MessagePattern({ cmd: 'list_orders' })
   async listOrders(data: {
     dto: ListOrdersDto;
-    user: {
-      userId: string;
-      companyId: string;
-      branchId: string;
-    };
+    user: { userId: string; companyId: string; branchId: string };
   }) {
-    const orders = await this.orderWorkflowService.listOrders(
-      data.user,
-      data.dto,
-    );
-    return orders
+    return this.orderWorkflowService.listOrders(data.user, data.dto, { mine: false });
   }
 
   @MessagePattern({ cmd: 'list_my_orders' })
   async listMyOrders(data: {
     dto: ListOrdersDto;
-    user: {
-      userId: string;
-      companyId: string;
-      branchId: string;
-    };
+    user: { userId: string; companyId: string; branchId: string };
   }) {
-    return this.orderWorkflowService.listMyOrders(
-      data.user,
-      data.dto,
-    );
+    return this.orderWorkflowService.listOrders(data.user, data.dto, { mine: true });
   }
 
   @MessagePattern({ cmd: 'get_order_full_data' })
