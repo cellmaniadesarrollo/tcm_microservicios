@@ -63,6 +63,10 @@ import { OrderPriority } from '../catalogs/entities/order-priority.entity';
 import { OrderTotalsService } from './order-totals/order-totals.service';
 import { orderFingerprint } from './order-fingerprint';
 import { PartRequestArrivalService } from '../order-part-request/part-request-arrival.service';
+export type ListOrdersOptions = {
+  /** true = solo "mis órdenes" (filtradas por el usuario logueado). */
+  mine?: boolean;
+};
 @Injectable()
 
 export class OrderWorkflowService {
@@ -405,96 +409,96 @@ export class OrderWorkflowService {
   private readonly ESTADO_BODEGA = 9;
   private readonly ESTADO_INVENTARIO = 10;
 
-private async assertDeviceNotInWarehouseOrInventory(
-  manager: EntityManager,
-  deviceId: number | undefined | null,
-  companyId: string,
-  excludeOrderId?: number,
-  strict = false,
-): Promise<void> {
-  if (!deviceId) return;
+  private async assertDeviceNotInWarehouseOrInventory(
+    manager: EntityManager,
+    deviceId: number | undefined | null,
+    companyId: string,
+    excludeOrderId?: number,
+    strict = false,
+  ): Promise<void> {
+    if (!deviceId) return;
 
-  const device = await manager.findOne(Device, {
-    where: { device_id: deviceId, company_id: companyId },
-    relations: ['imeis'],
-  });
-
-  const imeis = (device?.imeis ?? [])
-    .map((i) => String(i.imei_number).trim())
-    .filter(Boolean);
-
-  if (!imeis.length) return; // sin IMEI no hay con qué comparar
-
-  // 1) Otra orden con el mismo IMEI que ya está en BODEGA (9) o EN INVENTARIO (10)
-  const qb = manager
-    .getRepository(Order)
-    .createQueryBuilder('o')
-    .select(['o.id', 'o.order_number', 'o.current_status_id'])
-    .innerJoin('o.device', 'd')
-    .innerJoin('d.imeis', 'i')
-    .where('o.company_id = :companyId', { companyId })
-    .andWhere('i.imei_number IN (:...imeis)', { imeis })
-    .andWhere('o.current_status_id IN (:...statuses)', {
-      statuses: [this.ESTADO_BODEGA, this.ESTADO_INVENTARIO],
+    const device = await manager.findOne(Device, {
+      where: { device_id: deviceId, company_id: companyId },
+      relations: ['imeis'],
     });
 
-  if (excludeOrderId) {
-    qb.andWhere('o.id != :excludeOrderId', { excludeOrderId });
-  }
+    const imeis = (device?.imeis ?? [])
+      .map((i) => String(i.imei_number).trim())
+      .filter(Boolean);
 
-  const existing = await qb.getOne();
-  if (existing) {
-    const estadoTexto =
-      existing.current_status_id === this.ESTADO_INVENTARIO
-        ? 'en inventario'
-        : 'en bodega';
+    if (!imeis.length) return; // sin IMEI no hay con qué comparar
 
-    throw new RpcException(
-      new ConflictException(
-        `Este dispositivo ya está ${estadoTexto} en la orden #${existing.order_number}. No se puede ingresar de nuevo. Verifica esa orden.`,
-      ),
-    );
-  }
+    // 1) Otra orden con el mismo IMEI que ya está en BODEGA (9) o EN INVENTARIO (10)
+    const qb = manager
+      .getRepository(Order)
+      .createQueryBuilder('o')
+      .select(['o.id', 'o.order_number', 'o.current_status_id'])
+      .innerJoin('o.device', 'd')
+      .innerJoin('d.imeis', 'i')
+      .where('o.company_id = :companyId', { companyId })
+      .andWhere('i.imei_number IN (:...imeis)', { imeis })
+      .andWhere('o.current_status_id IN (:...statuses)', {
+        statuses: [this.ESTADO_BODEGA, this.ESTADO_INVENTARIO],
+      });
 
-  // 2) Ya está en inventario (microservicio de inventario por HTTP)
-  const baseUrl = process.env.INVENTORY_URL;
-  if (!baseUrl) {
-    if (strict) {
+    if (excludeOrderId) {
+      qb.andWhere('o.id != :excludeOrderId', { excludeOrderId });
+    }
+
+    const existing = await qb.getOne();
+    if (existing) {
+      const estadoTexto =
+        existing.current_status_id === this.ESTADO_INVENTARIO
+          ? 'en inventario'
+          : 'en bodega';
+
       throw new RpcException(
-        new InternalServerErrorException('No se puede verificar el inventario (INVENTORY_URL no configurada)'),
+        new ConflictException(
+          `Este dispositivo ya está ${estadoTexto} en la orden #${existing.order_number}. No se puede ingresar de nuevo. Verifica esa orden.`,
+        ),
       );
     }
-    console.warn('⚠️ INVENTORY_URL no configurada, se omite verificación en inventario');
-    return;
-  }
 
-  let res: any = null;
-  try {
-    const r = await fetch(`${baseUrl}/api/income-backend/check-device`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imeis }),
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!r.ok) throw new Error(`Inventario respondió ${r.status}`);
-    res = await r.json();
-  } catch (e) {
-    if (strict) {
+    // 2) Ya está en inventario (microservicio de inventario por HTTP)
+    const baseUrl = process.env.INVENTORY_URL;
+    if (!baseUrl) {
+      if (strict) {
+        throw new RpcException(
+          new InternalServerErrorException('No se puede verificar el inventario (INVENTORY_URL no configurada)'),
+        );
+      }
+      console.warn('⚠️ INVENTORY_URL no configurada, se omite verificación en inventario');
+      return;
+    }
+
+    let res: any = null;
+    try {
+      const r = await fetch(`${baseUrl}/api/income-backend/check-device`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imeis }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!r.ok) throw new Error(`Inventario respondió ${r.status}`);
+      res = await r.json();
+    } catch (e) {
+      if (strict) {
+        throw new RpcException(
+          new InternalServerErrorException('No se pudo verificar el inventario. Intenta de nuevo en unos segundos.'),
+        );
+      }
+      console.warn('⚠️ No se pudo verificar inventario, se continúa:', (e as any)?.message);
+    }
+
+    if (res?.inInventory) {
       throw new RpcException(
-        new InternalServerErrorException('No se pudo verificar el inventario. Intenta de nuevo en unos segundos.'),
+        new ConflictException(
+          `Este dispositivo ya está en inventario desde la orden ${res.previousOrder} (lote ${res.batchNumber}). No se puede ingresar de nuevo. Verifica esa orden.`,
+        ),
       );
     }
-    console.warn('⚠️ No se pudo verificar inventario, se continúa:', (e as any)?.message);
   }
-
-  if (res?.inInventory) {
-    throw new RpcException(
-      new ConflictException(
-        `Este dispositivo ya está en inventario desde la orden ${res.previousOrder} (lote ${res.batchNumber}). No se puede ingresar de nuevo. Verifica esa orden.`,
-      ),
-    );
-  }
-}
 
   private async emitNotification(
     orderId: number,
@@ -651,9 +655,11 @@ private async assertDeviceNotInWarehouseOrInventory(
     return orders.map((o) => ({ ...o, part_requests: porOrden.get(o.id) ?? [] }));
   }
 
+
   async listOrders(
     user: { companyId: string; branchId: string; userId: string },
     dto: any,
+    options: ListOrdersOptions = {},
   ) {
     const {
       page = 1,
@@ -661,6 +667,7 @@ private async assertDeviceNotInWarehouseOrInventory(
       search = '',
       orderTypeId = 0,
       orderStatusId = 0,
+      myOrdersFilter = [],
       dateFrom = null,
       dateTo = null,
     } = dto;
@@ -679,7 +686,75 @@ private async assertDeviceNotInWarehouseOrInventory(
       .select(['o.id', 'o.entry_date'])
       .where('o.company_id = :companyId', { companyId: user.companyId });
 
-    // ==================== BÚSQUEDA ====================
+    // ==================== FILTRO "MIS ÓRDENES" (única diferencia) ====================
+    // Si el filtro tiene su propia columna de fecha (entregadas, finalizadas,
+    // ejecutadas), el rango de fechas se aplica dentro del subquery.
+    // En los demás casos se aplica sobre o.entry_date.
+    let dateHandledInside = false;
+
+    if (options.mine) {
+      const activeFilter: string =
+        Array.isArray(myOrdersFilter) && myOrdersFilter.length > 0
+          ? myOrdersFilter[0]
+          : 'asignadas';
+
+      // Los parámetros se setean una sola vez; los subqueries los referencian.
+      paginatedQb.setParameters({ myUserId: user.userId, utcFrom, utcTo });
+
+      const dateSql = (col: string) =>
+        [
+          utcFrom ? ` AND ${col} >= :utcFrom` : '',
+          utcTo ? ` AND ${col} <= :utcTo` : '',
+        ].join('');
+
+      switch (activeFilter) {
+        case 'ingresadas':
+          paginatedQb.andWhere('o.created_by_id = :myUserId');
+          break;
+
+        case 'entregadas':
+          dateHandledInside = true;
+          paginatedQb.andWhere(
+            `o.id IN (
+            SELECT d.order_id FROM order_deliveries d
+            WHERE d.delivered_by_id = :myUserId${dateSql('d.delivered_at')}
+          )`,
+          );
+          break;
+
+        case 'finalizadas':
+          dateHandledInside = true;
+          paginatedQb.andWhere(
+            `o.id IN (
+            SELECT h.order_id FROM order_status_history h
+            WHERE h.to_status_id = :finalStatus
+              AND h.changed_by_id = :myUserId${dateSql('h.changed_at')}
+          )`,
+            { finalStatus: 7 },
+          );
+          break;
+
+        case 'ejecutadas':
+          dateHandledInside = true;
+          paginatedQb.andWhere(
+            `o.id IN (
+            SELECT f.order_id FROM order_findings f
+            INNER JOIN finding_procedures p ON p.finding_id = f.id
+            WHERE f.is_active = true
+              AND p.is_active = true
+              AND p.performed_by_id = :myUserId${dateSql('p.created_at')}
+          )`,
+          );
+          break;
+
+        case 'asignadas':
+        default:
+          paginatedQb.innerJoin('o.technicians', 'myTech', 'myTech.id = :myUserId');
+          break;
+      }
+    }
+
+    // ==================== BÚSQUEDA (idéntica para ambos) ====================
     if (search && search.trim() !== '') {
       const cleanSearch = search.trim();
 
@@ -729,11 +804,13 @@ private async assertDeviceNotInWarehouseOrInventory(
     }
 
     // ==================== FILTRO DE FECHAS ====================
-    if (utcFrom) {
-      paginatedQb.andWhere('o.entry_date >= :utcFrom', { utcFrom });
-    }
-    if (utcTo) {
-      paginatedQb.andWhere('o.entry_date <= :utcTo', { utcTo });
+    if (!dateHandledInside) {
+      if (utcFrom) {
+        paginatedQb.andWhere('o.entry_date >= :utcFrom', { utcFrom });
+      }
+      if (utcTo) {
+        paginatedQb.andWhere('o.entry_date <= :utcTo', { utcTo });
+      }
     }
 
     paginatedQb.orderBy('o.entry_date', 'DESC').skip(skip).take(limit);
@@ -785,9 +862,6 @@ private async assertDeviceNotInWarehouseOrInventory(
       .getMany();
 
     // ==================== QUERY 3: has_attachments por payment ====================
-    // Trae solo los entity_id (número) de attachments activos tipo PAYMENT
-    // que pertenezcan a algún pago de las órdenes de esta página.
-    // No trae URLs ni datos pesados, es una query liviana.
     const paymentsWithAttachments = await this.attachmentRepository
       .createQueryBuilder('a')
       .select('a.entity_id', 'payment_id')
@@ -816,335 +890,10 @@ private async assertDeviceNotInWarehouseOrInventory(
     }));
 
     // ==================== QUERY 4: resumen de solicitudes de repuesto ====================
-    const dataWithParts = await this.appendPartRequestsSummary(mappedData, ids); // 👈 nuevo
+    const dataWithParts = await this.appendPartRequestsSummary(mappedData, ids);
 
     const withTotals = await this.orderTotalsService.appendTotals(dataWithParts);
     return { data: withTotals, total, page, limit, totalPages: Math.ceil(total / limit) };
-  }
-
-  async listMyOrders(
-    user: { companyId: string; branchId: string; userId: string },
-    dto: any,
-  ) {
-    const {
-      page = 1,
-      limit = 10,
-      search = '',
-      orderTypeId = 0,
-      orderStatusId = 0,
-      myOrdersFilter = [],
-      dateFrom = null,
-      dateTo = null,
-    } = dto;
-
-    const skip = (page - 1) * limit;
-
-    const activeFilter: string | null =
-      Array.isArray(myOrdersFilter) && myOrdersFilter.length > 0
-        ? myOrdersFilter[0]
-        : null;
-
-    const { from: utcFrom, to: utcTo } = buildDateRangeUTC(dateFrom, dateTo);
-
-    const qb = this.orderRepo
-      .createQueryBuilder('o')
-      .leftJoinAndSelect('o.customer', 'c')
-      .leftJoinAndSelect('c.contacts', 'contact')
-      .leftJoinAndSelect('o.type', 'type')
-      .leftJoinAndSelect('o.currentStatus', 'status')
-      .leftJoinAndSelect('o.priority', 'priority')
-      .leftJoinAndSelect('o.technicians', 'technicians')
-      .leftJoinAndSelect('o.device', 'device')
-      .leftJoinAndSelect('device.imeis', 'imei')
-      .leftJoinAndSelect('device.model', 'deviceModel')
-      .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
-      .leftJoinAndSelect('o.delivery', 'orderDelivery')
-      .leftJoinAndSelect('o.payments', 'payments')
-      .leftJoinAndSelect('payments.paymentType', 'paymentType')
-      .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
-      .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
-      .leftJoinAndSelect(
-        'o.discounts',
-        'discounts',
-        'discounts.status != :cancelledStatusMyOrders',
-        { cancelledStatusMyOrders: 'CANCELLED' },
-      )
-      .leftJoinAndMapOne(
-        'o.potentialPurchase',
-        OrderPotentialPurchase,
-        'potentialPurchase',
-        'potentialPurchase.device_id = o.device_id AND o.device_id IS NOT NULL',
-      )
-      .leftJoinAndSelect('potentialPurchase.markedBy', 'potentialMarkedBy')
-      .where('o.company_id = :companyId', { companyId: user.companyId });
-
-    // ── Filtro principal según myOrdersFilter ──────────────────────────────────
-    switch (activeFilter) {
-      case 'ingresadas':
-        qb.andWhere('o.created_by_id = :userId', { userId: user.userId });
-        qb.orderBy('o.entry_date', 'DESC');
-        break;
-
-      case 'entregadas':
-        qb.innerJoin(
-          'order_deliveries',
-          'delivery',
-          'delivery.order_id = o.id AND delivery.delivered_by_id = :userId',
-          { userId: user.userId },
-        );
-        qb.addSelect('delivery.delivered_at', 'delivery_delivered_at');
-        qb.orderBy('delivery.delivered_at', 'DESC');
-        break;
-
-      case 'finalizadas':
-        qb.innerJoin(
-          'order_status_history',
-          'hist',
-          'hist.order_id = o.id AND hist.to_status_id = :finalStatus AND hist.changed_by_id = :userId',
-          { finalStatus: 7, userId: user.userId },
-        );
-        qb.addSelect('hist.changed_at', 'hist_changed_at');
-        qb.orderBy('hist.changed_at', 'DESC');
-        break;
-
-      case 'ejecutadas':
-        qb.innerJoin(
-          'order_findings',
-          'finding',
-          'finding.order_id = o.id AND finding.is_active = true',
-        );
-        qb.innerJoin(
-          'finding_procedures',
-          'proc',
-          'proc.finding_id = finding.id AND proc.performed_by_id = :userId AND proc.is_active = true',
-          { userId: user.userId },
-        );
-        qb.groupBy(`
-          o.id,
-          c.id,
-          contact.id,
-          type.id,
-          status.id,
-          priority.id,
-          technicians.id,
-          device.id,
-          deviceModel.id,
-          deviceBrand.id,
-          imei.id,
-          payments.id,
-          paymentType.id,
-          paymentMethod.id,
-          receivedBy.id,
-          potentialPurchase.id,
-          potentialMarkedBy.id,
-          discounts.id,
-          orderDelivery.id
-        `);
-        qb.orderBy('o.entry_date', 'DESC');
-        break;
-
-      case 'asignadas':
-      default:
-        qb.andWhere('technicians.id = :technicianId', { technicianId: user.userId });
-        qb.orderBy('o.entry_date', 'DESC');
-        break;
-    }
-
-    // ── Filtro de fechas ───────────────────────────────────────────────────────
-    if (utcFrom || utcTo) {
-      let dateColumn: string;
-
-      switch (activeFilter) {
-        case 'entregadas':
-          dateColumn = 'delivery.delivered_at';
-          break;
-        case 'finalizadas':
-          dateColumn = 'hist.changed_at';
-          break;
-        case 'ejecutadas':
-          dateColumn = 'proc.createdAt';
-          break;
-        default:
-          dateColumn = 'o.entry_date';
-          break;
-      }
-
-      if (utcFrom) qb.andWhere(`${dateColumn} >= :utcFrom`, { utcFrom });
-      if (utcTo) qb.andWhere(`${dateColumn} <= :utcTo`, { utcTo });
-    }
-
-    // ── Búsqueda ───────────────────────────────────────────────────────────────
-    if (search && search.trim() !== '') {
-      const cleanSearch = search.trim();
-
-      if (cleanSearch.startsWith('#')) {
-        const orderNumber = cleanSearch.slice(1);
-        if (!isNaN(Number(orderNumber)) && orderNumber !== '') {
-          qb.andWhere('o.order_number = :orderNumber', {
-            orderNumber: Number(orderNumber),
-          });
-        }
-      } else {
-        qb.andWhere(
-          new Brackets((q) => {
-            if (!isNaN(Number(cleanSearch))) {
-              q.where(
-                'c.idNumber ILIKE :num OR o.order_number::text ILIKE :num',
-                { num: `%${cleanSearch}%` },
-              );
-            } else {
-              const terms = cleanSearch.split(' ').filter(Boolean);
-              terms.forEach((term, i) => {
-                q.orWhere(
-                  `c.firstName ILIKE :t${i} OR c.lastName ILIKE :t${i}`,
-                  { [`t${i}`]: `%${term}%` },
-                );
-              });
-            }
-            q.orWhere('contact.value ILIKE :search', {
-              search: `%${cleanSearch}%`,
-            });
-          }),
-        );
-      }
-    }
-
-    // ── Filtros de tipo y estado ───────────────────────────────────────────────
-    if (orderTypeId && orderTypeId !== 0) {
-      qb.andWhere('o.order_type_id = :orderTypeId', { orderTypeId });
-    }
-
-    if (orderStatusId && orderStatusId !== 0) {
-      qb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
-    }
-
-    // ── Paginación para 'ejecutadas' ───────────────────────────────────────────
-    if (activeFilter === 'ejecutadas') {
-      const subQb = this.orderRepo
-        .createQueryBuilder('o')
-        .select('DISTINCT o.id', 'id')
-        .innerJoin(
-          'order_findings',
-          'finding',
-          'finding.order_id = o.id AND finding.is_active = true',
-        )
-        .innerJoin(
-          'finding_procedures',
-          'proc',
-          'proc.finding_id = finding.id AND proc.performed_by_id = :userId AND proc.is_active = true',
-          { userId: user.userId },
-        )
-        .where('o.company_id = :companyId', { companyId: user.companyId });
-
-      if (utcFrom) subQb.andWhere('proc.createdAt >= :utcFrom', { utcFrom });
-      if (utcTo) subQb.andWhere('proc.createdAt <= :utcTo', { utcTo });
-
-      if (orderTypeId && orderTypeId !== 0) {
-        subQb.andWhere('o.order_type_id = :orderTypeId', { orderTypeId });
-      }
-      if (orderStatusId && orderStatusId !== 0) {
-        subQb.andWhere('o.current_status_id = :orderStatusId', { orderStatusId });
-      }
-
-      if (search && search.trim() !== '') {
-        const cleanSearch = search.trim();
-        subQb.leftJoin('o.customer', 'c').leftJoin('c.contacts', 'contact');
-
-        if (cleanSearch.startsWith('#')) {
-          const orderNumber = cleanSearch.slice(1);
-          if (!isNaN(Number(orderNumber)) && orderNumber !== '') {
-            subQb.andWhere('o.order_number = :orderNumber', {
-              orderNumber: Number(orderNumber),
-            });
-          }
-        } else {
-          subQb.andWhere(
-            new Brackets((q) => {
-              if (!isNaN(Number(cleanSearch))) {
-                q.where(
-                  'c.idNumber ILIKE :num OR o.order_number::text ILIKE :num',
-                  { num: `%${cleanSearch}%` },
-                );
-              } else {
-                const terms = cleanSearch.split(' ').filter(Boolean);
-                terms.forEach((term, i) => {
-                  q.orWhere(
-                    `c.firstName ILIKE :t${i} OR c.lastName ILIKE :t${i}`,
-                    { [`t${i}`]: `%${term}%` },
-                  );
-                });
-              }
-              q.orWhere('contact.value ILIKE :search', {
-                search: `%${cleanSearch}%`,
-              });
-            }),
-          );
-        }
-      }
-
-      const rawIds = await subQb.getRawMany<{ id: number }>();
-      const ids = rawIds.map((r) => r.id);
-      const total = ids.length;
-
-      if (total === 0) {
-        return { data: [], total: 0, page, limit, totalPages: 0 };
-      }
-
-      const pagedIds = ids.slice(skip, skip + limit);
-
-      const data = await this.orderRepo
-        .createQueryBuilder('o')
-        .leftJoinAndSelect('o.customer', 'c')
-        .leftJoinAndSelect('c.contacts', 'contact')
-        .leftJoinAndSelect('o.type', 'type')
-        .leftJoinAndSelect('o.currentStatus', 'status')
-        .leftJoinAndSelect('o.priority', 'priority')
-        .leftJoinAndSelect('o.technicians', 'technicians')
-        .leftJoinAndSelect('o.device', 'device')
-        .leftJoinAndSelect('device.imeis', 'imei')
-        .leftJoinAndSelect('device.model', 'deviceModel')
-        .leftJoinAndSelect('deviceModel.brand', 'deviceBrand')
-        .leftJoinAndSelect('o.payments', 'payments')
-        .leftJoinAndSelect('payments.paymentType', 'paymentType')
-        .leftJoinAndSelect('payments.paymentMethod', 'paymentMethod')
-        .leftJoinAndSelect('payments.receivedBy', 'receivedBy')
-        .leftJoinAndSelect(
-          'o.discounts',
-          'discounts',
-          'discounts.status != :cancelledStatusEjecutadas',
-          { cancelledStatusEjecutadas: 'CANCELLED' },
-        )
-        .whereInIds(pagedIds)
-        .orderBy('o.entry_date', 'DESC')
-        .getMany();
-
-      // ── has_attachments para 'ejecutadas' ──────────────────────────────────
-      const mappedData = await this.appendPaymentAttachmentFlag(data, pagedIds);
-
-      const withClosure = mappedData.map((o: any) => ({
-        ...o,
-        closure_observation: o.delivery?.closure_observation ?? null,
-      }));
-
-      // ── resumen de solicitudes de repuesto ─────────────────────────────────
-      const dataWithParts = await this.appendPartRequestsSummary(mappedData, pagedIds); // 👈 nuevo
-
-      return { data: dataWithParts, total, page, limit, totalPages: Math.ceil(total / limit) };
-    }
-
-    // ── Paginación estándar ────────────────────────────────────────────────────
-    qb.skip(skip).take(limit);
-
-    const [data, total] = await qb.getManyAndCount();
-
-    // ── has_attachments ────────────────────────────────────────────────────────
-    const orderIds = data.map((o) => o.id);
-    const mappedData = await this.appendPaymentAttachmentFlag(data, orderIds);
-
-    // ── resumen de solicitudes de repuesto ─────────────────────────────────────
-    const dataWithParts = await this.appendPartRequestsSummary(mappedData, orderIds); // 👈 nuevo
-
-    return { data: dataWithParts, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
   async getOrderFullData(
