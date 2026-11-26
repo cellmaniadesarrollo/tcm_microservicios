@@ -14,6 +14,7 @@ import { DiscountsModule } from '../discounts/discounts.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { SigningService } from '../documents/services/signing.service';
+import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { SigningService } from '../documents/services/signing.service';
     DiscountsModule,
     DocumentsModule,
     AwsS3Module,
+    BroadcastModule,
   ],
   controllers: [SriDocumentsController],
   providers: [SriSequenceService, SriDocumentsService],

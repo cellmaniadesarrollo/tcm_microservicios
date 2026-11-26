@@ -60,6 +60,7 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // ✅ Unirse a sala personal (para notificaciones individuales)
       const userRoom = `user:${userId}`;
       client.join(userRoom);
+      // console.log(`🔌 [Sync] conectado ${client.id} -> ${companyRoom} / ${userRoom}`);
 
       client.emit('connection_success', {
         message: '✅ Conexión WebSocket establecida correctamente',
@@ -76,7 +77,8 @@ export class SyncGateway implements OnGatewayConnection, OnGatewayDisconnect {
         companyId: companyId,
       });
 
-    } catch (error) {
+    } catch (error: any) {
+      console.warn(`[Sync] token rechazado: ${error?.message}`);
       client.emit('error', { message: 'Token inválido o expirado' });
       client.disconnect(true);
     }

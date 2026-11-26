@@ -21,6 +21,7 @@ import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 import { DiscountsModule } from './discounts/discounts.module';
 import { DocumentsModule } from './documents/documents.module';
+import { ServicesCatalogModule } from './services-catalog/services-catalog.module';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { DocumentsModule } from './documents/documents.module';
     ReceiptsModule,
     DiscountsModule,
     DocumentsModule,
+    ServicesCatalogModule,
   ],
 })
 export class AppModule { }

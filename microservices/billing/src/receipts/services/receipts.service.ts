@@ -6,6 +6,7 @@ import { Receipt } from '../entities/receipt.entity';
 import { formatReceiptNumber } from '../helpers/receipt-number.helper';
 import { ReceiptSequenceService } from './receipt-sequence.service';
 import { StockClientService } from '../../documents/services/stock-client.service';
+import { BroadcastService } from '../../broadcast/service/broadcast.service';
 
 const toCents = (n: number) => Math.round(n * 100 + Number.EPSILON);
 const money = (cents: number) => (cents / 100).toFixed(2);
@@ -17,7 +18,26 @@ export class ReceiptsService {
     private readonly sequences: ReceiptSequenceService,
     private readonly discounts: DiscountsService,
     private readonly stock: StockClientService,
+    private readonly broadcast: BroadcastService,
   ) {}
+
+  /** Avisa a la lista en vivo. emit() nunca lanza. */
+  private async notify(r: Receipt) {
+    try {
+      await this.broadcast.publishReceiptUpdated({
+        company_id: r.companyId,
+        id: r.id,
+        kind: r.kind,
+        number: formatReceiptNumber({ kind: r.kind, series: r.series, sequence: r.sequence }),
+        buyerName: r.buyerName,
+        buyerIdNumber: r.buyerIdNumber,
+        issueDate: r.issueDate,
+        createdAt: r.createdAt,
+        total: r.total,
+        statusCode: r.statusCode,
+      });
+    } catch { /* nunca debe romper la venta */ }
+  }
 
   private present(r: Receipt, replayed: boolean) {
     return {
@@ -43,7 +63,7 @@ export class ReceiptsService {
     const series = await this.sequences.seriesForBranch(companyId, dto.branchId);
 
     try {
-      return await this.ds.transaction(async (m) => {
+      const result = await this.ds.transaction(async (m) => {
         // El servidor recalcula; nunca se confía en el total ni en descuentos del front.
         let subtotal = 0;
         let discountTotal = 0;
@@ -147,8 +167,10 @@ export class ReceiptsService {
           receipt.stockState = 'ISSUED';
         }
 
-        return this.present(receipt, false);
-      });
+          return { presented: this.present(receipt, false), receipt };
+        });
+      await this.notify(result.receipt);
+      return result.presented;
     } catch (e: any) {
       // Dos peticiones simultáneas con el mismo clientRequestId: gana una, la otra reproduce.
       if (e?.code === '23505') {

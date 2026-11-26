@@ -1,0 +1,1 @@
+export const REALTIME_CLIENT = 'REALTIME_CLIENT';

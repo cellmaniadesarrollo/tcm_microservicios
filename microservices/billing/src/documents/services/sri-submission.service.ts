@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { AwsS3Service } from '../../aws-s3/aws-s3.service';
+import { BroadcastService } from '../../broadcast/service/broadcast.service';
 import { SriDocument } from '../../sri-documents/entities/sri-document.entity';
 import { SriEnvironment } from '../../sri-catalogs/entities/sri-environment.entity';
 import { SRI_BUCKET, sriXmlKey } from '../helpers/xml-storage.helper';
@@ -34,7 +35,32 @@ export class SriSubmissionService {
     private readonly s3: AwsS3Service,
     private readonly sri: SriClientService,
     private readonly stock: StockClientService,
+    private readonly broadcast: BroadcastService,
   ) {}
+
+  /** Relee el documento ya guardado y avisa a la lista en vivo. Nunca lanza. */
+  private async notify(companyId: string, id: string) {
+    try {
+      const d = await this.ds.getRepository(SriDocument).findOne({ where: { id, companyId } });
+      if (!d) return;
+      await this.broadcast.publishInvoiceUpdated({
+        company_id: d.companyId,
+        id: d.id,
+        documentTypeCode: d.documentTypeCode,
+        series: d.series,
+        sequence: d.sequence,
+        buyerName: d.buyerName,
+        buyerIdNumber: d.buyerIdNumber,
+        issueDate: d.issueDate,
+        createdAt: d.createdAt,
+        total: d.total,
+        statusCode: d.statusCode,
+        lastErrorMessage: d.lastErrorMessage ?? null,
+      });
+    } catch (e: any) {
+      this.logger.warn(`notify falló: ${e?.message}`);
+    }
+  }
 
   /** Envía al SRI y consulta la autorización. Se puede repetir sin riesgo. */
   async send(companyId: string, documentId: string) {
@@ -72,6 +98,7 @@ export class SriSubmissionService {
           { id: doc.id, companyId },
           { statusCode: ST.RETURNED, ...errorFields(rec.messages) },
         );
+        await this.notify(companyId, doc.id);
         this.logger.warn(`Documento ${doc.id} DEVUELTO: ${JSON.stringify(rec.messages)}`);
         return { id: doc.id, statusCode: ST.RETURNED, messages: rec.messages };
       }
@@ -79,6 +106,7 @@ export class SriSubmissionService {
         { id: doc.id, companyId },
         { statusCode: ST.RECEIVED, lastErrorCode: null, lastErrorMessage: null },
       );
+      await this.notify(companyId, doc.id);
     }
 
     // 2) Autorización: hasta 4 consultas, 2 s entre cada una
@@ -112,6 +140,7 @@ export class SriSubmissionService {
             nextRetryAt: null,
           },
         );
+        await this.notify(companyId, doc.id);
         this.logger.log(`Documento ${doc.id} AUTORIZADO (${a.number})`);
         return { id: doc.id, statusCode: ST.AUTHORIZED, authorizationNumber: a.number };
       }
@@ -121,12 +150,14 @@ export class SriSubmissionService {
         { statusCode: ST.NOT_AUTHORIZED, ...errorFields(a.messages) },
       );
       await this.stock.giveBack(companyId, doc.id);
+      await this.notify(companyId, doc.id);
       this.logger.warn(`Documento ${doc.id} NO AUTORIZADO: ${JSON.stringify(a.messages)}`);
       return { id: doc.id, statusCode: ST.NOT_AUTHORIZED, messages: a.messages };
     }
 
     // Sigue en procesamiento: PPR; se reintenta con el mismo endpoint
     await repo.update({ id: doc.id, companyId }, { statusCode: ST.PENDING });
+    await this.notify(companyId, doc.id);
     return { id: doc.id, statusCode: ST.PENDING, pending: true };
   }
 }

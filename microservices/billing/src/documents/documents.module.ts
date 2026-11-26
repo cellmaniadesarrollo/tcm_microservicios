@@ -11,11 +11,13 @@ import { SriClientService } from './services/sri-client.service';
 import { SriSubmissionService } from './services/sri-submission.service';
 import { INVENTORY_CORE_CLIENT, StockClientService } from './services/stock-client.service';
 import { StockReconcileCron } from './cron/stock-reconcile.cron';
+import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
   imports: [
     AwsS3Module,
     SignaturesModule,
+    BroadcastModule,
     ClientsModule.register([
       {
         name: INVENTORY_CORE_CLIENT,

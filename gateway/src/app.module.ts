@@ -23,6 +23,7 @@ import { SriDocumentsModule } from './sri-documents/sri-documents.module';
 import { IssuersModule } from './issuers/issuers.module';
 import { ReceiptsModule } from './receipts/receipts.module';
 import { BillingDiscountsModule } from './billing-discounts/billing-discounts.module';
+import { BillingServicesModule } from './billing-services/billing-services.module';
 
 @Module({
   imports: [
@@ -48,6 +49,7 @@ import { BillingDiscountsModule } from './billing-discounts/billing-discounts.mo
     IssuersModule,
     ReceiptsModule,
     BillingDiscountsModule,
+    BillingServicesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

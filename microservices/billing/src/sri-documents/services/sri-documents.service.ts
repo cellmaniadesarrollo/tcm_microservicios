@@ -17,6 +17,7 @@ import { SRI_BUCKET, sriXmlKey } from '../../documents/helpers/xml-storage.helpe
 import { SigningService } from '../../documents/services/signing.service';
 import { SriSubmissionService } from '../../documents/services/sri-submission.service';
 import { StockClientService } from '../../documents/services/stock-client.service';
+import { BroadcastService } from '../../broadcast/service/broadcast.service';
 
 const money = (cents: number) => (cents / 100).toFixed(2);
 
@@ -34,6 +35,7 @@ export class SriDocumentsService {
     private readonly signing: SigningService,
     private readonly submission: SriSubmissionService,
     private readonly stock: StockClientService,
+    private readonly broadcast: BroadcastService,
   ) {}
 
   async createInvoice(companyId: string, userId: string, dto: CreateInvoiceDto) {
@@ -201,6 +203,7 @@ export class SriDocumentsService {
 
     await this.buildAndStoreXml(companyId, created.id);
     const signed = await this.trySign(companyId, created.id);
+    await this.notify(companyId, created.id);
 
     // Envío al SRI en segundo plano: el usuario no espera los 8-10 s de recepción + autorización.
     if (signed && process.env.SRI_AUTO_SEND !== 'false') {
@@ -331,5 +334,29 @@ export class SriDocumentsService {
     return {
       items: items.map(({ xmlUnsigned, xmlSigned, xmlAuthorized, ...rest }) => rest),
     };
+  }
+
+  /** Avisa a la lista en vivo con el estado actual. Nunca lanza. */
+  private async notify(companyId: string, id: string) {
+    try {
+      const d = await this.ds.getRepository(SriDocument).findOne({ where: { id, companyId } });
+      if (!d) return;
+      await this.broadcast.publishInvoiceUpdated({
+        company_id: d.companyId,
+        id: d.id,
+        documentTypeCode: d.documentTypeCode,
+        series: d.series,
+        sequence: d.sequence,
+        buyerName: d.buyerName,
+        buyerIdNumber: d.buyerIdNumber,
+        issueDate: d.issueDate,
+        createdAt: d.createdAt,
+        total: d.total,
+        statusCode: d.statusCode,
+        lastErrorMessage: d.lastErrorMessage ?? null,
+      });
+    } catch (e: any) {
+      this.logger.warn(`notify falló: ${e?.message}`);
+    }
   }
 }

@@ -9,12 +9,14 @@ import { ReceiptSequenceService } from './services/receipt-sequence.service';
 import { ReceiptsService } from './services/receipts.service';
 import { DiscountsModule } from '../discounts/discounts.module';
 import { DocumentsModule } from '../documents/documents.module';
+import { BroadcastModule } from '../broadcast/broadcast.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Receipt, ReceiptLine, ReceiptSequence, BranchReplica]),
     DiscountsModule,
     DocumentsModule,
+    BroadcastModule,
   ],
   controllers: [ReceiptsController],
   providers: [ReceiptSequenceService, ReceiptsService],
