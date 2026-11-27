@@ -27,6 +27,7 @@ import { OrderPartRequestModule } from './order-part-request/order-part-request.
 import { OrderDiscountsModule } from './order-discounts/order-discounts.module';
 import { PrintEndpointsModule } from './print-endpoints/print-endpoints.module';
 import { PurchaseLeadModule } from './purchase-lead/purchase-lead.module';
+import { DevicePurchasesModule } from './device-purchases/device-purchases.module';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { PurchaseLeadModule } from './purchase-lead/purchase-lead.module';
     OrderDiscountsModule,
     PrintEndpointsModule,
     PurchaseLeadModule,
+    DevicePurchasesModule,
   ],
   controllers: [AppController],
   providers: [AppService],
