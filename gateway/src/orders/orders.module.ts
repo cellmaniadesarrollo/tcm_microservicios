@@ -17,6 +17,8 @@ import { PurchaseLeadsController } from './purchase-leads/purchase-leads.control
 import { PurchaseLeadsGatewayService } from './purchase-leads/purchase-leads-gateway.service';
 import { PartRequestReportsController } from './part-request-reports/part-request-reports.controller';
 import { PartRequestReportsGatewayService } from './part-request-reports/part-request-reports-gateway.service';
+import { DevicePurchasesController } from './device-purchases/device-purchases.controller';
+import { DevicePurchasesGatewayService } from './device-purchases/device-purchases-gateway.service';
 
 @Module({
   imports: [
@@ -34,8 +36,10 @@ import { PartRequestReportsGatewayService } from './part-request-reports/part-re
     AuthModule
   ],
   controllers: [OrdersController, PartRequestsController,
-    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController, PurchaseLeadsController],
+    InvoicesController, OrderDiscountsController, PrintEndpointsController, PartRequestReportsController, PurchaseLeadsController,
+    DevicePurchasesController],
   providers: [OrdersGatewayService, PartRequestsGatewayService, OrderServiceClient,
-    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService, PurchaseLeadsGatewayService],
+    InvoicesGatewayService, OrderDiscountsService, PartRequestReportsGatewayService, PurchaseLeadsGatewayService,
+    DevicePurchasesGatewayService],
 })
 export class OrdersModule { }
