@@ -34,6 +34,10 @@ export class CreateInvoiceGatewayDto {
   @IsUUID('4', { message: 'La sucursal no es válida' })
   branchId!: string;
 
+  @IsOptional()
+  @IsUUID('4', { message: 'El punto de emisión no es válido' })
+  emissionPointId?: string;
+
   @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'La fecha debe ser YYYY-MM-DD' })
   issueDate!: string;
 

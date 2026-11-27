@@ -46,8 +46,8 @@ export class SriDocumentsService {
     });
     if (prev) return { ...prev, replayed: true };
 
-    // emisor, firma y establecimiento de la sucursal
-    const r = await this.issuers.resolveForBranch(companyId, dto.branchId);
+    // emisor, firma, establecimiento y punto de emisión
+    const r = await this.issuers.resolveForBranch(companyId, dto.branchId, userId, dto.emissionPointId); // CAMBIO
     const series = r.establishmentCode + r.emissionPointCode;
 
     // tarifas desde el catálogo (nunca confiar en el porcentaje del front)

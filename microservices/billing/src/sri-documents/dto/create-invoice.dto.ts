@@ -20,6 +20,7 @@ export class InvoicePaymentDto {
 export class CreateInvoiceDto {
   clientRequestId!: string;
   branchId!: string;
+  emissionPointId?: string; // opcional: si no llega, se usa el punto por defecto de la sucursal
   issueDate!: string;      // YYYY-MM-DD
   orderId?: string;        // opcional, para conectar ventas después
 

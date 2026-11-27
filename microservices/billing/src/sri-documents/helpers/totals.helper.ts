@@ -67,12 +67,15 @@ export function calculateTotals(
     if (l.quantity <= 0) throw new BadRequestException(`Línea ${i + 1}: cantidad inválida.`);
     if (l.unitPrice < 0) throw new BadRequestException(`Línea ${i + 1}: precio inválido.`);
 
+    const grossExact = l.quantity * l.unitPrice * 100; // centavos sin redondear
     const gross = toCents(l.quantity * l.unitPrice);
     const disc = toCents(l.discount ?? 0);
     if (disc > gross) throw new BadRequestException(`Línea ${i + 1}: el descuento supera el valor.`);
 
     const base = gross - disc;
-    const tax = l.vatKind === 'VAT' ? roundHalfUp((base * l.vatPercentage) / 100) : 0;
+    const baseExact = Math.max(grossExact - disc, 0);
+    // IVA sobre la base SIN redondear; se redondea una sola vez por línea.
+    const tax = l.vatKind === 'VAT' ? roundHalfUp((baseExact * l.vatPercentage) / 100) : 0;
 
     discount += disc;
     vat += tax;
