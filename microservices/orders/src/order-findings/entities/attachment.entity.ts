@@ -30,6 +30,9 @@ export enum AttachmentEntityType {
   PART_REQUEST_TRAVEL_ITEM = 'PART_REQUEST_TRAVEL_ITEM',
   // attachment.entity.ts
   PART_REQUEST_TRAVEL_ITEM_RESULT = 'PART_REQUEST_TRAVEL_ITEM_RESULT', // fotos del viajero al resolver
+
+  // attachment.entity.ts
+  DEVICE_PURCHASE_PAYMENT = 'DEVICE_PURCHASE_PAYMENT',   // transferencia, captura, recibo 
 }
 
 @Entity('attachments')
