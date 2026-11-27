@@ -119,4 +119,10 @@ export class GetOrdersFilterDto {
   @Transform(({ value }) => value === true || value === 'true')
   @IsBoolean()
   includeCommissions?: boolean = false;
+  /** Si es true, ignora page/limit y devuelve todo (para reportes físicos) */
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  all?: boolean = false;
+
 }
