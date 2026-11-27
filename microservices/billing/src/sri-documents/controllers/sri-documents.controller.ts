@@ -27,4 +27,14 @@ export class SriDocumentsController {
   listPaymentMethods() {
     return this.service.listPaymentMethods();
   }
+
+  @MessagePattern({ cmd: 'get_sri_invoice' })
+  getInvoice(@Payload() d: any) {
+    return this.service.findOne(d.user.companyId, d.id);
+  }
+
+  @MessagePattern({ cmd: 'correct_sri_invoice' })
+  correctInvoice(@Payload() d: any) {
+    return this.service.correct(d.user.companyId, d.id, d.dto);
+  }
 }

@@ -3,6 +3,8 @@ import { Auth } from '../common/auth/decorators/auth.decorator';
 import { User } from '../common/auth/decorators/user.decorator';
 import { CreateInvoiceGatewayDto } from './dto/create-invoice-gateway.dto';
 import { SriDocumentsService } from './sri-documents.service';
+import { Groups } from '../common/auth/decorators/groups.decorator';
+import { CorrectInvoiceGatewayDto } from './dto/correct-invoice-gateway.dto';
 
 @Controller('sri-invoices')
 @Auth()
@@ -26,6 +28,17 @@ export class SriDocumentsController {
   @Get('payment-methods')
   paymentMethods() {
     return this.service.listPaymentMethods();
+  }
+
+  @Get(':id')
+  findOne(@Param('id', ParseUUIDPipe) id: string, @User() user: any) {
+    return this.service.findOne(id, this.ctx(user));
+  }
+
+  @Post(':id/correct')
+  @Groups()
+  correct(@Param('id', ParseUUIDPipe) id: string, @Body() dto: CorrectInvoiceGatewayDto, @User() user: any) {
+    return this.service.correct(id, dto, this.ctx(user));
   }
 
   @Post()

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { BillingServiceClient } from '../common/microservices/billing-service-client';
 import { CreateInvoiceGatewayDto } from './dto/create-invoice-gateway.dto';
+import { CorrectInvoiceGatewayDto } from './dto/correct-invoice-gateway.dto';
 
 type UserCtx = { userId: string; companyId: string; branchId?: string };
 
@@ -22,6 +23,14 @@ export class SriDocumentsService {
 
   list(user: UserCtx) {
     return this.billing.send('list_invoices', { user });
+  }
+
+  findOne(id: string, user: UserCtx) {
+    return this.billing.send('get_sri_invoice', { id, user });
+  }
+
+  correct(id: string, dto: CorrectInvoiceGatewayDto, user: UserCtx) {
+    return this.billing.send('correct_sri_invoice', { id, dto, user });
   }
 
   previewXml(documentId: string, user: UserCtx) {

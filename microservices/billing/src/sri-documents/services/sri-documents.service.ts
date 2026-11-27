@@ -18,6 +18,8 @@ import { SigningService } from '../../documents/services/signing.service';
 import { SriSubmissionService } from '../../documents/services/sri-submission.service';
 import { StockClientService } from '../../documents/services/stock-client.service';
 import { BroadcastService } from '../../broadcast/service/broadcast.service';
+import { SriErrorCode } from '../../sri-catalogs/entities/sri-error-code.entity';
+import { SriDocumentPayment } from '../entities/sri-document-payment.entity';
 
 const money = (cents: number) => (cents / 100).toFixed(2);
 
@@ -327,7 +329,8 @@ export class SriDocumentsService {
   async list(companyId: string) {
     const items = await this.ds.getRepository(SriDocument).find({
       where: { companyId },
-      order: { createdAt: 'DESC' },
+      relations: { lines: true },
+      order: { createdAt: 'DESC', lines: { position: 'ASC' } },
       take: 100,
     });
     // no se devuelven los XML en el listado
@@ -339,7 +342,11 @@ export class SriDocumentsService {
   /** Avisa a la lista en vivo con el estado actual. Nunca lanza. */
   private async notify(companyId: string, id: string) {
     try {
-      const d = await this.ds.getRepository(SriDocument).findOne({ where: { id, companyId } });
+      const d = await this.ds.getRepository(SriDocument).findOne({
+        where: { id, companyId },
+        relations: { lines: true },
+        order: { lines: { position: 'ASC' } },
+      });
       if (!d) return;
       await this.broadcast.publishInvoiceUpdated({
         company_id: d.companyId,
@@ -354,9 +361,166 @@ export class SriDocumentsService {
         total: d.total,
         statusCode: d.statusCode,
         lastErrorMessage: d.lastErrorMessage ?? null,
+        buyerEmail: d.buyerEmail,
+        subtotal: d.subtotal,
+        totalDiscount: d.totalDiscount,
+        vatValue: d.vatValue,
+        lines: d.lines,
       });
     } catch (e: any) {
       this.logger.warn(`notify falló: ${e?.message}`);
     }
+  }
+
+  async findOne(companyId: string, id: string) {
+    const doc = await this.ds.getRepository(SriDocument).findOne({
+      where: { id, companyId },
+      relations: { lines: true, payments: true },
+      order: { lines: { position: 'ASC' } },
+    });
+    if (!doc) throw new BadRequestException('Documento no encontrado.');
+    const { xmlUnsigned, xmlSigned, xmlAuthorized, ...rest } = doc;
+    return { ...rest, errorInfo: await this.errorInfo(doc.lastErrorCode) };
+  }
+
+  private async errorInfo(code: string | null) {
+    if (!code) return null;
+    const e = await this.ds.getRepository(SriErrorCode).findOne({ where: { code } });
+    if (!e) return null;
+    const blocked = e.kind === 'ERROR' && (e.terminal || !e.retryable);
+    return { code: e.code, name: e.name, description: e.description, blocked };
+  }
+
+  async correct(companyId: string, id: string, dto: any) {
+    const repo = this.ds.getRepository(SriDocument);
+    const doc = await repo.findOne({
+      where: { id, companyId },
+      relations: { lines: true, payments: true },
+      order: { lines: { position: 'ASC' } },
+    });
+    if (!doc) throw new BadRequestException('Documento no encontrado.');
+    if (!['DEVUELTO', 'NAT'].includes(doc.statusCode))
+      throw new BadRequestException('Solo se corrigen facturas devueltas o no autorizadas.');
+
+    const info = await this.errorInfo(doc.lastErrorCode);
+    if (info?.blocked)
+      throw new BadRequestException(`No se puede reenviar. Error ${info.code}: ${info.name}. ${info.description}`);
+
+    // NAT: clave nueva con el mismo secuencial. DEVUELTO: misma clave.
+    const accessKey = doc.statusCode === 'NAT'
+      ? buildAccessKey({
+          issueDate: doc.issueDate,
+          documentTypeCode: doc.documentTypeCode,
+          ruc: doc.accessKey!.slice(10, 23),
+          environmentCode: doc.environmentCode,
+          series: doc.series,
+          sequence: doc.sequence,
+          emissionTypeCode: doc.emissionTypeCode,
+        })
+      : doc.accessKey;
+
+    // ── Líneas: solo cambian código, descripción, precio e IVA ──
+    const lines = doc.lines ?? [];
+    const edits = new Map<string, any>((dto.lines ?? []).map((l: any) => [l.id, l]));
+    for (const key of edits.keys()) {
+      if (!lines.some((l) => l.id === key))
+        throw new BadRequestException('Una línea no pertenece a esta factura.');
+    }
+
+    const rates = await this.loadVatRates(
+      lines.map((l) => edits.get(l.id)?.vatRateCode ?? l.vatRateCode),
+    );
+
+    const lineInputs: LineInput[] = lines.map((l) => {
+      const e = edits.get(l.id);
+      const vatRateCode = e?.vatRateCode ?? l.vatRateCode;
+      const rate = rates.get(vatRateCode);
+      if (!rate) throw new BadRequestException(`Tarifa de IVA no válida: ${vatRateCode}`);
+
+      const unitPrice = e ? Number(e.unitPrice) : Number(l.unitPrice);
+      const quantity = Number(l.quantity);
+      const discount = Number(l.discount); // dólares, se conserva tal cual
+      if (discount > quantity * unitPrice + 0.005)
+        throw new BadRequestException(`El descuento supera el valor de la línea ${l.position}.`);
+
+      return {
+        productId: l.productId,
+        lotId: l.lotId,
+        unitId: l.unitId,
+        mainCode: e?.mainCode ?? l.mainCode,
+        description: e?.description ?? l.description,
+        quantity,
+        unitPrice,
+        discount,
+        vatRateCode,
+        vatPercentage: rate.percentage,
+        vatKind: rate.kind,
+      };
+    });
+
+    const t = calculateTotals(lineInputs, { tip: Number(doc.tip) });
+    const newTotalCents = Math.round(Number(t.total) * 100);
+
+    // ── Pagos: con un solo pago se ajusta; con varios debe seguir cuadrando ──
+    const payments = doc.payments ?? [];
+    const paidCents = payments.reduce((s, p) => s + Math.round(Number(p.amount) * 100), 0);
+    if (payments.length !== 1 && paidCents !== newTotalCents)
+      throw new BadRequestException(
+        'El nuevo total no coincide con los pagos de la factura. Esta factura tiene varios pagos y no se pueden ajustar automáticamente.',
+      );
+
+    await this.ds.transaction(async (m) => {
+      // La condición por estado evita dos reenvíos simultáneos
+      const res = await m.update(
+        SriDocument,
+        { id, companyId, statusCode: doc.statusCode },
+        {
+          buyerIdTypeCode: dto.buyerIdTypeCode,
+          buyerIdNumber: dto.buyerIdNumber.trim(),
+          buyerName: dto.buyerName.trim().toUpperCase(),
+          buyerAddress: dto.buyerAddress?.trim() || null,
+          buyerEmail: dto.buyerEmail?.trim() || null,
+          subtotalVat: t.subtotalVat,
+          subtotalZero: t.subtotalZero,
+          subtotalNotObject: t.subtotalNotObject,
+          subtotalExempt: t.subtotalExempt,
+          subtotal: t.subtotal,
+          totalDiscount: t.totalDiscount,
+          iceValue: t.iceValue,
+          vatValue: t.vatValue,
+          tip: t.tip,
+          total: t.total,
+          accessKey,
+          statusCode: 'BORRADOR',
+          xmlUnsigned: null,
+          xmlSigned: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          sriMessages: null,
+          attempts: 0,
+          nextRetryAt: null,
+        },
+      );
+      if (!res.affected) throw new BadRequestException('El documento cambió, recarga la página.');
+
+      // Línea por línea, sin tocar producto, lote, unidad ni cantidad (el stock no se mueve)
+      for (const [i, l] of lines.entries()) {
+        const { productId, lotId, unitId, quantity, ...changes } = t.lines[i] as any;
+        await m.update(SriDocumentLine, { id: l.id }, changes);
+      }
+
+      if (payments.length === 1) {
+        await m.update(SriDocumentPayment, { id: payments[0].id }, { amount: t.total });
+      }
+    });
+
+    await this.buildAndStoreXml(companyId, id);
+    const signed = await this.trySign(companyId, id);
+    await this.notify(companyId, id);
+    if (signed && process.env.SRI_AUTO_SEND !== 'false') {
+      void this.sendInBackground(companyId, id);
+    }
+
+    return { id, signed };
   }
 }
