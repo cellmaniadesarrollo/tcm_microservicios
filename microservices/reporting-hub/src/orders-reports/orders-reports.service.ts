@@ -432,25 +432,33 @@ export class OrdersReportsService {
     // LISTA DE ÓRDENES
     // ─────────────────────────────────────────────────────────────────────────
 
+    private readonly MAX_EXPORT_ROWS = 5000; // ajusta según tu volumen
+
     async getOrdersList(companyId: string, dto: GetOrdersFilterDto) {
-        const page = dto.page ?? 1;
-        const limit = dto.limit ?? 20;
+        const exportAll = dto.all === true;
+        const page = exportAll ? 1 : (dto.page ?? 1);
+        const limit = exportAll ? undefined : (dto.limit ?? 20);
         const filter = this.buildMongoFilter(companyId, dto);
 
+        let query = this.orderReplicaModel
+            .find(filter)
+            .select({
+                id: 1, order_number: 1, previous_order_id: 1, revisadoAntes: 1,
+                is_national: 1, currentStatus: 1, type: 1, branch: 1,
+                customer: 1, device: 1, technicians: 1,
+                entry_date: 1, estimated_price: 1, statusHistory: 1, findings: 1, payments: 1,
+                priority: 1, priority_surcharge_percentage: 1,
+            })
+            .sort({ entry_date: -1, _id: -1 }); // _id evita duplicados al paginar
+
+        if (exportAll) {
+            query = query.limit(this.MAX_EXPORT_ROWS);
+        } else {
+            query = query.skip((page - 1) * limit!).limit(limit!);
+        }
+
         const [raw, total] = await Promise.all([
-            this.orderReplicaModel
-                .find(filter)
-                .select({
-                    id: 1, order_number: 1, previous_order_id: 1, revisadoAntes: 1,
-                    is_national: 1, currentStatus: 1, type: 1, branch: 1,
-                    customer: 1, device: 1, technicians: 1,
-                    entry_date: 1, estimated_price: 1, statusHistory: 1, findings: 1, payments: 1,
-                    priority: 1, priority_surcharge_percentage: 1,
-                })
-                .sort({ entry_date: -1, _id: -1 }) // _id evita duplicados al paginar
-                .skip((page - 1) * limit)
-                .limit(limit)
-                .lean(),
+            query.lean(),
             this.orderReplicaModel.countDocuments(filter),
         ]);
 
@@ -533,8 +541,9 @@ export class OrdersReportsService {
             data,
             total,
             page,
-            limit,
-            totalPages: Math.max(1, Math.ceil(total / limit)),
+            limit: exportAll ? data.length : limit,
+            totalPages: exportAll ? 1 : Math.max(1, Math.ceil(total / limit!)),
+            ...(exportAll && { truncated: total > this.MAX_EXPORT_ROWS }),
         };
     }
 
