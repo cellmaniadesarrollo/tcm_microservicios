@@ -445,6 +445,8 @@ export class DevicePurchasesService {
                 device: o.device
                     ? {
                         device_id: o.device.device_id,
+                        device_type_id: o.device.device_type_id,
+                        device_type_name: o.device.type?.name ?? null,
                         serial_number: o.device.serial_number ?? null,
                         color: o.device.color ?? null,
                         storage: o.device.storage ?? null,
