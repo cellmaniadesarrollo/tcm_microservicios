@@ -1,0 +1,40 @@
+name: tcm-shopify-sync
+
+services:
+  shopify-sync:
+    build:
+      context: ../../microservices/shopify-sync
+      dockerfile: Dockerfile.dev
+    container_name: ms-shopify-sync
+    restart: always
+    volumes:
+      - ../../microservices/shopify-sync:/app
+      - /app/node_modules
+    command: ["npm", "run", "start:dev"]
+    env_file: [../.env]
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - INTERNAL_SECRET=${INTERNAL_SECRET}
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME_SHOPIFY_SYNC}
+      - RABBIT_URL=${RABBIT_URL}
+      - KAFKA_BOOTSTRAP_SERVERS=${KAFKA_BOOTSTRAP_SERVERS}
+      - SHOPIFY_STORE_DOMAIN=${SHOPIFY_STORE_DOMAIN}
+      - SHOPIFY_ACCESS_TOKEN=${SHOPIFY_ACCESS_TOKEN}
+      - SHOPIFY_WEBHOOK_SECRET=${SHOPIFY_WEBHOOK_SECRET}
+      - SHOPIFY_API_VERSION=${SHOPIFY_API_VERSION}
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get({host:'127.0.0.1',port:3000,path:'/health'}, r => process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+networks:
+  backend:
+    external: true
