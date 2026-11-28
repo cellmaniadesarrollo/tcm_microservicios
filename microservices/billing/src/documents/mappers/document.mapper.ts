@@ -3,7 +3,7 @@ import { DataSource } from 'typeorm';
 import { BranchReplica } from '../../companies/entities/branch-replica.entity';
 import { Issuer } from '../../issuer/entities/issuer.entity';
 import { SriDocument } from '../../sri-documents/entities/sri-document.entity';
-import { AnyDoc, DocIssuer, InvoiceDoc } from '../models/document.model';
+import { AnyDoc, CreditNoteDoc, DocIssuer, DocLine, InvoiceDoc } from '../models/document.model';
 
 @Injectable()
 export class DocumentMapper {
@@ -15,7 +15,7 @@ export class DocumentMapper {
       relations: { lines: true, payments: true },
     });
     if (!doc) throw new NotFoundException('Documento no encontrado.');
-    if (doc.documentTypeCode !== '01')
+    if (!['01', '04'].includes(doc.documentTypeCode))
       throw new BadRequestException(`Tipo de documento ${doc.documentTypeCode} aún no soportado.`);
     if (!doc.accessKey) throw new BadRequestException('El documento no tiene clave de acceso.');
 
@@ -44,8 +44,58 @@ export class DocumentMapper {
       rimpe: null, // ni este
     };
 
-    const lines = [...doc.lines].sort((a, b) => a.position - b.position);
+    const lines: DocLine[] = [...doc.lines]
+      .sort((a, b) => a.position - b.position)
+      .map((l) => ({
+        mainCode: l.mainCode,
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        discount: l.discount,
+        lineTotal: l.lineTotal,
+        vatRateCode: l.vatRateCode,
+        vatPercentage: l.vatPercentage,
+        vatBase: l.vatBase,
+        vatAmount: l.vatAmount,
+      }));
 
+    // ── Nota de crédito ──
+    if (doc.documentTypeCode === '04') {
+      if (!doc.modifiedDocumentId)
+        throw new BadRequestException('La nota de crédito no tiene factura modificada.');
+      const mod = await this.ds.getRepository(SriDocument).findOne({
+        where: { id: doc.modifiedDocumentId, companyId },
+      });
+      if (!mod) throw new NotFoundException('Factura modificada no encontrada.');
+
+      const nc: CreditNoteDoc = {
+        kind: 'NOTA_CREDITO',
+        environmentCode: doc.environmentCode,
+        emissionTypeCode: doc.emissionTypeCode,
+        accessKey: doc.accessKey,
+        series: doc.series,
+        sequence: doc.sequence,
+        issueDate: doc.issueDate,
+        issuer: docIssuer,
+        buyer: {
+          idTypeCode: doc.buyerIdTypeCode,
+          idNumber: doc.buyerIdNumber,
+          name: doc.buyerName,
+          email: doc.buyerEmail,
+        },
+        modifiedDocTypeCode: '01',
+        modifiedDocSeries: mod.series,
+        modifiedDocSequence: mod.sequence,
+        modifiedDocIssueDate: mod.issueDate,
+        reason: doc.reason ?? '',
+        totalWithoutTax: doc.subtotal,
+        totalModification: doc.total,
+        lines,
+      };
+      return nc;
+    }
+
+    // ── Factura ──
     const invoice: InvoiceDoc = {
       kind: 'FACTURA',
       environmentCode: doc.environmentCode,
@@ -66,18 +116,7 @@ export class DocumentMapper {
       totalDiscount: doc.totalDiscount,
       tip: doc.tip,
       total: doc.total,
-      lines: lines.map((l) => ({
-        mainCode: l.mainCode,
-        description: l.description,
-        quantity: l.quantity,
-        unitPrice: l.unitPrice,
-        discount: l.discount,
-        lineTotal: l.lineTotal,
-        vatRateCode: l.vatRateCode,
-        vatPercentage: l.vatPercentage,
-        vatBase: l.vatBase,
-        vatAmount: l.vatAmount,
-      })),
+      lines,
       payments: doc.payments.map((p) => ({
         methodCode: p.methodCode,
         amount: p.amount,

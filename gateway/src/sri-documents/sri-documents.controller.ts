@@ -5,6 +5,7 @@ import { CreateInvoiceGatewayDto } from './dto/create-invoice-gateway.dto';
 import { SriDocumentsService } from './sri-documents.service';
 import { Groups } from '../common/auth/decorators/groups.decorator';
 import { CorrectInvoiceGatewayDto } from './dto/correct-invoice-gateway.dto';
+import { CreateCreditNoteGatewayDto } from './dto/create-credit-note-gateway.dto';
 
 @Controller('sri-invoices')
 @Auth()
@@ -59,5 +60,15 @@ export class SriDocumentsController {
   @Post(':id/send')
   send(@Param('id', ParseUUIDPipe) id: string, @User() user: any) {
     return this.service.sendDocument(id, this.ctx(user));
+  }
+
+  @Post('credit-notes')
+  createCreditNote(@Body() dto: CreateCreditNoteGatewayDto, @User() user: any) {
+    return this.service.createCreditNote(dto, this.ctx(user));
+  }
+  
+  @Post(':id/retry')
+  retry(@Param('id', ParseUUIDPipe) id: string, @User() user: any) {
+    return this.service.retryDocument(id, this.ctx(user));
   }
 }

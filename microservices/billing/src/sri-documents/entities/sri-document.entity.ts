@@ -10,6 +10,7 @@ import { SriDocumentPayment } from './sri-document-payment.entity';
 @Index('uq_sri_documents_access_key', ['accessKey'], { unique: true })
 @Index('idx_sri_documents_company_status', ['companyId', 'statusCode'])
 @Index('uq_sri_documents_request', ['companyId', 'clientRequestId'], { unique: true })
+@Index('idx_sri_documents_modified', ['modifiedDocumentId']) // NUEVO
 export class SriDocument {
   @PrimaryGeneratedColumn('uuid') id!: string;
 
@@ -31,6 +32,12 @@ export class SriDocument {
   @Column({ type: 'varchar', length: 9 }) sequence!: string;
   @Column({ name: 'access_key', type: 'char', length: 49, nullable: true }) accessKey!: string | null;
   @Column({ name: 'issue_date', type: 'date' }) issueDate!: string;
+
+  // --- Documento modificado (NC / ND) --- NUEVO
+  /** En una NC/ND: factura que se modifica. */
+  @Column({ name: 'modified_document_id', type: 'uuid', nullable: true }) modifiedDocumentId!: string | null;
+  /** En una NC: motivo (va en <motivo>). */
+  @Column({ type: 'varchar', length: 300, nullable: true }) reason!: string | null;
 
   // --- Comprador (snapshot) ---
   @Column({ name: 'buyer_id_type_code', type: 'varchar', length: 2 }) buyerIdTypeCode!: string;
@@ -55,7 +62,7 @@ export class SriDocument {
   @Column({ name: 'xml_unsigned', type: 'text', nullable: true }) xmlUnsigned!: string | null;
   @Column({ name: 'xml_signed', type: 'text', nullable: true }) xmlSigned!: string | null;
   @Column({ name: 'xml_authorized', type: 'text', nullable: true }) xmlAuthorized!: string | null;
-    /** Keys de S3 (nunca URLs). */
+  /** Keys de S3 (nunca URLs). */
   @Column({ name: 'xml_unsigned_key', type: 'varchar', length: 500, nullable: true }) xmlUnsignedKey!: string | null;
   @Column({ name: 'xml_signed_key', type: 'varchar', length: 500, nullable: true }) xmlSignedKey!: string | null;
   @Column({ name: 'xml_authorized_key', type: 'varchar', length: 500, nullable: true }) xmlAuthorizedKey!: string | null;

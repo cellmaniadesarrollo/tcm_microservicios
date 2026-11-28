@@ -141,6 +141,7 @@ export class SriSubmissionService {
           },
         );
         await this.notify(companyId, doc.id);
+        if (doc.documentTypeCode === '04') await this.stock.returnCreditNote(companyId, doc.id);
         this.logger.log(`Documento ${doc.id} AUTORIZADO (${a.number})`);
         return { id: doc.id, statusCode: ST.AUTHORIZED, authorizationNumber: a.number };
       }
@@ -149,6 +150,8 @@ export class SriSubmissionService {
         { id: doc.id, companyId },
         { statusCode: ST.NOT_AUTHORIZED, ...errorFields(a.messages) },
       );
+      if (doc.documentTypeCode === '04')
+        await repo.update({ id: doc.id, companyId }, { stockState: 'NONE' });
       await this.stock.giveBack(companyId, doc.id);
       await this.notify(companyId, doc.id);
       this.logger.warn(`Documento ${doc.id} NO AUTORIZADO: ${JSON.stringify(a.messages)}`);

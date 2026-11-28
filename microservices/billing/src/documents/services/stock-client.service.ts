@@ -7,7 +7,7 @@ import { SriDocument } from '../../sri-documents/entities/sri-document.entity';
 export const INVENTORY_CORE_CLIENT = 'INVENTORY_CORE_CLIENT';
 const SYSTEM_USER = '00000000-0000-0000-0000-000000000000';
 
-export type StockRefType = 'FACTURA' | 'RECIBO';
+export type StockRefType = 'FACTURA' | 'RECIBO' | 'NOTA_CREDITO';
 export type StockLine = { lineRef: string; lotId: string; quantity: number; unitIds?: string[] };
 type LineLike = { lotId?: string | null; unitId?: string | null; quantity: string | number };
 
@@ -99,6 +99,23 @@ export class StockClientService implements OnModuleInit, OnModuleDestroy {
       await repo.update({ id: documentId, companyId }, { stockState: 'RETURNED' });
     } catch (e: any) {
       this.logger.error(`Devolución de stock de ${documentId} falló: ${this.errorMessage(e)}`);
+    }
+  }
+
+  /** NC autorizada con devolución física: reingresa el stock. Nunca lanza. */
+  async returnCreditNote(companyId: string, documentId: string) {
+    try {
+      const repo = this.ds.getRepository(SriDocument);
+      const doc = await repo.findOne({ where: { id: documentId, companyId }, relations: { lines: true } });
+      if (!doc || doc.documentTypeCode !== '04' || doc.stockState !== 'TO_RETURN' || !doc.branchId) return;
+
+      const lines = this.buildLines(doc.lines);
+      if (lines.length) {
+        await this.inbound({ companyId, branchId: doc.branchId, refType: 'NOTA_CREDITO', documentId, lines });
+      }
+      await repo.update({ id: documentId, companyId }, { stockState: 'RETURNED' });
+    } catch (e: any) {
+      this.logger.error(`Reingreso de stock de la NC ${documentId} falló: ${this.errorMessage(e)}`);
     }
   }
 }

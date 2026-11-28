@@ -15,6 +15,9 @@ import { DocumentsModule } from '../documents/documents.module';
 import { AwsS3Module } from '../aws-s3/aws-s3.module';
 import { SigningService } from '../documents/services/signing.service';
 import { BroadcastModule } from '../broadcast/broadcast.module';
+import { CreditNotesService } from './services/credit-notes.service';
+import { SriEmissionService } from './services/sri-emission.service';
+import { VatRatesService } from './services/vat-rates.service';
 
 @Module({
   imports: [
@@ -33,7 +36,13 @@ import { BroadcastModule } from '../broadcast/broadcast.module';
     BroadcastModule,
   ],
   controllers: [SriDocumentsController],
-  providers: [SriSequenceService, SriDocumentsService],
+  providers: [
+    SriSequenceService, 
+    SriDocumentsService, 
+    CreditNotesService,
+    SriEmissionService,
+    VatRatesService,
+  ],
   exports: [SriDocumentsService],
 })
 export class SriDocumentsModule {}

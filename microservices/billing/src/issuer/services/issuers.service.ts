@@ -261,4 +261,20 @@ export class IssuersService {
     const { logoKey, ...safe } = i; // la key de S3 no sale
     return { ...safe, hasLogo: !!logoKey };
   }
+
+  /** Emisor y firma de la sucursal, sin tocar puntos de emisión. */
+  async resolveIssuerForBranch(companyId: string, branchId: string) {
+    const link = await this.ds.getRepository(SignatureBranch).findOne({
+      where: { branchId, signature: { companyId, active: true } },
+      relations: { signature: true },
+    });
+    if (!link?.signature.issuerId)
+      throw new BadRequestException('La sucursal no tiene firma con emisor asignado.');
+
+    const issuer = await this.ds.getRepository(Issuer).findOne({
+      where: { id: link.signature.issuerId, companyId, active: true },
+    });
+    if (!issuer) throw new NotFoundException('Emisor no encontrado.');
+    return { issuer, signatureId: link.signatureId };
+  }
 }

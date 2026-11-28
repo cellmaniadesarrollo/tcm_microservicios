@@ -29,4 +29,7 @@ export class SriDocumentLine {
   @Column({ name: 'product_id', type: 'uuid', nullable: true }) productId!: string | null;
   @Column({ name: 'lot_id', type: 'uuid', nullable: true }) lotId!: string | null;
   @Column({ name: 'unit_id', type: 'uuid', nullable: true }) unitId!: string | null;
+
+  /** En una NC: línea de la factura que se está devolviendo. */
+  @Column({ name: 'source_line_id', type: 'uuid', nullable: true }) sourceLineId!: string | null;
 }
