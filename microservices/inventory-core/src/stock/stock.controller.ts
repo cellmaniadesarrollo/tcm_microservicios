@@ -3,6 +3,7 @@ import { MessagePattern, Payload } from '@nestjs/microservices';
 import { DataSource } from 'typeorm';
 import { StockService } from './stock.service';
 import { MovementType } from './enums/stock.enums';
+import { StockMovement } from './entities/stock-movement.entity';
 
 @Controller('stock')
 export class StockController {
@@ -25,6 +26,20 @@ export class StockController {
   @MessagePattern({ cmd: 'stock.return' })
   async return_(@Payload() d: any) {
     const { internalToken, ...input } = d;
+
+    // Idempotencia: si ya se registró un retorno para este documento, no se repite
+    if (input.reference?.id) {
+      const done = await this.dataSource.getRepository(StockMovement).count({
+        where: {
+          companyId: input.companyId,
+          type: MovementType.RETURN_IN,
+          referenceType: input.reference.type,
+          referenceId: input.reference.id,
+        },
+      });
+      if (done > 0) return { ok: true, replayed: true };
+    }
+
     await this.dataSource.transaction((em) => this.stockService.registerReturn(em, input));
     return { ok: true };
   }

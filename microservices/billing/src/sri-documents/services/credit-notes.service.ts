@@ -167,7 +167,7 @@ export class CreditNotesService {
         reason: dto.reason.trim(),
         clientRequestId: dto.clientRequestId,
         // el stock se reingresa solo cuando el SRI autorice la NC (ver SriSubmissionService)
-        stockState: dto.returnStock && this.stock.buildLines(t.lines).length ? 'TO_RETURN' : 'NONE',
+        stockState: this.stock.buildLines(t.lines).length ? 'TO_RETURN' : 'NONE',
         lines: t.lines.map((l, i) => ({ ...l, sourceLineId: sourceIds[i] })),
         payments: [],
       });
